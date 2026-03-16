@@ -1,4 +1,4 @@
-import { User, Settings, Bell, Shield, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info } from "lucide-react";
+import { User, Settings, Bell, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info } from "lucide-react";
 import { useTheme, type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/AuthContext";
 
@@ -134,7 +134,7 @@ export default function Profile() {
       <div className="pt-4 flex flex-col items-center space-y-4">
         <div className="flex items-center gap-2 text-slate-400 text-xs font-medium">
           <Info className="w-3 h-3" />
-          Nouri v0.1.0 (BETA)
+          Nouri v0.2.2 (BETA)
         </div>
         <button 
           onClick={() => logout()}

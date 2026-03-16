@@ -2,6 +2,12 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.2.2] - 2026-03-16
+
+### Opraveno
+- **TypeScript**: Odstranění nepoužitého importu `Shield` v `Profile.tsx`, který blokoval build na Vercelu.
+- **UI**: Aktualizace zobrazené verze v patičce profilu.
+
 ## [0.2.1] - 2026-03-16
 
 ### Opraveno
