@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Heart, Droplets } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity } from "lucide-react";
 import { useTheme, type Theme } from "../context/ThemeContext";
 import { useAuth, type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
