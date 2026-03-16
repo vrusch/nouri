@@ -2,6 +2,23 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.3.0] - 2026-03-16
+
+### Přidáno
+- **Email/Heslo Autentizace**: Možnost registrace a přihlášení pomocí emailu přímo v onboardingu.
+- **Dynamický vizuál**: Pozadí aplikace se nyní jemně zabarvuje podle pohlaví uživatele (růžová pro ženy, modrá pro muže).
+- **Interaktivní Profil**: Kompletně přepracovaný profil s možností měnit jméno, váhu a výšku přímo kliknutím a uložením do DB.
+- **Bezpečný výběr cíle**: Nový systém pro změnu cíle (hubnutí/nabírání) formou rozbalovacího menu.
+- **AI Plán**: Vytvořena roadmapa `AI_PLAN.md` pro budoucí implementaci agentů.
+
+### Vylepšeno
+- **UX/UI**: Změna hlavního pozadí na jemnější odstín (`slate-50`) pro úlevu očím a prémiový iOS vzhled.
+- **Barvy**: Odstranění agresivní červené barvy u odhlášení a správy dat pro klidnější dojem.
+- **Dark Mode**: Opravena čitelnost a barvy textů v přihlašovacím formuláři v tmavém režimu.
+
+### Technické
+- **Automatizace**: Verze v patičce profilu se nyní načítá automaticky z `package.json`.
+
 ## [0.2.2] - 2026-03-16
 
 ### Opraveno

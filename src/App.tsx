@@ -40,13 +40,19 @@ export default function App() {
     }
   };
 
+  const genderBg = profile?.gender === 'female' 
+    ? 'bg-rose-50/30' 
+    : profile?.gender === 'male' 
+      ? 'bg-sky-50/30' 
+      : 'bg-slate-50';
+
   return (
-    <div className="h-dvh bg-slate-50 dark:bg-slate-950 font-sans flex justify-center text-slate-800 dark:text-slate-100 overflow-hidden transition-colors">
+    <div className={`h-dvh ${genderBg} dark:bg-slate-950 font-sans flex justify-center text-slate-900 dark:text-slate-100 overflow-hidden transition-colors`}>
       {/* Omezení šířky pro "App" vzhled i na desktopu */}
-      <div className="w-full max-w-md bg-slate-50 dark:bg-slate-950 h-full relative flex flex-col shadow-2xl overflow-hidden">
+      <div className={`w-full max-w-md ${genderBg} dark:bg-slate-950 h-full relative flex flex-col shadow-2xl overflow-hidden transition-colors`}>
         
         {/* --- HLAVIČKA --- */}
-        <header className="px-6 pt-12 pb-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-20 flex justify-between items-center border-b border-slate-100 dark:border-slate-800 shrink-0 transition-colors">
+        <header className={`px-6 pt-12 pb-4 ${genderBg}/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-20 flex justify-between items-center border-b border-slate-100/50 dark:border-slate-800 shrink-0 transition-colors`}>
           <LogoHorizontal />
 
           <button className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors focus:outline-none">

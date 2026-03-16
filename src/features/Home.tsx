@@ -81,7 +81,7 @@ export default function Home() {
       </div>
 
       {/* AI Doporučení */}
-      <div className="bg-linear-to-br from-indigo-50 to-blue-50 dark:from-indigo-950/30 dark:to-blue-950/30 rounded-3xl p-5 border border-blue-100 dark:border-blue-900/50 relative overflow-hidden transition-colors">
+      <div className="bg-linear-to-br from-blue-50/50 to-indigo-50/50 dark:from-indigo-950/20 dark:to-blue-950/20 rounded-3xl p-5 border border-blue-100/50 dark:border-blue-900/30 relative overflow-hidden transition-colors">
         <div className="absolute -right-6 -top-6 w-24 h-24 bg-blue-200 dark:bg-blue-800 rounded-full blur-2xl opacity-50 dark:opacity-20"></div>
         <div className="flex gap-4 relative z-10">
           <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-800 shadow-sm flex items-center justify-center shrink-0 text-blue-500 dark:text-blue-400 transition-colors">
