@@ -2,6 +2,12 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.2.1] - 2026-03-16
+
+### Opraveno
+- **TypeScript**: Oprava importů typů (`type-only imports`) pro kompatibilitu s Vercel buildem (`verbatimModuleSyntax`).
+- **Cleanup**: Odstranění nepoužitých importů v Onboarding komponentě.
+
 ## [0.2.0] - 2026-03-16
 
 ### Přidáno
