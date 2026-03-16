@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { signInWithPopup } from "firebase/auth";
 import { auth, googleProvider } from "../lib/firebase";
-import { useAuth, UserProfile } from "../context/AuthContext";
+import { useAuth, type UserProfile } from "../context/AuthContext";
 import { LogoHorizontal } from "../components/Logo";
-import { User, Ruler, Weight, Target, ChevronRight, LogIn } from "lucide-react";
+import { Ruler, Weight, ChevronRight, LogIn } from "lucide-react";
 
 export default function Onboarding() {
-  const { user, profile, updateProfile } = useAuth();
+  const { user, updateProfile } = useAuth();
   const [step, setStep] = useState(0);
   
   // Dočasný stav pro formulář
