@@ -1,73 +1,50 @@
-# React + TypeScript + Vite
+# Nouri. 🥑
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Moderní AI asistent pro zdravý životní styl a udržování váhy, navržený speciálně pro iOS. Tato aplikace je vyvíjena s láskou jako osobní pomocník pro moji manželku, s důrazem na jednoduchost, eleganci a chytrou asistenci v každém kroku.
 
-Currently, two official plugins are available:
+## ✨ Klíčové vlastnosti
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+-   **AI v srdci aplikace**: Implementace umělé inteligence (Mya) pro analýzu jídla, personalizovaná doporučení a generování receptů.
+-   **iOS Native Feel**: Čistý, minimalistický design optimalizovaný pro iPhone, včetně podpory tmavého/světlého režimu.
+-   **Chytré přidávání jídla**: Centrální AI tlačítko pro rychlé rozpoznávání jídla (přes foťák) a okamžitý zápis kalorií.
+-   **Offline First**: Díky Dexie.js a PWA funguje aplikace bleskově a data jsou bezpečně uložena přímo v zařízení.
+-   **Denní přehledy**: Intuitivní sledování kalorického příjmu a zbývajícího limitu pro aktuální den.
 
-## React Compiler
+## 🚀 Technologický stack
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
+-   **Frontend**: [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/)
+-   **Styling**: [Tailwind CSS v4](https://tailwindcss.com/) (moderní, ultra-rychlé utility)
+-   **Ikony**: [Lucide React](https://lucide.dev/) (konzistentní iOS-style ikony)
+-   **Databáze**: [Dexie.js](https://dexie.org/) (IndexedDB wrapper)
+-   **Build Tool**: [Vite](https://vitejs.dev/)
+-   **PWA**: [vite-plugin-pwa](https://vite-pwa-org.netlify.app/) pro instalaci na plochu iPhonu
 
-## Expanding the ESLint configuration
+## 🛠️ Instalace a vývoj
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+1.  Klonování repozitáře:
+    ```bash
+    git clone [url-repozitáře]
+    cd nouri
+    ```
+2.  Instalace závislostí:
+    ```bash
+    npm install
+    ```
+3.  Spuštění vývojového serveru:
+    ```bash
+    npm run dev
+    ```
+4.  Sestavení pro produkci (PWA):
+    ```bash
+    npm run build
+    ```
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## 📱 iOS Specifika
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+Aplikace je navržena pro přidání na plochu (**Add to Home Screen**). Podporuje:
+-   `h-dvh` (Dynamic Viewport Height) pro správné zobrazení na iPhonech s výřezem.
+-   Apple Status Bar (black-translucent).
+-   Plynulé přechody mezi světlým a tmavým režimem.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+---
+*Vyvinuto pro moji nejmilejší manželku, aby cesta za zdravím byla co nejjednodušší. 💙*
