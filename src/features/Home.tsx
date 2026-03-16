@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db/db";
+import { useAuth } from "../context/AuthContext";
 import { Zap } from "lucide-react";
 
 export default function Home() {
-  const GOAL_CALORIES = 1800;
+  const { profile } = useAuth();
+  const GOAL_CALORIES = profile?.targetCalories || 1800;
   
   const today = new Date().toISOString().split('T')[0];
   const meals = useLiveQuery(() => db.meals.where('date').equals(today).toArray()) || [];
@@ -31,7 +33,7 @@ export default function Home() {
       {/* Uvítání */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">
-          Krásné ráno, Petya ✨
+          Krásné ráno, {profile?.name || 'Petya'} ✨
         </h1>
         <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
           Dnes to bude skvělý den. Jak se cítíš?
@@ -119,11 +121,11 @@ export default function Home() {
                 {meal.type === "breakfast" ? "🥑" : meal.type === "snack" ? "🍵" : "🥗"}
               </div>
               <div className="flex-1">
-                <h4 className="font-semibold text-slate-800 dark:text-slate-100">{meal.name}</h4>
-                <p className="text-xs text-slate-400 dark:text-slate-500 font-medium">{meal.time}</p>
+                <h4 className="font-semibold text-slate-800 dark:text-white">{meal.name}</h4>
+                <p className="text-xs text-slate-400 dark:text-slate-400 font-medium">{meal.time}</p>
               </div>
               <div className="text-right">
-                <span className="font-bold text-slate-800 dark:text-slate-100">{meal.value}</span>
+                <span className="font-bold text-slate-800 dark:text-white">{meal.value}</span>
                 <span className="text-xs text-slate-400 dark:text-slate-500 ml-1">kcal</span>
               </div>
             </div>

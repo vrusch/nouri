@@ -5,10 +5,25 @@ import Home from "./features/Home";
 import Stats from "./features/Stats";
 import Recipes from "./features/Recipes";
 import Profile from "./features/Profile";
+import Onboarding from "./features/Onboarding";
+import { useAuth } from "./context/AuthContext";
 import { Bell } from "lucide-react";
 
 export default function App() {
+  const { user, profile, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>("home");
+
+  if (loading) {
+    return (
+      <div className="h-dvh flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (!user || !profile?.setupComplete) {
+    return <Onboarding />;
+  }
 
   const renderContent = () => {
     switch (activeTab) {

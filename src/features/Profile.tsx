@@ -1,14 +1,15 @@
-import { User, Settings, Bell, Shield, Moon, Sun, Smartphone } from "lucide-react";
+import { User, Settings, Bell, Shield, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info } from "lucide-react";
 import { useTheme, type Theme } from "../context/ThemeContext";
+import { useAuth } from "../context/AuthContext";
 
 export default function Profile() {
   const { theme, setTheme } = useTheme();
+  const { profile, user, logout } = useAuth();
 
-  const menu = [
-    { icon: User, label: "Osobní údaje" },
-    { icon: Bell, label: "Notifikace" },
-    { icon: Shield, label: "Soukromí" },
-    { icon: Settings, label: "Obecná nastavení" },
+  const metrics = [
+    { icon: Ruler, label: "Výška", value: `${profile?.height || '--'} cm` },
+    { icon: Weight, label: "Váha", value: `${profile?.weight || '--'} kg` },
+    { icon: Target, label: "Cíl", value: profile?.goal === 'lose' ? 'Hubnout' : profile?.goal === 'maintain' ? 'Udržovat' : 'Nabírat' },
   ];
 
   const themeOptions: { id: Theme; label: string; icon: any }[] = [
@@ -18,19 +19,79 @@ export default function Profile() {
   ];
 
   return (
-    <div className="space-y-8 pt-6">
-      {/* Uživatelské info */}
+    <div className="space-y-8 pt-6 pb-24 transition-colors">
+      {/* 1. HLAVIČKA PROFILU */}
       <div className="flex flex-col items-center">
-        <div className="w-24 h-24 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 mb-4 border-4 border-white dark:border-slate-800 shadow-sm transition-colors">
-          <User className="w-12 h-12" />
+        <div className="w-24 h-24 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 mb-4 border-4 border-white dark:border-slate-800 shadow-sm transition-colors overflow-hidden">
+          {user?.photoURL ? (
+            <img src={user.photoURL} alt="Profil" className="w-full h-full object-cover" />
+          ) : (
+            <User className="w-12 h-12" />
+          )}
         </div>
-        <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">Petya</h1>
-        <p className="text-slate-500 dark:text-slate-400 text-sm">Cíl: Hubnutí (-5 kg)</p>
+        <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">{profile?.name || user?.displayName || 'Uživatel'}</h1>
+        <p className="text-slate-500 dark:text-slate-400 text-sm">{user?.email}</p>
       </div>
 
-      {/* Nastavení Vzhledu (Nový přepínač) */}
+      {/* 2. RYCHLÉ METRIKY (Zobrazujeme to, co se mění nejčastěji) */}
+      <div className="grid grid-cols-3 gap-3">
+        {metrics.map((m, i) => (
+          <div key={i} className="bg-white dark:bg-slate-900 p-4 rounded-3xl border border-slate-100 dark:border-slate-800 flex flex-col items-center text-center space-y-1 transition-colors shadow-sm">
+            <m.icon className="w-4 h-4 text-blue-500 mb-1" />
+            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">{m.label}</span>
+            <span className="font-bold text-slate-800 dark:text-slate-100">{m.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* 3. SEKCE: MOJE NASTAVENÍ */}
       <div className="space-y-3">
-        <h2 className="px-1 text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Vzhled</h2>
+        <h2 className="px-1 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Moje Nastavení</h2>
+        <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-sm border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 transition-colors">
+          <button className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
+            <div className="flex items-center gap-4">
+              <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                <Settings className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <span className="block font-semibold text-slate-700 dark:text-slate-200">Upravit parametry</span>
+                <span className="text-xs text-slate-400">Jméno, výška, věk, pohlaví</span>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-slate-300 group-hover:translate-x-1 transition-transform" />
+          </button>
+
+          <button className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
+            <div className="flex items-center gap-4">
+              <div className="w-8 h-8 rounded-xl bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center text-orange-600 dark:text-orange-400">
+                <Target className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <span className="block font-semibold text-slate-700 dark:text-slate-200">Cíl a kalorie</span>
+                <span className="text-xs text-slate-400">Limit: {profile?.targetCalories || 1800} kcal (Automaticky)</span>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-slate-300 group-hover:translate-x-1 transition-transform" />
+          </button>
+
+          <button className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors group">
+            <div className="flex items-center gap-4">
+              <div className="w-8 h-8 rounded-xl bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center text-purple-600 dark:text-purple-400">
+                <Bell className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <span className="block font-semibold text-slate-700 dark:text-slate-200">Notifikace</span>
+                <span className="text-xs text-slate-400">Připomenutí jídla a pitného režimu</span>
+              </div>
+            </div>
+            <ChevronRight className="w-5 h-5 text-slate-300 group-hover:translate-x-1 transition-transform" />
+          </button>
+        </div>
+      </div>
+
+      {/* 4. SEKCE: VZHLED (Ponecháno jako rychlý přepínač) */}
+      <div className="space-y-3">
+        <h2 className="px-1 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Vzhled Aplikace</h2>
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-1.5 shadow-sm border border-slate-100 dark:border-slate-800 flex gap-1 transition-colors">
           {themeOptions.map((opt) => (
             <button
@@ -49,24 +110,39 @@ export default function Profile() {
         </div>
       </div>
 
-      {/* Klasické menu */}
-      <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-sm border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 transition-colors">
-        {menu.map((item, i) => (
-          <button key={i} className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
+      {/* 5. SEKCE: DATA A SOUKROMÍ */}
+      <div className="space-y-3">
+        <h2 className="px-1 text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Správa Dat</h2>
+        <div className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-sm border border-slate-100 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800 transition-colors">
+          <button className="w-full px-6 py-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-800/30 transition-colors">
             <div className="flex items-center gap-4">
-              <item.icon className="w-5 h-5 text-slate-400 dark:text-slate-500" />
-              <span className="font-semibold text-slate-700 dark:text-slate-200">{item.label}</span>
-            </div>
-            <div className="text-slate-300 dark:text-slate-600">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
+              <Download className="w-5 h-5 text-slate-400" />
+              <span className="font-semibold text-slate-700 dark:text-slate-200">Exportovat historii (CSV)</span>
             </div>
           </button>
-        ))}
+
+          <button className="w-full px-6 py-4 flex items-center justify-between hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors group">
+            <div className="flex items-center gap-4">
+              <Trash2 className="w-5 h-5 text-red-400 group-hover:text-red-500" />
+              <span className="font-semibold text-red-500">Smazat historii jídla</span>
+            </div>
+          </button>
+        </div>
       </div>
 
-      <button className="w-full py-4 text-red-500 dark:text-red-400 font-bold transition-colors">Odhlásit se</button>
+      {/* 6. INFO A ODHLÁŠENÍ */}
+      <div className="pt-4 flex flex-col items-center space-y-4">
+        <div className="flex items-center gap-2 text-slate-400 text-xs font-medium">
+          <Info className="w-3 h-3" />
+          Nouri v0.1.0 (BETA)
+        </div>
+        <button 
+          onClick={() => logout()}
+          className="w-full py-5 rounded-3xl bg-slate-100 dark:bg-slate-900 text-red-500 dark:text-red-400 font-bold transition-all active:scale-[0.98] border border-slate-200 dark:border-slate-800 shadow-sm"
+        >
+          Odhlásit se
+        </button>
+      </div>
     </div>
   );
 }
