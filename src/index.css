@@ -10,6 +10,10 @@
   .hide-scrollbar::-webkit-scrollbar {
     display: none;
   }
+  .mask-fade-bottom {
+    mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 50%, transparent 100%);
+  }
 }
 
 :root {

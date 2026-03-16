@@ -13,6 +13,7 @@ export interface UserProfile {
   goal: 'lose' | 'maintain' | 'gain';
   targetCalories: number;
   setupComplete: boolean;
+  lastAiReport?: string; // Uložený AI report od Myi
 }
 
 interface AuthContextType {

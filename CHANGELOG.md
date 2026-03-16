@@ -2,6 +2,22 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.4.0] - 2026-03-16
+### Přidáno
+- **Rozšířený Onboarding**: Sběr dat o datu narození a úrovni aktivity pro přesnější výpočty.
+- **Mya Insight (AI)**: V profilu je nyní možné generovat kompletní osobní analýzu těla a doporučení pomocí AI.
+- **Živé metriky**: V profilu se v reálném čase počítá BMR a TDEE na základě uživatelských dat.
+- **Adaptivní barvy**: Rozhraní se nyní dynamicky zabarvuje podle pohlaví (růžová/modrá) napříč celou aplikací.
+- **UI vychytávky**: Přidány animace pro rozbalovací sekce v profilu a nová CSS třída `mask-fade-bottom`.
+
+### Vylepšeno
+- **UX**: Přehlednější editační režimy v profilu s okamžitým potvrzením změn.
+- **Navigace**: Vizuální indikace postupu v onboardingu přes vylepšený progress bar.
+
+### Technické
+- **Typy**: Rozšířen `UserProfile` v `AuthContext` o `birthDate` a `activityLevel`.
+- **Plán**: Aktualizace `AI_PLAN.md` na verzi 0.3.5 reflektující aktuální stav implementace.
+
 ## [0.3.0] - 2026-03-16
 
 ### Přidáno

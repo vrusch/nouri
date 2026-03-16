@@ -3,7 +3,7 @@ import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPass
 import { auth, googleProvider } from "../lib/firebase";
 import { useAuth, type UserProfile } from "../context/AuthContext";
 import { LogoHorizontal } from "../components/Logo";
-import { Ruler, Weight, ChevronRight, LogIn, Mail, Lock, User as UserIcon } from "lucide-react";
+import { Ruler, Weight, ChevronRight, LogIn, Mail, Lock, User as UserIcon, Zap, Calendar } from "lucide-react";
 
 export default function Onboarding() {
   const { user, updateProfile } = useAuth();
@@ -57,7 +57,7 @@ export default function Onboarding() {
   };
 
   const handleNext = async () => {
-    if (step < 3) {
+    if (step < 4) {
       setStep(step + 1);
     } else {
       await updateProfile({ ...formData, setupComplete: true });
@@ -152,8 +152,8 @@ export default function Onboarding() {
     return (
       <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
         <div className="space-y-8 pt-12">
-          <div className="w-12 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-1/3 h-full bg-blue-600 rounded-full" />
+          <div className="w-16 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-1/4 h-full bg-blue-600 rounded-full" />
           </div>
           <div className="space-y-2 text-center sm:text-left">
             <h2 className="text-3xl font-bold tracking-tight">Jak ti máme říkat?</h2>
@@ -191,13 +191,13 @@ export default function Onboarding() {
     );
   }
 
-  // 3. VÝŠKA A VÁHA
+  // 3. DATUM, VÝŠKA A VÁHA
   if (step === 2) {
     return (
       <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
         <div className="space-y-12 pt-12">
-          <div className="w-12 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-2/3 h-full bg-blue-600 rounded-full" />
+          <div className="w-16 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-2/4 h-full bg-blue-600 rounded-full" />
           </div>
           <div className="space-y-2 text-center sm:text-left">
             <h2 className="text-3xl font-bold tracking-tight">Tvoje parametry</h2>
@@ -205,6 +205,20 @@ export default function Onboarding() {
           </div>
           
           <div className="space-y-4">
+            {/* DATUM NAROZENÍ */}
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-blue-500 transition-all">
+              <div className="flex items-center gap-4 text-slate-400 dark:text-slate-500">
+                <Calendar className="w-6 h-6" />
+                <span className="font-bold">Narození</span>
+              </div>
+              <input
+                type="date"
+                value={formData.birthDate}
+                onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                className="text-right font-bold text-lg bg-transparent outline-none dark:text-white"
+              />
+            </div>
+
             <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-blue-500 transition-all">
               <div className="flex items-center gap-4 text-slate-400 dark:text-slate-500">
                 <Ruler className="w-6 h-6" />
@@ -233,18 +247,65 @@ export default function Onboarding() {
           </div>
         </div>
         <button onClick={handleNext} className="bg-blue-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
+          Pokračovat <ChevronRight className="w-5 h-5" />
+        </button>
+      </div>
+    );
+  }
+
+  // 4. AKTIVITA
+  if (step === 3) {
+    const activities = [
+      { v: 1.2, l: "Nízká", d: "Sedavé zaměstnání, málo pohybu" },
+      { v: 1.375, l: "Lehká", d: "Cvičení 1-3x týdně nebo 10k kroků" },
+      { v: 1.55, l: "Střední", d: "Aktivní pohyb 3-5x týdně" },
+      { v: 1.725, l: "Vysoká", d: "Denní intenzivní trénink" }
+    ];
+
+    return (
+      <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
+        <div className="space-y-12 pt-12">
+          <div className="w-16 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-3/4 h-full bg-blue-600 rounded-full" />
+          </div>
+          <div className="space-y-2 text-center sm:text-left">
+            <h2 className="text-3xl font-bold tracking-tight">Jak aktivní jsi?</h2>
+            <p className="text-slate-500 dark:text-slate-400">Pomůže nám to určit tvůj výdej.</p>
+          </div>
+          
+          <div className="space-y-3">
+             {activities.map((act) => (
+               <button
+                 key={act.v}
+                 onClick={() => setFormData({...formData, activityLevel: act.v as any})}
+                 className={`w-full p-5 rounded-3xl text-left border-2 transition-all active:scale-[0.98] ${
+                   formData.activityLevel === act.v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20' : 'border-transparent bg-white dark:bg-slate-900'
+                 }`}
+               >
+                 <div className="flex items-center gap-3">
+                   <Zap className={`w-5 h-5 ${formData.activityLevel === act.v ? 'text-blue-600' : 'text-slate-300'}`} />
+                   <div>
+                     <div className={`font-bold ${formData.activityLevel === act.v ? 'text-blue-600' : 'text-slate-800 dark:text-slate-100'}`}>{act.l}</div>
+                     <div className="text-xs text-slate-500 dark:text-slate-400">{act.d}</div>
+                   </div>
+                 </div>
+               </button>
+             ))}
+          </div>
+        </div>
+        <button onClick={handleNext} className="bg-blue-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
           Už skoro hotovo <ChevronRight className="w-5 h-5" />
         </button>
       </div>
     );
   }
 
-  // 4. CÍLE
-  if (step === 3) {
+  // 5. CÍLE
+  if (step === 4) {
     return (
       <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
         <div className="space-y-12 pt-12">
-          <div className="w-12 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
+          <div className="w-16 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
             <div className="w-full h-full bg-blue-600 rounded-full" />
           </div>
           <div className="space-y-2 text-center sm:text-left">

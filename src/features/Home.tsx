@@ -1,11 +1,13 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db/db";
 import { useAuth } from "../context/AuthContext";
 import { Zap } from "lucide-react";
+import { MyaAI } from "../lib/ai";
 
 export default function Home() {
   const { profile } = useAuth();
+  const [greeting, setGreeting] = useState<string>("Přemýšlím o tvém dni...");
   const GOAL_CALORIES = profile?.targetCalories || 1800;
   
   const today = new Date().toISOString().split('T')[0];
@@ -14,6 +16,32 @@ export default function Home() {
   const consumedCalories = meals.reduce((sum, meal) => sum + meal.value, 0);
   const remainingCalories = Math.max(0, GOAL_CALORIES - consumedCalories);
   const progressPercent = Math.min(100, (consumedCalories / GOAL_CALORIES) * 100);
+
+  useEffect(() => {
+    const fetchGreeting = async () => {
+      if (!profile) return;
+      
+      // Kešování: pokud máme pozdrav v session pro dnešek, nevoláme API
+      const cacheKey = `mya_greeting_${today}`;
+      const cached = sessionStorage.getItem(cacheKey);
+      
+      if (cached) {
+        setGreeting(cached);
+        return;
+      }
+
+      try {
+        const msg = await MyaAI.getDailyGreeting(profile, consumedCalories);
+        setGreeting(msg);
+        sessionStorage.setItem(cacheKey, msg);
+      } catch (error) {
+        setGreeting(`Ahoj ${profile.name}! Nezapomeň dnes pít hodně vody. ✨`);
+      }
+    };
+    
+    // Voláme jen pokud se změní den nebo jméno, ne při každém soustu
+    fetchGreeting();
+  }, [profile?.name, today]); // Snížená závislost pro úsporu API volání
 
   useEffect(() => {
     const checkData = async () => {
@@ -95,8 +123,8 @@ export default function Home() {
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
               </span>
             </div>
-            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              "Venku je dnes slunečno. Nezapomeň doplňovat tekutiny! Co takhle vyměnit odpolední kávu za osvěžující vodu s citronem a mátou?"
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed italic">
+              "{greeting}"
             </p>
           </div>
         </div>
