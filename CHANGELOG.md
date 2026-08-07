@@ -2,6 +2,19 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.5.0] - 2026-08-07
+### Přidáno
+- **Zápis jídel**: Hlavní tlačítko konečně funguje — vyfocení jídla s AI rozpoznáním (GPT-4o Vision, odhad kalorií a maker) nebo rychlý ruční zápis jako rovnocenná alternativa.
+- **Rozšířený model jídla**: `MealItem` nyní nese i bílkoviny/tuky/sacharidy a zdroj záznamu (foto/ruční).
+- **Export a správa dat**: Funkční export historie jídel do CSV a smazání historie (s dvoutapovým potvrzením) v Profilu.
+
+### Vylepšeno
+- **Bezpečnost AI volání**: `Mya` (report, pozdrav, rozpoznání fotky) volá OpenAI přes Firebase Cloud Functions místo přímo z klienta — API klíč už není součástí client bundlu a každé volání vyžaduje přihlášeného uživatele.
+
+### Opraveno
+- Odstraněna fake demo data, která se tiše zapisovala do Home při prvním spuštění.
+- Opraven nefunkční gradientový rámeček avataru v Profilu (dynamicky skládaná Tailwind třída).
+
 ## [0.4.0] - 2026-03-16
 ### Přidáno
 - **Rozšířený Onboarding**: Sběr dat o datu narození a úrovni aktivity pro přesnější výpočty.
