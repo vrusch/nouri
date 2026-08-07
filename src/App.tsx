@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LogoHorizontal } from "./components/Logo";
 import BottomNav, { type NavTab } from "./components/BottomNav";
 import CameraModal from "./components/CameraModal";
@@ -8,12 +8,35 @@ import Recipes from "./features/Recipes";
 import Profile from "./features/Profile";
 import Onboarding from "./features/Onboarding";
 import { useAuth } from "./context/AuthContext";
+import { fetchLatestWeightLog, hydrateMealsIfEmpty, seedWeightLogIfEmpty } from "./lib/cloudSync";
 import { Bell } from "lucide-react";
+
+function daysSince(dateISO: string): number {
+  const todayISO = new Date().toISOString().split("T")[0];
+  const msPerDay = 86400000;
+  const diff = Date.parse(`${todayISO}T00:00:00Z`) - Date.parse(`${dateISO}T00:00:00Z`);
+  return Math.round(diff / msPerDay);
+}
 
 export default function App() {
   const { user, profile, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>("home");
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [weighInOverdue, setWeighInOverdue] = useState(false);
+  const [showReminder, setShowReminder] = useState(false);
+
+  useEffect(() => {
+    if (!user || !profile?.setupComplete) return;
+    const uid = user.uid;
+    const reminderDays = profile.weighInReminderDays ?? 3;
+
+    (async () => {
+      await hydrateMealsIfEmpty(uid);
+      await seedWeightLogIfEmpty(uid, profile.weight);
+      const latest = await fetchLatestWeightLog(uid);
+      setWeighInOverdue(!!latest && daysSince(latest.date) >= reminderDays);
+    })();
+  }, [user, profile?.setupComplete, profile?.weight, profile?.weighInReminderDays]);
 
   if (loading) {
     return (
@@ -57,10 +80,28 @@ export default function App() {
         <header className={`px-6 pt-12 pb-4 ${genderBg}/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-20 flex justify-between items-center border-b border-slate-100/50 dark:border-slate-800 shrink-0 transition-colors`}>
           <LogoHorizontal />
 
-          <button className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors focus:outline-none">
-            <Bell className="w-6 h-6 stroke-2" />
-            <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => weighInOverdue && setShowReminder((v) => !v)}
+              className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors focus:outline-none"
+            >
+              <Bell className="w-6 h-6 stroke-2" />
+              {weighInOverdue && (
+                <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
+              )}
+            </button>
+            {showReminder && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-100 dark:border-slate-700 p-4 z-30 text-left">
+                <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">Nezapomeň se dnes zvážit — pomůže ti to sledovat trend.</p>
+                <button
+                  onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
+                  className="w-full bg-blue-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
+                >
+                  Zapsat váhu
+                </button>
+              </div>
+            )}
+          </div>
         </header>
 
         {/* --- OBSAH --- */}

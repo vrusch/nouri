@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Uživatel má přístup jen ke svému vlastnímu stromu dokumentů:
+    // profil (users/{uid}) i všechny podkolekce (meals, weightLogs, ...).
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

@@ -3,6 +3,8 @@ import { X, Camera, PenLine, Loader2, ChevronLeft, AlertCircle, CheckCircle2 } f
 import { db, type MealItem } from "../db/db";
 import { MyaVision, type VisionResult, type MealType } from "../lib/vision";
 import { MyaAI } from "../lib/ai";
+import { backupMeal } from "../lib/cloudSync";
+import { calculateNutrition } from "../lib/nutrition";
 import { useAuth } from "../context/AuthContext";
 
 interface CameraModalProps {
@@ -60,7 +62,7 @@ function fileToCompressedDataUrl(file: File, maxDim = 1024, quality = 0.82): Pro
 }
 
 export default function CameraModal({ onClose }: CameraModalProps) {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [step, setStep] = useState<Step>("choose");
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [source, setSource] = useState<"photo" | "manual">("manual");
@@ -154,6 +156,7 @@ export default function CameraModal({ onClose }: CameraModalProps) {
         date: new Date().toISOString().split("T")[0],
         type,
         source,
+        syncId: crypto.randomUUID(),
       };
       if (protein) meal.protein = Math.round(Number(protein));
       if (fat) meal.fat = Math.round(Number(fat));
@@ -162,16 +165,19 @@ export default function CameraModal({ onClose }: CameraModalProps) {
       await db.meals.add(meal);
       setStep("feedback");
 
+      if (user) backupMeal(user.uid, meal);
+
       if (profile) {
         const todayMeals = await db.meals.where("date").equals(meal.date).toArray();
         const consumedTodayCalories = todayMeals.reduce((sum, m) => sum + m.value, 0);
+        const { targetCalories } = calculateNutrition(profile);
         MyaAI.getMealFeedback({
           mealName: meal.name,
           calories: meal.value,
           protein: meal.protein ?? 0,
           mealType: meal.type,
           consumedTodayCalories,
-          targetCalories: profile.targetCalories,
+          targetCalories,
         }).then(setFeedbackText);
       } else {
         setFeedbackText("Zapsáno! 👍");

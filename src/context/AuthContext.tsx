@@ -14,6 +14,7 @@ export interface UserProfile {
   targetCalories: number;
   setupComplete: boolean;
   lastAiReport?: string; // Uložený AI report od Myi
+  weighInReminderDays?: number; // Jak často připomínat vážení (1-7 dní)
 }
 
 interface AuthContextType {

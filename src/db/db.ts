@@ -11,6 +11,7 @@ export interface MealItem {
   fat?: number; // g
   carbs?: number; // g
   source?: "photo" | "manual";
+  syncId?: string; // stabilní UUID pro cloud zálohu (na rozdíl od ++id přežije reset lokální DB)
 }
 
 const db = new Dexie('NouriDB') as Dexie & {
@@ -20,6 +21,10 @@ const db = new Dexie('NouriDB') as Dexie & {
 // Schéma pro tabulku jídla
 db.version(1).stores({
   meals: '++id, name, date, type'
+});
+
+db.version(2).stores({
+  meals: '++id, name, date, type, syncId'
 });
 
 export { db };

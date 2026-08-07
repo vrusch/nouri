@@ -4,11 +4,12 @@ import { db } from "../db/db";
 import { useAuth } from "../context/AuthContext";
 import { Zap } from "lucide-react";
 import { MyaAI } from "../lib/ai";
+import { calculateNutrition } from "../lib/nutrition";
 
 export default function Home() {
   const { profile } = useAuth();
   const [greeting, setGreeting] = useState<string>("Přemýšlím o tvém dni...");
-  const GOAL_CALORIES = profile?.targetCalories || 1800;
+  const GOAL_CALORIES = profile ? calculateNutrition(profile).targetCalories : 1800;
   
   const today = new Date().toISOString().split('T')[0];
   const meals = useLiveQuery(() => db.meals.where('date').equals(today).toArray()) || [];

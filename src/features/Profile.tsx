@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell } from "lucide-react";
 import { useTheme, type Theme } from "../context/ThemeContext";
 import { useAuth, type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
+import { logWeight, clearMealsBackup } from "../lib/cloudSync";
 import { db } from "../db/db";
 import pkg from "../../package.json";
 
@@ -37,6 +38,13 @@ export default function Profile() {
     { id: 'gain', label: 'Nabírat svaly' },
   ];
 
+  const reminderOptions = [1, 2, 3, 5, 7];
+  const formatDays = (n: number) => {
+    if (n === 1) return "1 den";
+    if (n >= 2 && n <= 4) return `${n} dny`;
+    return `${n} dní`;
+  };
+
   const activityOptions: { id: UserProfile['activityLevel']; label: string; desc: string }[] = [
     { id: 1.2, label: "Nízká", desc: "Sedavé zaměstnání" },
     { id: 1.375, label: "Lehká", desc: "1-3x cvičení nebo 10k kroků" },
@@ -50,8 +58,12 @@ export default function Profile() {
     
     let val: any = tempValue;
     if (field === 'weight' || field === 'height') val = Number(tempValue);
-    
+
+    const weightChanged = field === 'weight' && val !== profile?.weight;
     await updateProfile({ [field]: val });
+    if (weightChanged && user) {
+      logWeight(user.uid, val, new Date().toISOString().split('T')[0]);
+    }
     setEditing(null);
   };
 
@@ -110,6 +122,7 @@ export default function Profile() {
     setIsDeleting(true);
     try {
       await db.meals.clear();
+      if (user) await clearMealsBackup(user.uid);
       setConfirmDelete(false);
     } finally {
       setIsDeleting(false);
@@ -278,6 +291,37 @@ export default function Profile() {
                     {profile?.activityLevel === opt.id && <Check className={`w-4 h-4 ${accentText}`} />}
                   </div>
                   <span className="text-[10px] text-slate-500 dark:text-slate-400">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div
+            className={`px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${editing === 'reminder' ? accentBg : 'active:bg-slate-50 dark:active:bg-slate-800'}`}
+            onClick={() => setEditing(editing === 'reminder' ? null : 'reminder')}
+          >
+            <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+              <Bell className="w-4 h-4 text-purple-500" />
+              Připomínat vážení
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-bold text-slate-800 dark:text-white">
+                Každých {formatDays(profile?.weighInReminderDays ?? 3)}
+              </span>
+              <ChevronDown className={`w-4 h-4 ${editing === 'reminder' ? accentText : 'text-slate-400'}`} />
+            </div>
+          </div>
+
+          {editing === 'reminder' && (
+            <div className={`px-2 pb-2 grid grid-cols-5 gap-1 ${accentBg}`}>
+              {reminderOptions.map((n) => (
+                <button
+                  key={n}
+                  onClick={async () => { await updateProfile({ weighInReminderDays: n }); setEditing(null); }}
+                  className={`flex flex-col items-center py-3 rounded-xl transition-all ${(profile?.weighInReminderDays ?? 3) === n ? 'bg-white dark:bg-slate-800 shadow-sm' : 'hover:bg-white/50 dark:hover:bg-slate-800/50'}`}
+                >
+                  <span className={`text-sm font-bold ${(profile?.weighInReminderDays ?? 3) === n ? accentText : 'text-slate-700 dark:text-slate-200'}`}>{n}</span>
+                  <span className="text-[9px] text-slate-500 dark:text-slate-400">dní</span>
                 </button>
               ))}
             </div>
