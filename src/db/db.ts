@@ -7,6 +7,10 @@ export interface MealItem {
   time: string;
   date: string; // ISO format (YYYY-MM-DD)
   type: "breakfast" | "lunch" | "dinner" | "snack";
+  protein?: number; // g
+  fat?: number; // g
+  carbs?: number; // g
+  source?: "photo" | "manual";
 }
 
 const db = new Dexie('NouriDB') as Dexie & {

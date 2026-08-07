@@ -43,19 +43,6 @@ export default function Home() {
     fetchGreeting();
   }, [profile?.name, today]); // Snížená závislost pro úsporu API volání
 
-  useEffect(() => {
-    const checkData = async () => {
-      const count = await db.meals.count();
-      if (count === 0) {
-        await db.meals.bulkAdd([
-          { name: "Avokádový toast s vejcem", value: 350, time: "08:30", date: today, type: "breakfast" },
-          { name: "Matcha Latté (mandlové mléko)", value: 120, time: "10:15", date: today, type: "snack" },
-        ]);
-      }
-    };
-    checkData();
-  }, [today]);
-
   return (
     <div className="space-y-6 pt-6 transition-colors">
       {/* Uvítání */}

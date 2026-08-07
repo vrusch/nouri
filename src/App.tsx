@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { LogoHorizontal } from "./components/Logo";
 import BottomNav, { type NavTab } from "./components/BottomNav";
+import CameraModal from "./components/CameraModal";
 import Home from "./features/Home";
 import Stats from "./features/Stats";
 import Recipes from "./features/Recipes";
@@ -12,6 +13,7 @@ import { Bell } from "lucide-react";
 export default function App() {
   const { user, profile, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>("home");
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   if (loading) {
     return (
@@ -69,8 +71,10 @@ export default function App() {
         </main>
 
         {/* --- SPODNÍ NAVIGACE --- */}
-        <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} />
+        <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} onOpenCamera={() => setCameraOpen(true)} />
       </div>
+
+      {cameraOpen && <CameraModal onClose={() => setCameraOpen(false)} />}
     </div>
   );
 }

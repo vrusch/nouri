@@ -4,16 +4,22 @@ import { useTheme, type Theme } from "../context/ThemeContext";
 import { useAuth, type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
+import { db } from "../db/db";
 import pkg from "../../package.json";
 
 export default function Profile() {
   const { theme, setTheme } = useTheme();
   const { profile, user, logout, updateProfile } = useAuth();
-  
+
   // Stavy pro editaci
   const [editing, setEditing] = useState<string | null>(null);
   const [tempValue, setTempValue] = useState<string>("");
   const [showPrivacy, setShowPrivacy] = useState(false);
+
+  // Správa dat stavy
+  const [isExporting, setIsExporting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // AI report stavy
   const [isGenerating, setIsGenerating] = useState(false);
@@ -71,6 +77,45 @@ export default function Profile() {
     }
   };
 
+  const handleExportCsv = async () => {
+    setIsExporting(true);
+    try {
+      const meals = await db.meals.orderBy('date').toArray();
+      const header = ['Datum', 'Čas', 'Typ', 'Název', 'Kalorie', 'Bílkoviny (g)', 'Tuky (g)', 'Sacharidy (g)', 'Zdroj'];
+      const rows = meals.map(m => [
+        m.date, m.time, m.type, m.name, m.value,
+        m.protein ?? '', m.fat ?? '', m.carbs ?? '', m.source ?? ''
+      ]);
+      const csv = [header, ...rows]
+        .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nouri-jidla-${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleDeleteHistory = async () => {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 4000);
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      await db.meals.clear();
+      setConfirmDelete(false);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   // Vypočítat živé metriky pro zobrazení
   const metrics = profile ? calculateNutrition({
     gender: profile.gender,
@@ -81,7 +126,6 @@ export default function Profile() {
     goal: profile.goal
   }) : null;
 
-  const accentColor = profile?.gender === 'female' ? 'rose' : 'sky';
   const accentBg = profile?.gender === 'female' ? 'bg-rose-50 dark:bg-rose-900/10' : 'bg-sky-50 dark:bg-sky-900/10';
   const accentText = profile?.gender === 'female' ? 'text-rose-600 dark:text-rose-400' : 'text-sky-600 dark:text-sky-400';
 
@@ -90,7 +134,7 @@ export default function Profile() {
       
       {/* 1. HLAVIČKA */}
       <div className="flex flex-col items-center">
-        <div className={`w-20 h-20 rounded-full bg-linear-to-tr from-${accentColor}-500 to-${accentColor}-400 p-0.5 shadow-lg`}>
+        <div className={`w-20 h-20 rounded-full bg-linear-to-tr p-0.5 shadow-lg ${profile?.gender === 'female' ? 'from-rose-500 to-rose-400' : 'from-sky-500 to-sky-400'}`}>
           <div className="w-full h-full rounded-full bg-white dark:bg-slate-900 flex items-center justify-center overflow-hidden transition-colors">
             {user?.photoURL ? (
               <img src={user.photoURL} alt="Profil" className="w-full h-full object-cover" />
@@ -359,13 +403,25 @@ export default function Profile() {
           
           {showPrivacy && (
             <div className="px-4 pb-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-200">
-              <button className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl active:scale-[0.98] transition-all">
-                <Download className="w-4 h-4 text-slate-500" />
+              <button
+                onClick={handleExportCsv}
+                disabled={isExporting}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                {isExporting ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <Download className="w-4 h-4 text-slate-500" />}
                 <span className="text-sm font-bold text-slate-700 dark:text-slate-200">Exportovat do CSV</span>
               </button>
-              <button className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl active:scale-[0.98] transition-all text-slate-400 dark:text-slate-500 border border-slate-100 dark:border-slate-800">
-                <Trash2 className="w-4 h-4" />
-                <span className="text-sm font-bold">Smazat veškerou historie</span>
+              <button
+                onClick={handleDeleteHistory}
+                disabled={isDeleting}
+                className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50 border ${
+                  confirmDelete
+                    ? 'bg-red-50 dark:bg-red-900/20 text-red-500 border-red-200 dark:border-red-900/50'
+                    : 'bg-slate-50 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500 border-slate-100 dark:border-slate-800'
+                }`}
+              >
+                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                <span className="text-sm font-bold">{confirmDelete ? 'Opravdu smazat? Klikni znovu' : 'Smazat veškerou historii'}</span>
               </button>
             </div>
           )}
