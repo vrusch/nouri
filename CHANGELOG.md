@@ -2,6 +2,16 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.7.0] - 2026-08-07
+### Přidáno
+- **Cloud záloha jídel**: Write-through zálohování do Firestore (`users/{uid}/meals`) přes stabilní `syncId` (UUID) místo lokálního Dexie `++id` — přežije evikci IndexedDB na iOS. Při prázdné lokální databázi (nový telefon, smazaná data) se historie jednorázově obnoví z cloudu.
+- **Historie váhy**: Každá změna váhy v Profilu se ukládá do Firestore (`weightLogs`, doc id = datum, oprava překlepu ve stejný den nevytváří duplicitu). Stats zobrazuje trend váhy, jakmile jsou k dispozici aspoň 2 záznamy.
+- **Připomínka vážení**: Nastavitelný interval (1–7 dní) v Profilu — zvonek v hlavičce appky se rozsvítí, jakmile je poslední zápis váhy po termínu, s odkazem rovnou na zápis nové hodnoty.
+- **`firestore.rules`**: Poprvé verzovaná bezpečnostní pravidla (dřív v repu chyběla úplně) — uživatel má přístup jen ke svému vlastnímu stromu dokumentů. Nasazeno na produkci.
+
+### Opraveno
+- **Zastaralý kalorický cíl**: `targetCalories` se dřív přepočítal jen po ručním kliknutí na "Aktualizovat analýzu" v AI reportu — po změně váhy/cíle/aktivity tak zůstával neplatný. Home, Stats i AI zpětná vazba k jídlu ho teď počítají živě z aktuálních dat profilu.
+
 ## [0.6.0] - 2026-08-07
 ### Přidáno
 - **Zpětná vazba k jídlu**: Nová Cloud Function `getMealFeedback` — Mya krátce zareaguje na každé uložené jídlo (foto i ruční zápis), zobrazí se hned po uložení.
