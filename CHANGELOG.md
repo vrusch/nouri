@@ -2,6 +2,15 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.6.0] - 2026-08-07
+### Přidáno
+- **Zpětná vazba k jídlu**: Nová Cloud Function `getMealFeedback` — Mya krátce zareaguje na každé uložené jídlo (foto i ruční zápis), zobrazí se hned po uložení.
+- **Reálné Statistiky**: `Stats.tsx` nahrazen sloupcovým grafem kalorií za posledních 7 dní z reálných dat, s referenční linkou denního cíle a týdenním průměrem.
+
+### Vylepšeno
+- **Denní pozdrav od Myi**: Přegeneruje se po každém novém zápisu jídla (dřív zůstával zafixovaný na stav z rána) a nově zohledňuje i snězené bílkoviny vůči cíli.
+- **Recepty**: 3 fake karty nahrazeny upřímným stavem "Připravujeme" — appka už neslibuje funkci, kterou nemá.
+
 ## [0.5.0] - 2026-08-07
 ### Přidáno
 - **Zápis jídel**: Hlavní tlačítko konečně funguje — vyfocení jídla s AI rozpoznáním (GPT-4o Vision, odhad kalorií a maker) nebo rychlý ruční zápis jako rovnocenná alternativa.
