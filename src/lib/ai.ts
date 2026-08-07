@@ -13,10 +13,26 @@ const generateWelcomeReportFn = httpsCallable<{ profile: UserProfile }, AIRespon
   "generateWelcomeReport"
 );
 
-const getDailyGreetingFn = httpsCallable<{ profile: UserProfile; consumedToday: number }, { text: string }>(
+interface DailyStats {
+  consumedCalories: number;
+  consumedProtein: number;
+}
+
+const getDailyGreetingFn = httpsCallable<{ profile: UserProfile } & DailyStats, { text: string }>(
   functions,
   "getDailyGreeting"
 );
+
+export interface MealFeedbackInput {
+  mealName: string;
+  calories: number;
+  protein: number;
+  mealType: string;
+  consumedTodayCalories: number;
+  targetCalories: number;
+}
+
+const getMealFeedbackFn = httpsCallable<MealFeedbackInput, { text: string }>(functions, "getMealFeedback");
 
 export const MyaAI = {
   /**
@@ -47,14 +63,28 @@ export const MyaAI = {
 
   /**
    * Vygeneruje krátkou proaktivní zprávu pro Home screen přes server-side Cloud Function.
+   * Zohledňuje i snězené bílkoviny, ne jen kalorie.
    */
-  async getDailyGreeting(profile: UserProfile, consumedToday: number): Promise<string> {
+  async getDailyGreeting(profile: UserProfile, stats: DailyStats): Promise<string> {
     try {
-      const response = await getDailyGreetingFn({ profile, consumedToday });
+      const response = await getDailyGreetingFn({ profile, ...stats });
       return response.data.text;
     } catch (error) {
       console.error("Mya AI Error:", error);
       return `Ahoj ${profile.name}! Nezapomeň si dnes zapsat všechna jídla.`;
+    }
+  },
+
+  /**
+   * Krátká AI reakce na konkrétní právě uložené jídlo.
+   */
+  async getMealFeedback(input: MealFeedbackInput): Promise<string> {
+    try {
+      const response = await getMealFeedbackFn(input);
+      return response.data.text;
+    } catch (error) {
+      console.error("Mya AI Error:", error);
+      return "Zapsáno! 👍";
     }
   }
 };

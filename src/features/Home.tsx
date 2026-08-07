@@ -14,34 +14,34 @@ export default function Home() {
   const meals = useLiveQuery(() => db.meals.where('date').equals(today).toArray()) || [];
   
   const consumedCalories = meals.reduce((sum, meal) => sum + meal.value, 0);
+  const consumedProtein = meals.reduce((sum, meal) => sum + (meal.protein ?? 0), 0);
   const remainingCalories = Math.max(0, GOAL_CALORIES - consumedCalories);
   const progressPercent = Math.min(100, (consumedCalories / GOAL_CALORIES) * 100);
 
   useEffect(() => {
     const fetchGreeting = async () => {
       if (!profile) return;
-      
-      // Kešování: pokud máme pozdrav v session pro dnešek, nevoláme API
-      const cacheKey = `mya_greeting_${today}`;
+
+      // Kešování na dnešek + počet zapsaných jídel, ať se pozdrav obnoví po každém novém zápisu
+      const cacheKey = `mya_greeting_${today}_${meals.length}`;
       const cached = sessionStorage.getItem(cacheKey);
-      
+
       if (cached) {
         setGreeting(cached);
         return;
       }
 
       try {
-        const msg = await MyaAI.getDailyGreeting(profile, consumedCalories);
+        const msg = await MyaAI.getDailyGreeting(profile, { consumedCalories, consumedProtein });
         setGreeting(msg);
         sessionStorage.setItem(cacheKey, msg);
       } catch (error) {
         setGreeting(`Ahoj ${profile.name}! Nezapomeň dnes pít hodně vody. ✨`);
       }
     };
-    
-    // Voláme jen pokud se změní den nebo jméno, ne při každém soustu
+
     fetchGreeting();
-  }, [profile?.name, today]); // Snížená závislost pro úsporu API volání
+  }, [profile?.name, today, meals.length]);
 
   return (
     <div className="space-y-6 pt-6 transition-colors">

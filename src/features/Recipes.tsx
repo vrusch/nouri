@@ -1,19 +1,20 @@
+import { ChefHat } from "lucide-react";
+
 export default function Recipes() {
   return (
     <div className="space-y-6 pt-6 transition-colors">
       <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">AI Recepty</h1>
-      <div className="grid grid-cols-1 gap-4">
-        {[1, 2, 3].map(i => (
-          <div key={i} className="bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-sm border border-slate-100 dark:border-slate-800 h-48 relative flex items-end p-6 transition-colors">
-            {/* Zástupný obrázek s gradientem */}
-            <div className="absolute inset-0 bg-linear-to-br from-blue-100 to-indigo-100 dark:from-blue-900/20 dark:to-indigo-900/20 opacity-50 transition-colors"></div>
-            <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent"></div>
-            <div className="relative text-white">
-              <span className="text-xs font-bold uppercase tracking-wider text-blue-300">Tip pro tebe</span>
-              <h3 className="text-lg font-bold">Zdravý recept #{i}</h3>
-            </div>
-          </div>
-        ))}
+
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col items-center text-center gap-4 transition-colors">
+        <div className="w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-500 dark:text-blue-400">
+          <ChefHat className="w-7 h-7" />
+        </div>
+        <div>
+          <h2 className="font-bold text-slate-800 dark:text-white mb-1">Připravujeme</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+            Mya časem naučí navrhovat recepty na míru tvým makrům a tomu, co ti dnes ještě zbývá sníst. Zatím se soustředíme na zápis jídel a přehledy.
+          </p>
+        </div>
       </div>
     </div>
   );

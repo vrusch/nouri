@@ -1,13 +1,15 @@
 import { useRef, useState } from "react";
-import { X, Camera, PenLine, Loader2, ChevronLeft, AlertCircle } from "lucide-react";
+import { X, Camera, PenLine, Loader2, ChevronLeft, AlertCircle, CheckCircle2 } from "lucide-react";
 import { db, type MealItem } from "../db/db";
 import { MyaVision, type VisionResult, type MealType } from "../lib/vision";
+import { MyaAI } from "../lib/ai";
+import { useAuth } from "../context/AuthContext";
 
 interface CameraModalProps {
   onClose: () => void;
 }
 
-type Step = "choose" | "photo-preview" | "analyzing" | "form";
+type Step = "choose" | "photo-preview" | "analyzing" | "form" | "feedback";
 
 const MEAL_TYPE_OPTIONS: { id: MealType; label: string }[] = [
   { id: "breakfast", label: "Snídaně" },
@@ -58,11 +60,13 @@ function fileToCompressedDataUrl(file: File, maxDim = 1024, quality = 0.82): Pro
 }
 
 export default function CameraModal({ onClose }: CameraModalProps) {
+  const { profile } = useAuth();
   const [step, setStep] = useState<Step>("choose");
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [source, setSource] = useState<"photo" | "manual">("manual");
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [feedbackText, setFeedbackText] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [name, setName] = useState("");
@@ -156,7 +160,22 @@ export default function CameraModal({ onClose }: CameraModalProps) {
       if (carbs) meal.carbs = Math.round(Number(carbs));
 
       await db.meals.add(meal);
-      onClose();
+      setStep("feedback");
+
+      if (profile) {
+        const todayMeals = await db.meals.where("date").equals(meal.date).toArray();
+        const consumedTodayCalories = todayMeals.reduce((sum, m) => sum + m.value, 0);
+        MyaAI.getMealFeedback({
+          mealName: meal.name,
+          calories: meal.value,
+          protein: meal.protein ?? 0,
+          mealType: meal.type,
+          consumedTodayCalories,
+          targetCalories: profile.targetCalories,
+        }).then(setFeedbackText);
+      } else {
+        setFeedbackText("Zapsáno! 👍");
+      }
     } finally {
       setSaving(false);
     }
@@ -185,6 +204,7 @@ export default function CameraModal({ onClose }: CameraModalProps) {
               {step === "photo-preview" && "Zkontroluj fotku"}
               {step === "analyzing" && "Mya analyzuje..."}
               {step === "form" && (source === "photo" ? "Potvrď jídlo" : "Zapsat jídlo")}
+              {step === "feedback" && "Uloženo"}
             </h2>
           </div>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
@@ -361,6 +381,27 @@ export default function CameraModal({ onClose }: CameraModalProps) {
               >
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Uložit jídlo
+              </button>
+            </div>
+          )}
+
+          {step === "feedback" && (
+            <div className="flex flex-col items-center text-center gap-4 py-8">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center text-emerald-500">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+              <div className="min-h-10 flex items-center justify-center px-4">
+                {feedbackText ? (
+                  <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{feedbackText}</p>
+                ) : (
+                  <Loader2 className="w-5 h-5 text-slate-300 dark:text-slate-600 animate-spin" />
+                )}
+              </div>
+              <button
+                onClick={onClose}
+                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all"
+              >
+                Hotovo
               </button>
             </div>
           )}

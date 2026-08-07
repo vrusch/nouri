@@ -124,15 +124,25 @@ export const getDailyGreeting = onCall(
   async (request) => {
     requireAuth(request);
     const profile = request.data?.profile as UserProfileInput | undefined;
-    const consumedToday = Number(request.data?.consumedToday) || 0;
+    const consumedCalories = Number(request.data?.consumedCalories) || 0;
+    const consumedProtein = Number(request.data?.consumedProtein) || 0;
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
 
-    const remaining = profile.targetCalories - consumedToday;
+    const remaining = profile.targetCalories - consumedCalories;
+    const targetProtein = calculateNutrition({
+      gender: profile.gender,
+      weight: profile.weight,
+      height: profile.height,
+      birthDate: profile.birthDate,
+      activityLevel: profile.activityLevel,
+      goal: profile.goal,
+    }).macros.protein;
+    const proteinRemaining = Math.max(0, targetProtein - consumedProtein);
 
     const systemPrompt = `Jsi Mya z aplikace Nouri. Piš krátké, úderné a motivující zprávy (max 2 věty).
-Zohledni aktuální stav uživatele.`;
+Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem k denní době, zmiň to konkrétně (počet gramů).`;
 
-    const userPrompt = `Uživatel: ${profile.name}. Cíl: ${profile.targetCalories} kcal. Dnes snědeno: ${consumedToday} kcal. Zbývá: ${remaining} kcal.`;
+    const userPrompt = `Uživatel: ${profile.name}. Cíl: ${profile.targetCalories} kcal (bílkoviny ${targetProtein}g). Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.`;
 
     try {
       const response = await fetch(OPENAI_API_URL, {
@@ -245,6 +255,71 @@ Pokud na fotce není rozpoznatelné jídlo, vrať confidence "low", name "Nezná
     } catch (error) {
       console.error("Mya Vision Error:", error);
       return null;
+    }
+  }
+);
+
+interface MealFeedbackInput {
+  mealName: string;
+  calories: number;
+  protein: number;
+  mealType: MealType;
+  consumedTodayCalories: number;
+  targetCalories: number;
+}
+
+const MEAL_TYPE_LABELS: Record<MealType, string> = {
+  breakfast: "snídani",
+  lunch: "oběd",
+  dinner: "večeři",
+  snack: "svačinu",
+};
+
+export const getMealFeedback = onCall(
+  { secrets: [openaiApiKey], region: "us-central1" },
+  async (request) => {
+    requireAuth(request);
+    const input = request.data as MealFeedbackInput | undefined;
+    if (!input?.mealName) throw new HttpsError("invalid-argument", "Chybí data o jídle.");
+
+    const remaining = input.targetCalories - input.consumedTodayCalories;
+    const mealTypeLabel = MEAL_TYPE_LABELS[input.mealType] ?? "jídlo";
+
+    const systemPrompt = `Jsi Mya z aplikace Nouri. Uživatel právě zapsal jídlo. Reaguj JEDNOU krátkou větou (max ~15 slov),
+věcně a přátelsky — jak tohle jídlo zapadá do zbytku dne. Žádné obecné fráze, konkrétní reakce na dané jídlo.`;
+
+    const userPrompt = `Právě zapsáno jako ${mealTypeLabel}: "${input.mealName}" (${input.calories} kcal, ${input.protein}g bílkovin).
+Dnes celkem snědeno: ${input.consumedTodayCalories} kcal z cíle ${input.targetCalories} kcal. Zbývá ${remaining} kcal.`;
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 60,
+        }),
+      });
+
+      if (response.status === 429) {
+        return { text: "Zapsáno! ✨" };
+      }
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      if (!json.choices) {
+        console.error("OpenAI response missing choices:", response.status, JSON.stringify(json));
+      }
+      return { text: json.choices?.[0]?.message?.content || "Zapsáno! 👍" };
+    } catch (error) {
+      console.error("Mya AI Error (meal feedback):", error);
+      return { text: "Zapsáno! 👍" };
     }
   }
 );
