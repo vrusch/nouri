@@ -10,7 +10,8 @@ export default defineConfig({
     react(),
     tailwindcss(), // <-- Přidán plugin pro Tailwind
     VitePWA({
-      registerType: "autoUpdate",
+      registerType: "prompt",
+      injectRegister: false,
       includeAssets: ["apple-touch-icon.png"],
       manifest: {
         name: "Nouri",
