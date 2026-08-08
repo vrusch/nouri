@@ -91,7 +91,11 @@ export default function Home() {
             {remainingCalories} <span className="text-sm text-slate-500 dark:text-slate-400 font-medium tracking-normal">kcal</span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-snug">
-            {progressPercent > 80 ? "Pozor na večeři!" : "Skvělé tempo! K obědu si můžeš dát něco vydatnějšího."}
+            {consumedCalories === 0
+              ? "Zatím jsi dnes nic nezapsala — pojďme na to!"
+              : progressPercent > 80
+                ? "Pozor na večeři!"
+                : "Skvělé tempo! K obědu si můžeš dát něco vydatnějšího."}
           </p>
         </div>
       </div>

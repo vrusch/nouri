@@ -36,8 +36,9 @@ export default function App() {
       await hydrateMealsIfEmpty(uid);
       await seedWeightLogIfEmpty(uid, profile.weight);
       const latest = await fetchLatestWeightLog(uid);
-      // Tichý "seed" záznam (viz seedWeightLogIfEmpty) se pro připomínku nepočítá jako reálné vážení.
-      const lastRealWeighIn = latest && latest.source !== "seed" ? latest : null;
+      // Za reálné vážení se počítá jen výslovně source: "manual" — starší záznamy bez
+      // pole source (z doby před rozlišením seed/manual) i tiché seed body se ignorují.
+      const lastRealWeighIn = latest && latest.source === "manual" ? latest : null;
       const sinceDays = lastRealWeighIn ? daysSince(lastRealWeighIn.date) : null;
       setDaysSinceWeighIn(sinceDays);
       setWeighInOverdue(sinceDays === null || sinceDays >= reminderDays);
@@ -97,7 +98,7 @@ export default function App() {
               )}
             </button>
             {showReminder && (
-              <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-100 dark:border-slate-700 p-4 z-30 text-left">
+              <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-100 dark:border-slate-700 p-4 z-30 text-left">
                 <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
                   {daysSinceWeighIn === null
                     ? "Ještě jsi nezapsala váhu — zapiš první hodnotu a appka ti pak sama pohlídá další vážení."
