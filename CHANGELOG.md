@@ -2,6 +2,17 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.9.0] - 2026-08-08
+### Přidáno
+- **Popis jídla jako AI kanál**: appka teď umí odhadnout kalorie a makra i ze slovního popisu jídla ("Popsat jídlo"), ne jen z fotky — nová Cloud Function `analyzeFoodText` (gpt-4o-mini), vede na stejný editovatelný formulář jako u fotek.
+
+### Opraveno
+- **Zvoneček připomínky vážení**: klik dřív nic nezobrazil, pokud nebylo vážení po termínu (působilo jako mrtvá ikona). Teď se vždy otevře přehled — nikdy nezváženo / po termínu / kolik dní zbývá do příští připomínky.
+- **Počítání dní do vážení**: tichý startovní záznam váhy pro graf trendu (založený automaticky z profilu při prvním spuštění) se dřív omylem počítal jako reálné vážení a tím tiše "splnil" připomínku. Nový příznak `weightLogs.source` (seed/manual) odděluje startovní bod grafu od skutečných zápisů — připomínka teď počítá jen ty druhé.
+
+### Změněno
+- **Přejmenování "camera" na "add meal"**: hlavní tlačítko appky mělo ikonu fotoaparátu a interní pojmenování (`CameraModal`, `onOpenCamera`), i když appka umí přidat jídlo víc kanály (foto, popis, do budoucna hlas). Ikona nahrazena obecným `+`, komponenta přejmenována na `AddMealModal`.
+
 ## [0.8.0] - 2026-08-08
 ### Přidáno
 - **Kontrola verze a auto-aktualizace appky**: appka jako PWA se dřív na telefonu nemohla dostat k nové nasazené verzi (žádný app store update, žádná ruční instalace). Teď se service worker aktivně kontroluje každou hodinu a při každém návratu appky do popředí — jakmile je k dispozici novější verze, zobrazí se banner s tlačítkem "Aktualizovat".
