@@ -2,6 +2,16 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.11.0] - 2026-08-08
+### Přidáno
+- **Testovací sada** — appka dřív neměla žádný test. Vitest (`npm test`): 46 unit/regresních testů pro `nutrition.ts`, `format.ts`, `weighIn.ts` a `cloudSync.ts` (mockovaný Firestore), včetně explicitních regresních testů na obě chyby nahlášené v ostrém provozu. Playwright E2E (`npm run test:e2e`): automatizuje ověření adaptivní kalibrace — jednorázový testovací účet, syntetická historie přes reálný appkový kód, kontrola karty a zápisu, úklid po sobě. Běží proti reálnému Firebase, spouští se jen na vyžádání.
+
+### Opraveno
+- **Denní pozdrav od Myi** počítal se zastaralým uloženým cílem kalorií místo živého přepočtu — teď používá stejnou cestu jako zbytek appky.
+
+### Změněno
+- Logika klasifikace vážení (`App.tsx`) a hlášky k dennímu postupu (`Home.tsx`) přesunuta do samostatných čistých funkcí (`src/lib/weighIn.ts`, `getProgressCaption`) — nutná příprava pro to, aby šly vůbec testovat.
+
 ## [0.10.0] - 2026-08-08
 ### Přidáno
 - **Adaptivní kalibrace kalorického cíle**: appka teď umí porovnat skutečnou změnu váhy se zapsanými kaloriemi za stejné období a odhadnout reálný denní výdej — přesnější než formulka ze sebehodnocené úrovně aktivity. Návrh se zobrazí ve Statistikách, jakmile je dost dat (aspoň 14 dní mezi reálnými zápisy váhy, aspoň 7 dní se zapsaným jídlem, odchylka nad 10 %). Potvrzená kalibrace se promítne všude — Home, Stats, Profil, AI report i denní pozdrav.
