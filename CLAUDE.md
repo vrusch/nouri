@@ -13,9 +13,16 @@ npm run dev       # start Vite dev server
 npm run build      # tsc -b (project references) then vite build — build fails on any TS error, including unused locals/params
 npm run lint       # eslint .
 npm run preview    # preview a production build locally
+npm test           # vitest run — unit/regression tests for pure logic (src/**/*.test.ts)
+npm run test:watch # vitest in watch mode
+npm run test:e2e   # playwright test — full E2E flow against a real throwaway Firebase account (see below)
 ```
 
-There is no test suite/runner configured in this project.
+## Testing
+
+**Unit/regression tests** (`src/lib/*.test.ts`, run via Vitest) cover pure logic only — `nutrition.ts` (BMR/TDEE/macro math, `calibrateTarget`), `format.ts`, `weighIn.ts`. No component/rendering tests exist; UI logic that matters is kept in small pure functions specifically so it's unit-testable (e.g. `getProgressCaption` in `nutrition.ts`, `computeWeighInStatus` in `weighIn.ts`) rather than inlined as JSX ternaries. When you find a real bug in one of these functions, add a regression test alongside the fix — `nutrition.test.ts` and `weighIn.test.ts` already have precedent (`// REGRESE:` comments) for two bugs found in the wild: the seed/manual weigh-in misclassification and the "Skvělé tempo" caption showing at 0 logged calories.
+
+**E2E test** (`e2e/calibration.spec.ts`, run via Playwright) exercises the full adaptive-calibration flow against the **real production Firebase project** (`nouri-70d9e`) — there are no Firebase emulators configured. It registers a throwaway email/password test account (`e2e-calibration-<timestamp>@example.com`, never Google OAuth — no risk of colliding with a real saved Google session), completes onboarding, seeds 21 days of synthetic weight/meal history directly through the app's own exported functions (`logWeight`, `db.meals.add`) via `page.evaluate` + dynamic `import()` of the served source modules (Vite dev server serves raw ES modules, so `await import("/src/lib/cloudSync.ts")` works from an injected script — bare specifiers like `"firebase/firestore"` do *not* resolve this way, only same-origin file paths do), asserts the calibration card and its effects, then deletes the account and all its data (Firestore REST API + local Dexie) in a `finally` block. Expected values are computed by importing the real `calculateNutrition`/`calibrateTarget` functions directly into the Node-side test file, not hardcoded — the test stays correct if the formula or thresholds change. Costs a small real OpenAI call (`gpt-4o-mini`, via the deployed `getDailyGreeting` function firing on Home mount) each run — not wired into `build`/`lint`, run it deliberately.
 
 ## Environment
 
