@@ -13,7 +13,6 @@ interface UserProfileInput {
   birthDate: string;
   activityLevel: number;
   goal: Goal;
-  targetCalories: number;
   calibratedTDEE?: number;
 }
 
@@ -130,8 +129,9 @@ export const getDailyGreeting = onCall(
     const consumedProtein = Number(request.data?.consumedProtein) || 0;
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
 
-    const remaining = profile.targetCalories - consumedCalories;
-    const targetProtein = calculateNutrition({
+    // Živě přepočteno z profilu, ne z uloženého profile.targetCalories — to může být
+    // zastaralé (naposledy zapsané při onboardingu nebo posledním "Aktualizovat analýzu").
+    const nutrition = calculateNutrition({
       gender: profile.gender,
       weight: profile.weight,
       height: profile.height,
@@ -139,13 +139,15 @@ export const getDailyGreeting = onCall(
       activityLevel: profile.activityLevel,
       goal: profile.goal,
       calibratedTDEE: profile.calibratedTDEE,
-    }).macros.protein;
+    });
+    const targetProtein = nutrition.macros.protein;
+    const remaining = nutrition.targetCalories - consumedCalories;
     const proteinRemaining = Math.max(0, targetProtein - consumedProtein);
 
     const systemPrompt = `Jsi Mya z aplikace Nouri. Piš krátké, úderné a motivující zprávy (max 2 věty).
 Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem k denní době, zmiň to konkrétně (počet gramů).`;
 
-    const userPrompt = `Uživatel: ${profile.name}. Cíl: ${profile.targetCalories} kcal (bílkoviny ${targetProtein}g). Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.`;
+    const userPrompt = `Uživatel: ${profile.name}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g). Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.`;
 
     try {
       const response = await fetch(OPENAI_API_URL, {
