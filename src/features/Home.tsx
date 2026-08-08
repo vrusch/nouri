@@ -4,7 +4,7 @@ import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { Zap } from "lucide-react";
 import { MyaAI } from "../lib/ai";
-import { calculateNutrition } from "../lib/nutrition";
+import { calculateNutrition, getProgressCaption } from "../lib/nutrition";
 
 export default function Home() {
   const { profile } = useAuth();
@@ -91,11 +91,7 @@ export default function Home() {
             {remainingCalories} <span className="text-sm text-slate-500 dark:text-slate-400 font-medium tracking-normal">kcal</span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-snug">
-            {consumedCalories === 0
-              ? "Zatím jsi dnes nic nezapsala — pojďme na to!"
-              : progressPercent > 80
-                ? "Pozor na večeři!"
-                : "Skvělé tempo! K obědu si můžeš dát něco vydatnějšího."}
+            {getProgressCaption(consumedCalories, progressPercent)}
           </p>
         </div>
       </div>

@@ -10,14 +10,8 @@ import Onboarding from "./features/Onboarding";
 import { useAuth } from "./context/useAuth";
 import { fetchLatestWeightLog, hydrateMealsIfEmpty, seedWeightLogIfEmpty } from "./lib/cloudSync";
 import { formatDaysCs } from "./lib/format";
+import { computeWeighInStatus } from "./lib/weighIn";
 import { Bell } from "lucide-react";
-
-function daysSince(dateISO: string): number {
-  const todayISO = new Date().toISOString().split("T")[0];
-  const msPerDay = 86400000;
-  const diff = Date.parse(`${todayISO}T00:00:00Z`) - Date.parse(`${dateISO}T00:00:00Z`);
-  return Math.round(diff / msPerDay);
-}
 
 export default function App() {
   const { user, profile, loading } = useAuth();
@@ -36,12 +30,9 @@ export default function App() {
       await hydrateMealsIfEmpty(uid);
       await seedWeightLogIfEmpty(uid, profile.weight);
       const latest = await fetchLatestWeightLog(uid);
-      // Za reálné vážení se počítá jen výslovně source: "manual" — starší záznamy bez
-      // pole source (z doby před rozlišením seed/manual) i tiché seed body se ignorují.
-      const lastRealWeighIn = latest && latest.source === "manual" ? latest : null;
-      const sinceDays = lastRealWeighIn ? daysSince(lastRealWeighIn.date) : null;
-      setDaysSinceWeighIn(sinceDays);
-      setWeighInOverdue(sinceDays === null || sinceDays >= reminderDays);
+      const status = computeWeighInStatus(latest, reminderDays);
+      setDaysSinceWeighIn(status.daysSinceWeighIn);
+      setWeighInOverdue(status.weighInOverdue);
     })();
   }, [user, profile?.setupComplete, profile?.weight, reminderDays]);
 

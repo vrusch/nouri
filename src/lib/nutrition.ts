@@ -101,6 +101,16 @@ export function calculateNutrition(data: {
   };
 }
 
+/**
+ * Krátká hláška k dennímu kalorickému postupu na Home obrazovce. Musí rozlišit "nic
+ * nezapsáno" od "postupuje v pohodě" — 0 % postupu není totéž co "skvělé tempo".
+ */
+export function getProgressCaption(consumedCalories: number, progressPercent: number): string {
+  if (consumedCalories === 0) return "Zatím jsi dnes nic nezapsala — pojďme na to!";
+  if (progressPercent > 80) return "Pozor na večeři!";
+  return "Skvělé tempo! K obědu si můžeš dát něco vydatnějšího.";
+}
+
 const MIN_CALIBRATION_SPAN_DAYS = 14;
 const MIN_CALIBRATION_LOGGED_DAYS = 7;
 const CALIBRATION_DEVIATION_THRESHOLD = 0.1; // 10 % — pod touhle odchylkou se odhad bere jako "v podstatě sedí"
