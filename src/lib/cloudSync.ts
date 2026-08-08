@@ -55,9 +55,14 @@ export async function hydrateMealsIfEmpty(uid: string): Promise<void> {
 
 // Doc id = datum (YYYY-MM-DD), takže oprava překlepu ve stejný den přepíše
 // existující bod místo vytvoření duplicity v trendu.
-export async function logWeight(uid: string, weightKg: number, dateISO: string): Promise<void> {
+export async function logWeight(
+  uid: string,
+  weightKg: number,
+  dateISO: string,
+  source: "seed" | "manual" = "manual"
+): Promise<void> {
   try {
-    await setDoc(doc(weightLogsCollection(uid), dateISO), { weight: weightKg, date: dateISO });
+    await setDoc(doc(weightLogsCollection(uid), dateISO), { weight: weightKg, date: dateISO, source });
   } catch (error) {
     console.error("Zápis váhy do cloudu selhal:", error);
   }
@@ -66,6 +71,7 @@ export async function logWeight(uid: string, weightKg: number, dateISO: string):
 export interface WeightLogEntry {
   date: string;
   weight: number;
+  source?: "seed" | "manual";
 }
 
 export async function fetchWeightLogs(uid: string): Promise<WeightLogEntry[]> {
@@ -98,7 +104,7 @@ export async function seedWeightLogIfEmpty(uid: string, currentWeight: number): 
     const snap = await getDocs(weightLogsCollection(uid));
     if (!snap.empty) return;
     const today = new Date().toISOString().split("T")[0];
-    await logWeight(uid, currentWeight, today);
+    await logWeight(uid, currentWeight, today, "seed");
   } catch (error) {
     console.error("Založení výchozí váhové historie selhalo:", error);
   }

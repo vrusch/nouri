@@ -7,11 +7,11 @@ import { backupMeal } from "../lib/cloudSync";
 import { calculateNutrition } from "../lib/nutrition";
 import { useAuth } from "../context/useAuth";
 
-interface CameraModalProps {
+interface AddMealModalProps {
   onClose: () => void;
 }
 
-type Step = "choose" | "photo-preview" | "analyzing" | "form" | "feedback";
+type Step = "choose" | "photo-preview" | "describe" | "analyzing" | "form" | "feedback";
 
 const MEAL_TYPE_OPTIONS: { id: MealType; label: string }[] = [
   { id: "breakfast", label: "Snídaně" },
@@ -61,10 +61,11 @@ function fileToCompressedDataUrl(file: File, maxDim = 1024, quality = 0.82): Pro
   });
 }
 
-export default function CameraModal({ onClose }: CameraModalProps) {
+export default function AddMealModal({ onClose }: AddMealModalProps) {
   const { profile, user } = useAuth();
   const [step, setStep] = useState<Step>("choose");
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
+  const [description, setDescription] = useState("");
   const [source, setSource] = useState<"photo" | "manual">("manual");
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -79,7 +80,7 @@ export default function CameraModal({ onClose }: CameraModalProps) {
   const [type, setType] = useState<MealType>(guessMealType());
   const [time, setTime] = useState(currentTime());
 
-  const resetFormFromVision = (result: VisionResult | null) => {
+  const resetFormFromVision = (result: VisionResult | null, failureNotice: string) => {
     if (result) {
       setName(result.name);
       setCalories(result.calories ? String(result.calories) : "");
@@ -95,7 +96,7 @@ export default function CameraModal({ onClose }: CameraModalProps) {
       setFat("");
       setCarbs("");
       setType(guessMealType());
-      setNotice("Mya se nepodařilo rozpoznat jídlo z fotky. Zapiš prosím hodnoty ručně.");
+      setNotice(failureNotice);
     }
     setTime(currentTime());
   };
@@ -119,7 +120,23 @@ export default function CameraModal({ onClose }: CameraModalProps) {
     if (!photoDataUrl) return;
     setStep("analyzing");
     const result = await MyaVision.analyzeFood(photoDataUrl);
-    resetFormFromVision(result);
+    resetFormFromVision(result, "Mya se nepodařilo rozpoznat jídlo z fotky. Zapiš prosím hodnoty ručně.");
+    setStep("form");
+  };
+
+  const handleDescribeStart = () => {
+    setSource("manual");
+    setPhotoDataUrl(null);
+    setDescription("");
+    setNotice(null);
+    setStep("describe");
+  };
+
+  const handleAnalyzeText = async () => {
+    if (!description.trim()) return;
+    setStep("analyzing");
+    const result = await MyaVision.analyzeFoodText(description.trim());
+    resetFormFromVision(result, "Mya nerozpoznala jídlo z popisu. Zapiš prosím hodnoty ručně.");
     setStep("form");
   };
 
@@ -140,6 +157,7 @@ export default function CameraModal({ onClose }: CameraModalProps) {
   const handleBack = () => {
     setStep("choose");
     setPhotoDataUrl(null);
+    setDescription("");
     setNotice(null);
   };
 
@@ -197,7 +215,7 @@ export default function CameraModal({ onClose }: CameraModalProps) {
         {/* HLAVIČKA */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-2">
-            {(step === "photo-preview" || step === "form") && (
+            {(step === "photo-preview" || step === "describe" || step === "form") && (
               <button
                 onClick={handleBack}
                 className="p-1 -ml-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
@@ -208,6 +226,7 @@ export default function CameraModal({ onClose }: CameraModalProps) {
             <h2 className="font-bold text-slate-800 dark:text-white">
               {step === "choose" && "Přidat jídlo"}
               {step === "photo-preview" && "Zkontroluj fotku"}
+              {step === "describe" && "Popiš jídlo"}
               {step === "analyzing" && "Mya analyzuje..."}
               {step === "form" && (source === "photo" ? "Potvrď jídlo" : "Zapsat jídlo")}
               {step === "feedback" && "Uloženo"}
@@ -244,15 +263,15 @@ export default function CameraModal({ onClose }: CameraModalProps) {
               </button>
 
               <button
-                onClick={handleManualStart}
+                onClick={handleDescribeStart}
                 className="w-full flex items-center gap-4 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-3xl active:scale-[0.98] transition-all"
               >
                 <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 shadow-sm flex items-center justify-center text-slate-500 dark:text-slate-400 shrink-0">
                   <PenLine className="w-5 h-5" />
                 </div>
                 <div className="text-left">
-                  <div className="font-bold text-slate-800 dark:text-white">Zapsat ručně</div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Rychlý zápis bez focení</div>
+                  <div className="font-bold text-slate-800 dark:text-white">Popsat jídlo</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Mya odhadne kalorie z popisu</div>
                 </div>
               </button>
 
@@ -283,10 +302,41 @@ export default function CameraModal({ onClose }: CameraModalProps) {
             </div>
           )}
 
+          {step === "describe" && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Co jsi jedla?</label>
+                <textarea
+                  autoFocus
+                  rows={4}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Např. dvě vejce na měkko, krajíc chleba s máslem a rajče"
+                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-blue-500 dark:text-white transition-all resize-none"
+                />
+              </div>
+              <button
+                onClick={handleAnalyzeText}
+                disabled={!description.trim()}
+                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                Analyzovat
+              </button>
+              <button
+                onClick={handleManualStart}
+                className="w-full text-center text-sm font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors py-1"
+              >
+                Radši zapsat čísla ručně
+              </button>
+            </div>
+          )}
+
           {step === "analyzing" && (
             <div className="flex flex-col items-center justify-center gap-4 py-16">
               <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-              <p className="text-sm text-slate-500 dark:text-slate-400">Mya kouká na fotku a počítá kalorie...</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                {photoDataUrl ? "Mya kouká na fotku a počítá kalorie..." : "Mya čte popis a počítá kalorie..."}
+              </p>
             </div>
           )}
 

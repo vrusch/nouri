@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { LogoHorizontal } from "./components/Logo";
 import BottomNav, { type NavTab } from "./components/BottomNav";
-import CameraModal from "./components/CameraModal";
+import AddMealModal from "./components/AddMealModal";
 import Home from "./features/Home";
 import Stats from "./features/Stats";
 import Recipes from "./features/Recipes";
@@ -9,6 +9,7 @@ import Profile from "./features/Profile";
 import Onboarding from "./features/Onboarding";
 import { useAuth } from "./context/useAuth";
 import { fetchLatestWeightLog, hydrateMealsIfEmpty, seedWeightLogIfEmpty } from "./lib/cloudSync";
+import { formatDaysCs } from "./lib/format";
 import { Bell } from "lucide-react";
 
 function daysSince(dateISO: string): number {
@@ -21,22 +22,27 @@ function daysSince(dateISO: string): number {
 export default function App() {
   const { user, profile, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>("home");
-  const [cameraOpen, setCameraOpen] = useState(false);
+  const [addMealOpen, setAddMealOpen] = useState(false);
   const [weighInOverdue, setWeighInOverdue] = useState(false);
+  const [daysSinceWeighIn, setDaysSinceWeighIn] = useState<number | null>(null);
   const [showReminder, setShowReminder] = useState(false);
+  const reminderDays = profile?.weighInReminderDays ?? 3;
 
   useEffect(() => {
     if (!user || !profile?.setupComplete) return;
     const uid = user.uid;
-    const reminderDays = profile.weighInReminderDays ?? 3;
 
     (async () => {
       await hydrateMealsIfEmpty(uid);
       await seedWeightLogIfEmpty(uid, profile.weight);
       const latest = await fetchLatestWeightLog(uid);
-      setWeighInOverdue(!!latest && daysSince(latest.date) >= reminderDays);
+      // Tichý "seed" záznam (viz seedWeightLogIfEmpty) se pro připomínku nepočítá jako reálné vážení.
+      const lastRealWeighIn = latest && latest.source !== "seed" ? latest : null;
+      const sinceDays = lastRealWeighIn ? daysSince(lastRealWeighIn.date) : null;
+      setDaysSinceWeighIn(sinceDays);
+      setWeighInOverdue(sinceDays === null || sinceDays >= reminderDays);
     })();
-  }, [user, profile?.setupComplete, profile?.weight, profile?.weighInReminderDays]);
+  }, [user, profile?.setupComplete, profile?.weight, reminderDays]);
 
   if (loading) {
     return (
@@ -82,7 +88,7 @@ export default function App() {
 
           <div className="relative">
             <button
-              onClick={() => weighInOverdue && setShowReminder((v) => !v)}
+              onClick={() => setShowReminder((v) => !v)}
               className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors focus:outline-none"
             >
               <Bell className="w-6 h-6 stroke-2" />
@@ -92,7 +98,13 @@ export default function App() {
             </button>
             {showReminder && (
               <div className="absolute right-0 top-full mt-2 w-56 bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-100 dark:border-slate-700 p-4 z-30 text-left">
-                <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">Nezapomeň se dnes zvážit — pomůže ti to sledovat trend.</p>
+                <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+                  {daysSinceWeighIn === null
+                    ? "Ještě jsi nezapsala váhu — zapiš první hodnotu a appka ti pak sama pohlídá další vážení."
+                    : weighInOverdue
+                      ? "Nezapomeň se dnes zvážit — pomůže ti to sledovat trend."
+                      : `Naposledy zváženo před ${formatDaysCs(daysSinceWeighIn)} · další připomínka za ${formatDaysCs(reminderDays - daysSinceWeighIn)}.`}
+                </p>
                 <button
                   onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
                   className="w-full bg-blue-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
@@ -112,10 +124,10 @@ export default function App() {
         </main>
 
         {/* --- SPODNÍ NAVIGACE --- */}
-        <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} onOpenCamera={() => setCameraOpen(true)} />
+        <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} onOpenAddMeal={() => setAddMealOpen(true)} />
       </div>
 
-      {cameraOpen && <CameraModal onClose={() => setCameraOpen(false)} />}
+      {addMealOpen && <AddMealModal onClose={() => setAddMealOpen(false)} />}
     </div>
   );
 }

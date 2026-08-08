@@ -1,14 +1,14 @@
-import { Home, BarChart2, Utensils, User, Camera } from 'lucide-react';
+import { Home, BarChart2, Utensils, User, Plus } from 'lucide-react';
 
 export type NavTab = 'home' | 'stats' | 'recipes' | 'profile';
 
 interface BottomNavProps {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
-  onOpenCamera: () => void;
+  onOpenAddMeal: () => void;
 }
 
-export default function BottomNav({ activeTab, setActiveTab, onOpenCamera }: BottomNavProps) {
+export default function BottomNav({ activeTab, setActiveTab, onOpenAddMeal }: BottomNavProps) {
   const tabs = [
     { id: 'home', label: 'Domů', icon: Home },
     { id: 'stats', label: 'Statistiky', icon: BarChart2 },
@@ -31,13 +31,13 @@ export default function BottomNav({ activeTab, setActiveTab, onOpenCamera }: Bot
         </button>
       ))}
 
-      {/* HLAVNÍ AKČNÍ TLAČÍTKO - Focení / Přidání jídla */}
+      {/* HLAVNÍ AKČNÍ TLAČÍTKO - Přidání jídla (foto / popis / do budoucna hlas) */}
       <div className="relative -top-6">
         <button
-          onClick={onOpenCamera}
+          onClick={onOpenAddMeal}
           className="w-16 h-16 bg-linear-to-tr from-blue-600 to-sky-400 rounded-full flex items-center justify-center text-white shadow-lg shadow-blue-500/30 transform transition-transform active:scale-95 hover:scale-105 border-4 border-white dark:border-slate-900"
         >
-          <Camera className="w-7 h-7" />
+          <Plus className="w-7 h-7" />
         </button>
       </div>
 

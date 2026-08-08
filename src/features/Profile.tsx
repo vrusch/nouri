@@ -7,6 +7,7 @@ import { type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
 import { logWeight, clearMealsBackup } from "../lib/cloudSync";
+import { formatDaysCs } from "../lib/format";
 import { db } from "../db/db";
 import pkg from "../../package.json";
 
@@ -41,11 +42,6 @@ export default function Profile() {
   ];
 
   const reminderOptions = [1, 2, 3, 5, 7];
-  const formatDays = (n: number) => {
-    if (n === 1) return "1 den";
-    if (n >= 2 && n <= 4) return `${n} dny`;
-    return `${n} dní`;
-  };
 
   const activityOptions: { id: UserProfile['activityLevel']; label: string; desc: string }[] = [
     { id: 1.2, label: "Nízká", desc: "Sedavé zaměstnání" },
@@ -308,7 +304,7 @@ export default function Profile() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[15px] font-bold text-slate-800 dark:text-white">
-                Každých {formatDays(profile?.weighInReminderDays ?? 3)}
+                Každých {formatDaysCs(profile?.weighInReminderDays ?? 3)}
               </span>
               <ChevronDown className={`w-4 h-4 ${editing === 'reminder' ? accentText : 'text-slate-400'}`} />
             </div>

@@ -259,6 +259,76 @@ Pokud na fotce není rozpoznatelné jídlo, vrať confidence "low", name "Nezná
   }
 );
 
+export const analyzeFoodText = onCall(
+  { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 30 },
+  async (request) => {
+    requireAuth(request);
+    const description = request.data?.description as string | undefined;
+    if (!description || !description.trim()) {
+      throw new HttpsError("invalid-argument", "Chybí popis jídla.");
+    }
+
+    const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti slovně popíše, co snědl (bez fotky).
+Tvým úkolem je z popisu odhadnout jídlo a jeho nutriční hodnoty pro popsanou porci. Pokud popis neuvádí množství, odhadni typickou porci pro dospělého člověka.
+
+Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný markdown, žádný text okolo):
+{
+  "name": "krátký český název jídla",
+  "calories": číslo (celkové kalorie odhadované porce),
+  "protein": číslo (bílkoviny v gramech),
+  "fat": číslo (tuky v gramech),
+  "carbs": číslo (sacharidy v gramech),
+  "type": "breakfast" | "lunch" | "dinner" | "snack" (odhad podle charakteru jídla),
+  "confidence": "low" | "medium" | "high" (nízká, pokud je popis vágní nebo množství neurčité)
+}
+
+Pokud z popisu nejde rozeznat žádné jídlo, vrať confidence "low", name "Neznámé jídlo" a nulové hodnoty.`;
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: description.trim() },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.3,
+        }),
+      });
+
+      if (response.status === 429) throw new Error("Rate limit exceeded");
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      const content = json.choices?.[0]?.message?.content;
+      if (!content) {
+        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
+        throw new Error("Invalid AI response");
+      }
+
+      const parsed = JSON.parse(content);
+
+      return {
+        name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Neznámé jídlo",
+        calories: Math.max(0, Math.round(Number(parsed.calories) || 0)),
+        protein: Math.max(0, Math.round(Number(parsed.protein) || 0)),
+        fat: Math.max(0, Math.round(Number(parsed.fat) || 0)),
+        carbs: Math.max(0, Math.round(Number(parsed.carbs) || 0)),
+        type: MEAL_TYPES.includes(parsed.type) ? parsed.type : "snack",
+        confidence: CONFIDENCE_LEVELS.includes(parsed.confidence) ? parsed.confidence : "low",
+      };
+    } catch (error) {
+      console.error("Mya Text Analysis Error:", error);
+      return null;
+    }
+  }
+);
+
 interface MealFeedbackInput {
   mealName: string;
   calories: number;
