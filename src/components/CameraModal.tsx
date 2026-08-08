@@ -5,7 +5,7 @@ import { MyaVision, type VisionResult, type MealType } from "../lib/vision";
 import { MyaAI } from "../lib/ai";
 import { backupMeal } from "../lib/cloudSync";
 import { calculateNutrition } from "../lib/nutrition";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 
 interface CameraModalProps {
   onClose: () => void;

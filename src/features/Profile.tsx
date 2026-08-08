@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell } from "lucide-react";
-import { useTheme, type Theme } from "../context/ThemeContext";
-import { useAuth, type UserProfile } from "../context/AuthContext";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, type LucideIcon } from "lucide-react";
+import { useTheme } from "../context/useTheme";
+import { type Theme } from "../context/ThemeContext";
+import { useAuth } from "../context/useAuth";
+import { type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
 import { logWeight, clearMealsBackup } from "../lib/cloudSync";
@@ -26,7 +28,7 @@ export default function Profile() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [showFullReport, setShowFullReport] = useState(false);
 
-  const themeOptions: { id: Theme; label: string; icon: any }[] = [
+  const themeOptions: { id: Theme; label: string; icon: LucideIcon }[] = [
     { id: "light", label: "Světlý", icon: Sun },
     { id: "dark", label: "Tmavý", icon: Moon },
     { id: "system", label: "Systém", icon: Smartphone },
@@ -56,18 +58,18 @@ export default function Profile() {
     if (!tempValue && field === 'name') return setEditing(null);
     if (!tempValue) return setEditing(null);
     
-    let val: any = tempValue;
+    let val: string | number = tempValue;
     if (field === 'weight' || field === 'height') val = Number(tempValue);
 
     const weightChanged = field === 'weight' && val !== profile?.weight;
     await updateProfile({ [field]: val });
-    if (weightChanged && user) {
+    if (weightChanged && user && typeof val === 'number') {
       logWeight(user.uid, val, new Date().toISOString().split('T')[0]);
     }
     setEditing(null);
   };
 
-  const startEdit = (field: string, current: any) => {
+  const startEdit = (field: string, current: unknown) => {
     setEditing(field);
     setTempValue(String(current || ''));
   };

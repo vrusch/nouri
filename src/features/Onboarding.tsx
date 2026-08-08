@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "firebase/auth";
+import { FirebaseError } from "firebase/app";
 import { auth, googleProvider } from "../lib/firebase";
-import { useAuth, type UserProfile } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
+import { type UserProfile } from "../context/AuthContext";
 import { LogoHorizontal } from "../components/Logo";
 import { Ruler, Weight, ChevronRight, LogIn, Mail, Lock, User as UserIcon, Zap, Calendar } from "lucide-react";
 
@@ -33,7 +35,7 @@ export default function Onboarding() {
       setAuthError("");
       await signInWithPopup(auth, googleProvider);
       setStep(1);
-    } catch (error: any) {
+    } catch {
       setAuthError("Přihlášení přes Google selhalo.");
     }
   };
@@ -48,8 +50,10 @@ export default function Onboarding() {
         await signInWithEmailAndPassword(auth, email, password);
       }
       setStep(1);
-    } catch (error: any) {
-      if (error.code === 'auth/email-already-in-use') setAuthError("Tento email se již používá.");
+    } catch (error) {
+      if (!(error instanceof FirebaseError)) {
+        setAuthError("Chyba při přihlašování.");
+      } else if (error.code === 'auth/email-already-in-use') setAuthError("Tento email se již používá.");
       else if (error.code === 'auth/invalid-credential') setAuthError("Nesprávný email nebo heslo.");
       else if (error.code === 'auth/weak-password') setAuthError("Heslo musí mít alespoň 6 znaků.");
       else setAuthError("Chyba při přihlašování.");
@@ -171,10 +175,10 @@ export default function Onboarding() {
             />
           </div>
           <div className="flex gap-4">
-             {['female', 'male'].map((g) => (
+             {(['female', 'male'] as const).map((g) => (
                <button
                  key={g}
-                 onClick={() => setFormData({...formData, gender: g as any})}
+                 onClick={() => setFormData({...formData, gender: g})}
                  className={`flex-1 py-4 rounded-3xl font-bold border-2 transition-all active:scale-[0.97] ${
                    formData.gender === g ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 text-blue-600' : 'border-transparent bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-500'
                  }`}
@@ -260,7 +264,7 @@ export default function Onboarding() {
       { v: 1.375, l: "Lehká", d: "Cvičení 1-3x týdně nebo 10k kroků" },
       { v: 1.55, l: "Střední", d: "Aktivní pohyb 3-5x týdně" },
       { v: 1.725, l: "Vysoká", d: "Denní intenzivní trénink" }
-    ];
+    ] as const;
 
     return (
       <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
@@ -277,7 +281,7 @@ export default function Onboarding() {
              {activities.map((act) => (
                <button
                  key={act.v}
-                 onClick={() => setFormData({...formData, activityLevel: act.v as any})}
+                 onClick={() => setFormData({...formData, activityLevel: act.v})}
                  className={`w-full p-5 rounded-3xl text-left border-2 transition-all active:scale-[0.98] ${
                    formData.activityLevel === act.v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20' : 'border-transparent bg-white dark:bg-slate-900'
                  }`}
@@ -314,14 +318,14 @@ export default function Onboarding() {
           </div>
           
           <div className="space-y-3">
-             {[
+             {([
                {id: 'lose', label: 'Hubnout', sub: 'Chci se cítit lehčeji'},
                {id: 'maintain', label: 'Udržovat', sub: 'Cítím se skvěle, chci tak zůstat'},
                {id: 'gain', label: 'Nabírat', sub: 'Chci víc svalů a síly'}
-             ].map((g) => (
+             ] as const).map((g) => (
                <button
                  key={g.id}
-                 onClick={() => setFormData({...formData, goal: g.id as any})}
+                 onClick={() => setFormData({...formData, goal: g.id})}
                  className={`w-full p-6 rounded-3xl text-left border-2 transition-all active:scale-[0.98] ${
                    formData.goal === g.id ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20' : 'border-transparent bg-white dark:bg-slate-900'
                  }`}

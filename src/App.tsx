@@ -7,7 +7,7 @@ import Stats from "./features/Stats";
 import Recipes from "./features/Recipes";
 import Profile from "./features/Profile";
 import Onboarding from "./features/Onboarding";
-import { useAuth } from "./context/AuthContext";
+import { useAuth } from "./context/useAuth";
 import { fetchLatestWeightLog, hydrateMealsIfEmpty, seedWeightLogIfEmpty } from "./lib/cloudSync";
 import { Bell } from "lucide-react";
 

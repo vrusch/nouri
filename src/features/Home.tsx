@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db/db";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 import { Zap } from "lucide-react";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
@@ -36,13 +36,13 @@ export default function Home() {
         const msg = await MyaAI.getDailyGreeting(profile, { consumedCalories, consumedProtein });
         setGreeting(msg);
         sessionStorage.setItem(cacheKey, msg);
-      } catch (error) {
+      } catch {
         setGreeting(`Ahoj ${profile.name}! Nezapomeň dnes pít hodně vody. ✨`);
       }
     };
 
     fetchGreeting();
-  }, [profile?.name, today, meals.length]);
+  }, [profile, today, meals.length, consumedCalories, consumedProtein]);
 
   return (
     <div className="space-y-6 pt-6 transition-colors">

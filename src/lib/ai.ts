@@ -1,11 +1,11 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase";
 import { type UserProfile } from "../context/AuthContext";
-import { calculateNutrition } from "./nutrition";
+import { calculateNutrition, type NutritionResults } from "./nutrition";
 
 export interface AIResponse {
   text: string;
-  data?: any;
+  data?: NutritionResults;
 }
 
 const generateWelcomeReportFn = httpsCallable<{ profile: UserProfile }, AIResponse>(

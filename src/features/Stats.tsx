@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db/db";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../context/useAuth";
 import { calculateNutrition } from "../lib/nutrition";
 import { fetchWeightLogs, type WeightLogEntry } from "../lib/cloudSync";
 
