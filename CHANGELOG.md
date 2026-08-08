@@ -2,6 +2,13 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.8.0] - 2026-08-08
+### Přidáno
+- **Kontrola verze a auto-aktualizace appky**: appka jako PWA se dřív na telefonu nemohla dostat k nové nasazené verzi (žádný app store update, žádná ruční instalace). Teď se service worker aktivně kontroluje každou hodinu a při každém návratu appky do popředí — jakmile je k dispozici novější verze, zobrazí se banner s tlačítkem "Aktualizovat".
+
+### Opraveno
+- **Všechny ESLint chyby v appce**: `any` typy nahrazeny skutečnými typy (`FirebaseError`, `LucideIcon`, `NutritionResults`), `AuthContext`/`ThemeContext` rozděleny na komponentu a samostatný kontext + hook kvůli React Fast Refresh, odstraněné nepoužité proměnné a doplněné hook závislosti. Čistě typová/strukturální oprava, appka se chová stejně jako předtím.
+
 ## [0.7.0] - 2026-08-07
 ### Přidáno
 - **Cloud záloha jídel**: Write-through zálohování do Firestore (`users/{uid}/meals`) přes stabilní `syncId` (UUID) místo lokálního Dexie `++id` — přežije evikci IndexedDB na iOS. Při prázdné lokální databázi (nový telefon, smazaná data) se historie jednorázově obnoví z cloudu.
