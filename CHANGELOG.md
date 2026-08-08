@@ -2,6 +2,15 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.10.0] - 2026-08-08
+### Přidáno
+- **Adaptivní kalibrace kalorického cíle**: appka teď umí porovnat skutečnou změnu váhy se zapsanými kaloriemi za stejné období a odhadnout reálný denní výdej — přesnější než formulka ze sebehodnocené úrovně aktivity. Návrh se zobrazí ve Statistikách, jakmile je dost dat (aspoň 14 dní mezi reálnými zápisy váhy, aspoň 7 dní se zapsaným jídlem, odchylka nad 10 %). Potvrzená kalibrace se promítne všude — Home, Stats, Profil, AI report i denní pozdrav.
+
+### Opraveno
+- **Připomínka vážení** brala i starý záznam bez rozlišení seed/manual jako reálné vážení — opravena chybná klasifikace.
+- Notifikační okno zvonečku rozšířeno, aby se delší text (dny do vážení) zbytečně nelámal.
+- **Home**: statická hláška "Skvělé tempo!" se dřív zobrazovala i při 0 zapsaných kaloriích za den.
+
 ## [0.9.0] - 2026-08-08
 ### Přidáno
 - **Popis jídla jako AI kanál**: appka teď umí odhadnout kalorie a makra i ze slovního popisu jídla ("Popsat jídlo"), ne jen z fotky — nová Cloud Function `analyzeFoodText` (gpt-4o-mini), vede na stejný editovatelný formulář jako u fotek.
