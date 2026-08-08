@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { Gauge } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
-import { calculateNutrition } from "../lib/nutrition";
+import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
 import { fetchWeightLogs, type WeightLogEntry } from "../lib/cloudSync";
 
 const DAY_LABELS = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
@@ -18,14 +19,17 @@ function lastNDates(n: number): string[] {
 }
 
 export default function Stats() {
-  const { profile, user } = useAuth();
-  const targetCalories = profile ? calculateNutrition(profile).targetCalories : 1800;
+  const { profile, user, updateProfile } = useAuth();
+  const nutrition = profile ? calculateNutrition(profile) : null;
+  const targetCalories = nutrition ? nutrition.targetCalories : 1800;
 
   const days = lastNDates(7);
   const today = days[days.length - 1];
   const [selectedDay, setSelectedDay] = useState<string>(today);
 
-  const meals = useLiveQuery(() => db.meals.where("date").aboveOrEqual(days[0]).toArray()) || [];
+  // Všechna jídla, ne jen posledních 7 dní — kalibrace cíle (níže) potřebuje delší historii.
+  const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
+  const meals = allMeals.filter((m) => m.date >= days[0]);
 
   const [weightLogs, setWeightLogs] = useState<WeightLogEntry[]>([]);
   useEffect(() => {
@@ -57,6 +61,15 @@ export default function Stats() {
   const weightDelta = hasWeightTrend
     ? Math.round((latestWeight.weight - chartWeights[0].weight) * 10) / 10
     : 0;
+
+  const dailyCalories = Array.from(
+    allMeals.reduce((map, m) => map.set(m.date, (map.get(m.date) || 0) + m.value), new Map<string, number>())
+  ).map(([date, calories]) => ({ date, calories }));
+  const manualWeighIns = weightLogs.filter((w) => w.source === "manual");
+  const calibration =
+    profile && nutrition
+      ? calibrateTarget(manualWeighIns, dailyCalories, profile.goal, nutrition.bmr, nutrition.tdee)
+      : null;
 
   return (
     <div className="space-y-6 pt-6 transition-colors">
@@ -162,6 +175,33 @@ export default function Stats() {
           </>
         )}
       </div>
+
+      {/* Kalibrace cíle podle skutečných dat */}
+      {calibration && (
+        <div className="bg-blue-50/50 dark:bg-blue-950/20 rounded-3xl p-6 border border-blue-100/50 dark:border-blue-900/30 transition-colors">
+          <div className="flex items-center gap-2 mb-2">
+            <Gauge className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Kalibrace cíle podle dat</h3>
+          </div>
+          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
+            Za posledních {calibration.daysSpan} dní jsi v průměru jedla {calibration.avgLoggedCalories} kcal/den
+            a váha se změnila o {calibration.weightChangeKg > 0 ? "+" : ""}
+            {calibration.weightChangeKg} kg. Podle toho tvůj skutečný denní výdej vychází spíš na{" "}
+            {calibration.estimatedTDEE} kcal (teď se počítá s {nutrition?.tdee} kcal).
+          </p>
+          <button
+            onClick={() =>
+              updateProfile({
+                calibratedTDEE: calibration.estimatedTDEE,
+                targetCalories: calibration.suggestedTargetCalories,
+              })
+            }
+            className="w-full bg-blue-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all"
+          >
+            Upravit cíl na {calibration.suggestedTargetCalories} kcal
+          </button>
+        </div>
+      )}
     </div>
   );
 }

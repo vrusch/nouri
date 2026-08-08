@@ -14,6 +14,7 @@ interface UserProfileInput {
   activityLevel: number;
   goal: Goal;
   targetCalories: number;
+  calibratedTDEE?: number;
 }
 
 function requireAuth(request: CallableRequest) {
@@ -45,6 +46,7 @@ export const generateWelcomeReport = onCall(
       birthDate: profile.birthDate,
       activityLevel: profile.activityLevel,
       goal: profile.goal,
+      calibratedTDEE: profile.calibratedTDEE,
     });
 
     const age = new Date().getFullYear() - new Date(profile.birthDate).getFullYear();
@@ -136,6 +138,7 @@ export const getDailyGreeting = onCall(
       birthDate: profile.birthDate,
       activityLevel: profile.activityLevel,
       goal: profile.goal,
+      calibratedTDEE: profile.calibratedTDEE,
     }).macros.protein;
     const proteinRemaining = Math.max(0, targetProtein - consumedProtein);
 

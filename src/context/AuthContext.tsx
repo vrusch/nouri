@@ -16,6 +16,7 @@ export interface UserProfile {
   setupComplete: boolean;
   lastAiReport?: string; // Uložený AI report od Myi
   weighInReminderDays?: number; // Jak často připomínat vážení (1-7 dní)
+  calibratedTDEE?: number; // Skutečný výdej odhadnutý z dat (viz Stats.tsx), přepíše formulkový odhad z activityLevel
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

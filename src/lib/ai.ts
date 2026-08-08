@@ -46,7 +46,8 @@ export const MyaAI = {
       height: profile.height,
       birthDate: profile.birthDate,
       activityLevel: profile.activityLevel,
-      goal: profile.goal
+      goal: profile.goal,
+      calibratedTDEE: profile.calibratedTDEE
     });
 
     try {

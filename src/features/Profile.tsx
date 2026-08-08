@@ -134,7 +134,8 @@ export default function Profile() {
     height: profile.height,
     birthDate: profile.birthDate,
     activityLevel: profile.activityLevel,
-    goal: profile.goal
+    goal: profile.goal,
+    calibratedTDEE: profile.calibratedTDEE
   }) : null;
 
   const accentBg = profile?.gender === 'female' ? 'bg-rose-50 dark:bg-rose-900/10' : 'bg-sky-50 dark:bg-sky-900/10';

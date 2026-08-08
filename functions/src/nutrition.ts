@@ -30,6 +30,7 @@ export function calculateNutrition(data: {
   birthDate: string;
   activityLevel: number;
   goal: Goal;
+  calibratedTDEE?: number;
 }): NutritionResults {
   const age = calculateAge(data.birthDate);
 
@@ -40,7 +41,9 @@ export function calculateNutrition(data: {
     bmr -= 161;
   }
 
-  const tdee = Math.round(bmr * data.activityLevel);
+  // Pokud existuje kalibrace ze skutečných dat (viz calibrateTarget v klientském nutrition.ts),
+  // má přednost před formulkovým odhadem z activityLevel.
+  const tdee = data.calibratedTDEE ?? Math.round(bmr * data.activityLevel);
 
   let targetCalories = tdee;
   if (data.goal === "lose") {

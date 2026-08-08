@@ -17,6 +17,22 @@ export interface NutritionResults {
 export type Goal = 'lose' | 'maintain' | 'gain';
 export type Gender = 'male' | 'female';
 
+// Kolik kcal odpovídá změně 1 kg tělesné hmotnosti — běžně používaná aproximace
+// (ve skutečnosti kolísá s podílem tuku/vody, ale pro odhad z reálných dat stačí).
+const KCAL_PER_KG = 7700;
+
+function applyGoalAdjustment(tdee: number, goal: Goal, bmr: number): number {
+  if (goal === 'lose') {
+    const target = tdee - 500; // Standardní deficit pro 0.5kg týdně
+    // Bezpečnostní pojistka: nejdeme pod BMR (nebo pod absolutní minimum)
+    return target < bmr ? Math.round(bmr) : Math.round(target);
+  }
+  if (goal === 'gain') {
+    return Math.round(tdee + 300); // Jemný přebytek pro nabírání svalů
+  }
+  return Math.round(tdee);
+}
+
 /**
  * Vypočítá věk z data narození
  */
@@ -41,6 +57,7 @@ export function calculateNutrition(data: {
   birthDate: string;
   activityLevel: number;
   goal: Goal;
+  calibratedTDEE?: number;
 }): NutritionResults {
   const age = calculateAge(data.birthDate);
 
@@ -52,18 +69,12 @@ export function calculateNutrition(data: {
     bmr -= 161;
   }
 
-  // 2. Výpočet TDEE (Celkový denní výdej)
-  const tdee = Math.round(bmr * data.activityLevel);
+  // 2. Výpočet TDEE (Celkový denní výdej) — pokud existuje kalibrace ze skutečných dat
+  // (viz calibrateTarget níže), má přednost před formulkovým odhadem z activityLevel.
+  const tdee = data.calibratedTDEE ?? Math.round(bmr * data.activityLevel);
 
   // 3. Stanovení cílových kalorií podle cíle
-  let targetCalories = tdee;
-  if (data.goal === 'lose') {
-    targetCalories = tdee - 500; // Standardní deficit pro 0.5kg týdně
-    // Bezpečnostní pojistka: nejdeme pod BMR (nebo pod absolutní minimum)
-    if (targetCalories < bmr) targetCalories = Math.round(bmr);
-  } else if (data.goal === 'gain') {
-    targetCalories = tdee + 300; // Jemný přebytek pro nabírání svalů
-  }
+  const targetCalories = applyGoalAdjustment(tdee, data.goal, bmr);
 
   // 4. Výpočet maker (Makroživin)
   // Bílkoviny: 1.8g - 2.2g na kg váhy (pro hubnutí/svaly)
@@ -87,5 +98,61 @@ export function calculateNutrition(data: {
       fat: fatGrams,
       carbs: carbGrams
     }
+  };
+}
+
+const MIN_CALIBRATION_SPAN_DAYS = 14;
+const MIN_CALIBRATION_LOGGED_DAYS = 7;
+const CALIBRATION_DEVIATION_THRESHOLD = 0.1; // 10 % — pod touhle odchylkou se odhad bere jako "v podstatě sedí"
+
+export interface CalibrationInsight {
+  estimatedTDEE: number;
+  suggestedTargetCalories: number;
+  daysSpan: number;
+  loggedDays: number;
+  avgLoggedCalories: number;
+  weightChangeKg: number;
+}
+
+/**
+ * Odhadne skutečný denní výdej ze skutečných dat (reálné zápisy váhy + zapsaná jídla),
+ * místo spoléhání na formulku + sebehodnocenou úroveň aktivity. Vrací null, pokud není
+ * dost dat na spolehlivý odhad, nebo pokud se odhad od formulky v podstatě neliší.
+ */
+export function calibrateTarget(
+  manualWeighIns: { date: string; weight: number }[],
+  dailyCalories: { date: string; calories: number }[],
+  goal: Goal,
+  bmr: number,
+  formulaTDEE: number
+): CalibrationInsight | null {
+  if (manualWeighIns.length < 2) return null;
+
+  const sorted = [...manualWeighIns].sort((a, b) => a.date.localeCompare(b.date));
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const daysSpan = Math.round((Date.parse(last.date) - Date.parse(first.date)) / 86400000);
+  if (daysSpan < MIN_CALIBRATION_SPAN_DAYS) return null;
+
+  const loggedInWindow = dailyCalories.filter((d) => d.date >= first.date && d.date <= last.date);
+  if (loggedInWindow.length < MIN_CALIBRATION_LOGGED_DAYS) return null;
+
+  const avgLoggedCalories = Math.round(
+    loggedInWindow.reduce((sum, d) => sum + d.calories, 0) / loggedInWindow.length
+  );
+  const weightChangeKg = Math.round((last.weight - first.weight) * 10) / 10;
+  const actualDailyBalance = (weightChangeKg * KCAL_PER_KG) / daysSpan;
+  const estimatedTDEE = Math.round(avgLoggedCalories - actualDailyBalance);
+
+  const deviation = Math.abs(estimatedTDEE - formulaTDEE) / formulaTDEE;
+  if (deviation < CALIBRATION_DEVIATION_THRESHOLD) return null;
+
+  return {
+    estimatedTDEE,
+    suggestedTargetCalories: applyGoalAdjustment(estimatedTDEE, goal, bmr),
+    daysSpan,
+    loggedDays: loggedInWindow.length,
+    avgLoggedCalories,
+    weightChangeKg,
   };
 }
