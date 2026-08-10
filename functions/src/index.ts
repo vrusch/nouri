@@ -398,3 +398,119 @@ Dnes celkem snědeno: ${input.consumedTodayCalories} kcal z cíle ${input.target
     }
   }
 );
+
+interface RecipeInput {
+  remainingCalories: number;
+  remainingProtein: number;
+  remainingFat: number;
+  remainingCarbs: number;
+  goal: Goal;
+  preferences?: string;
+}
+
+interface RecipeResult {
+  name: string;
+  description: string;
+  ingredients: string[];
+  instructions: string[];
+  prepMinutes: number;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+}
+
+const GOAL_LABELS: Record<Goal, string> = {
+  lose: "hubnutí",
+  maintain: "udržování váhy",
+  gain: "nabírání svalové hmoty",
+};
+
+function sanitizeStringList(value: unknown, maxItems: number): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim())
+    .slice(0, maxItems);
+}
+
+export const generateRecipe = onCall(
+  { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 45 },
+  async (request): Promise<RecipeResult | null> => {
+    requireAuth(request);
+    const input = request.data as RecipeInput | undefined;
+    if (!input || !Number.isFinite(input.remainingCalories) || input.remainingCalories <= 0) {
+      throw new HttpsError("invalid-argument", "Chybí platný zbývající kalorický rozpočet.");
+    }
+
+    const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
+
+    const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel chce recept, který mu pomůže
+dojíst zbytek denního nutričního cíle. Navrhni JEDEN recept reálně uvařitelný doma z běžně dostupných surovin,
+jehož nutriční hodnoty (kalorie, bílkoviny, tuky, sacharidy) se co nejvíc blíží zadaným zbývajícím hodnotám —
+klidně mírně pod nimi, ale nikdy výrazně nad.
+
+Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný markdown, žádný text okolo):
+{
+  "name": "krátký český název receptu",
+  "description": "jedna věta, proč recept sedí do zbytku dne",
+  "ingredients": ["surovina s množstvím", ...],
+  "instructions": ["krok 1", "krok 2", ...],
+  "prepMinutes": číslo (odhad doby přípravy v minutách),
+  "calories": číslo,
+  "protein": číslo (g),
+  "fat": číslo (g),
+  "carbs": číslo (g)
+}`;
+
+    const userPrompt = `Zbývá do dnešního cíle: ${Math.round(input.remainingCalories)} kcal, ${Math.round(
+      input.remainingProtein
+    )}g bílkovin, ${Math.round(input.remainingFat)}g tuků, ${Math.round(input.remainingCarbs)}g sacharidů.
+Cíl uživatele: ${goalLabel}.${input.preferences?.trim() ? `\nPreference/omezení: ${input.preferences.trim()}.` : ""}`;
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.7,
+        }),
+      });
+
+      if (response.status === 429) throw new Error("Rate limit exceeded");
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      const content = json.choices?.[0]?.message?.content;
+      if (!content) {
+        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
+        throw new Error("Invalid AI response");
+      }
+
+      const parsed = JSON.parse(content);
+
+      return {
+        name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Recept",
+        description: typeof parsed.description === "string" ? parsed.description.trim() : "",
+        ingredients: sanitizeStringList(parsed.ingredients, 20),
+        instructions: sanitizeStringList(parsed.instructions, 15),
+        prepMinutes: Math.min(240, Math.max(1, Math.round(Number(parsed.prepMinutes) || 20))),
+        calories: Math.max(0, Math.round(Number(parsed.calories) || 0)),
+        protein: Math.max(0, Math.round(Number(parsed.protein) || 0)),
+        fat: Math.max(0, Math.round(Number(parsed.fat) || 0)),
+        carbs: Math.max(0, Math.round(Number(parsed.carbs) || 0)),
+      };
+    } catch (error) {
+      console.error("Mya Recipe Error:", error);
+      return null;
+    }
+  }
+);

@@ -111,6 +111,57 @@ export function getProgressCaption(consumedCalories: number, progressPercent: nu
   return "Skvělé tempo! K obědu si můžeš dát něco vydatnějšího.";
 }
 
+export interface RemainingMacros {
+  calories: number; // signed — může být záporné, pokud je uživatel už nad cílem
+  protein: number;
+  fat: number;
+  carbs: number;
+  hasIncompleteMacroData: boolean; // některé dnešní jídlo nemá zapsané protein/fat/carbs (jen kalorie)
+}
+
+/**
+ * Kolik ještě zbývá do denního cíle — signed, ne Math.max(0, …) jako na Home obrazovce.
+ * Volající strana (např. generátor receptů) musí zápornou/nízkou hodnotu řešit explicitně,
+ * ne ji tiše ořezat na 0 — to by z "300 kcal nad cíl" udělalo "0 kcal zbývá" a AI by
+ * dostala falešný vstup pro nulový recept.
+ */
+export function computeRemainingMacros(
+  target: NutritionResults,
+  todaysMeals: { value: number; protein?: number; fat?: number; carbs?: number }[]
+): RemainingMacros {
+  const consumedCalories = todaysMeals.reduce((sum, m) => sum + m.value, 0);
+  const consumedProtein = todaysMeals.reduce((sum, m) => sum + (m.protein ?? 0), 0);
+  const consumedFat = todaysMeals.reduce((sum, m) => sum + (m.fat ?? 0), 0);
+  const consumedCarbs = todaysMeals.reduce((sum, m) => sum + (m.carbs ?? 0), 0);
+  const hasIncompleteMacroData = todaysMeals.some(
+    (m) => m.protein === undefined || m.fat === undefined || m.carbs === undefined
+  );
+
+  return {
+    calories: target.targetCalories - consumedCalories,
+    protein: target.macros.protein - consumedProtein,
+    fat: target.macros.fat - consumedFat,
+    carbs: target.macros.carbs - consumedCarbs,
+    hasIncompleteMacroData,
+  };
+}
+
+// Pod touhle hranicí zbývajících kalorií už nemá smysl navrhovat plnohodnotný recept.
+const MIN_RECIPE_CALORIES = 200;
+
+export type RecipeAvailability = "ready" | "too-little-remaining" | "over-target";
+
+/**
+ * Rozhodne, jestli má smysl volat AI generátor receptů na základě toho, kolik kalorií
+ * ještě dnes zbývá. Odděleno od Recipes.tsx, ať je hranice (a případ ≤0) testovatelná —
+ * stejná třída chyby, jaká už appku postihla u "Skvělé tempo" při 0 zapsaných kcal.
+ */
+export function getRecipeAvailability(remainingCalories: number): RecipeAvailability {
+  if (remainingCalories <= 0) return "over-target";
+  if (remainingCalories < MIN_RECIPE_CALORIES) return "too-little-remaining";
+  return "ready";
+}
+
 const MIN_CALIBRATION_SPAN_DAYS = 14;
 const MIN_CALIBRATION_LOGGED_DAYS = 7;
 const CALIBRATION_DEVIATION_THRESHOLD = 0.1; // 10 % — pod touhle odchylkou se odhad bere jako "v podstatě sedí"

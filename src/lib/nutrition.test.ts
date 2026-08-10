@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { calculateAge, calculateNutrition, calibrateTarget, getProgressCaption } from "./nutrition";
+import {
+  calculateAge,
+  calculateNutrition,
+  calibrateTarget,
+  getProgressCaption,
+  computeRemainingMacros,
+  getRecipeAvailability,
+  type NutritionResults,
+} from "./nutrition";
 
 function addDays(base: string, days: number): string {
   const d = new Date(`${base}T00:00:00Z`);
@@ -262,5 +270,68 @@ describe("getProgressCaption (regrese: 'Skvělé tempo' při 0 kcal)", () => {
   it("hranice: přesně 80 % ještě nevaruje před večeří (> práh, ne >=)", () => {
     expect(getProgressCaption(1600, 80)).not.toMatch(/večeři/i);
     expect(getProgressCaption(1601, 80.01)).toMatch(/večeři/i);
+  });
+});
+
+describe("computeRemainingMacros", () => {
+  const target: NutritionResults = {
+    bmr: 1400,
+    tdee: 2000,
+    targetCalories: 2000,
+    macros: { protein: 120, fat: 60, carbs: 200 },
+  };
+
+  it("odečte snězené hodnoty od cíle", () => {
+    const result = computeRemainingMacros(target, [
+      { value: 500, protein: 40, fat: 15, carbs: 60 },
+      { value: 300, protein: 20, fat: 10, carbs: 30 },
+    ]);
+    expect(result).toEqual({
+      calories: 1200,
+      protein: 60,
+      fat: 35,
+      carbs: 110,
+      hasIncompleteMacroData: false,
+    });
+  });
+
+  it("vrací signed záporný zbytek, když je uživatel už nad cílem — neořezává na 0", () => {
+    const result = computeRemainingMacros(target, [{ value: 2300, protein: 120, fat: 60, carbs: 200 }]);
+    expect(result.calories).toBe(-300);
+  });
+
+  it("bez zapsaných jídel se remaining rovná celému cíli", () => {
+    const result = computeRemainingMacros(target, []);
+    expect(result).toEqual({ calories: 2000, protein: 120, fat: 60, carbs: 200, hasIncompleteMacroData: false });
+  });
+
+  it("označí neúplná makro data, když jídlo má jen kalorie bez protein/fat/carbs", () => {
+    const result = computeRemainingMacros(target, [{ value: 400 }]);
+    expect(result.hasIncompleteMacroData).toBe(true);
+    // Chybějící makra se počítají jako 0 snězeno, ne jako "neznámo" — zbytek zůstává vysoký.
+    expect(result.protein).toBe(120);
+  });
+});
+
+describe("getRecipeAvailability", () => {
+  it("nad cílem (záporný zbytek) hlásí over-target, ne nulu", () => {
+    expect(getRecipeAvailability(-50)).toBe("over-target");
+  });
+
+  it("přesně 0 zbývajících kalorií je taky over-target", () => {
+    expect(getRecipeAvailability(0)).toBe("over-target");
+  });
+
+  it("málo zbývajících kalorií hlásí too-little-remaining", () => {
+    expect(getRecipeAvailability(150)).toBe("too-little-remaining");
+  });
+
+  it("hranice: přesně 200 kcal už je ready (>= práh)", () => {
+    expect(getRecipeAvailability(200)).toBe("ready");
+    expect(getRecipeAvailability(199)).toBe("too-little-remaining");
+  });
+
+  it("dost zbývajících kalorií hlásí ready", () => {
+    expect(getRecipeAvailability(800)).toBe("ready");
   });
 });
