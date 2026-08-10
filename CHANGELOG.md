@@ -2,6 +2,19 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.12.0] - 2026-08-10
+### Přidáno
+- **Plná obousměrná synchronizace jídel a váhy mezi zařízeními**: živé Firestore listenery (`subscribeMeals`, `subscribeWeightLogs`) nahrazují jednorázové čtení/zálohu — víc otevřených zařízení/tabů vidí zápisy z ostatních bez restartu appky. Firestore offline perzistence: zápisy bez připojení se frontují a odešlou automaticky po obnovení sítě.
+- **AI generátor receptů**: na vyžádání navrhne recept sedící do toho, co ještě zbývá sníst do denního cíle (kalorie/bílkoviny/tuky/sacharidy), podle textového popisu nebo preference.
+- **Smart Fridge**: vyfoť obsah lednice/spíže, Mya z rozpoznaných surovin navrhne recept sedící do zbývajících maker.
+- **Nákupní seznam**: suroviny z vygenerovaného receptu jde přidat do jednoho běžícího nákupního seznamu (koupeno/nekoupeno, mazání), sledovaného živě napříč zařízeními.
+- **Uložené recepty**: recepty jde uložit do trvalé knihovny místo jen vygenerovat a zahodit — prohlížení, mazání a zpětné přidání surovin do nákupního seznamu i odtud.
+- **Voice-to-Log**: nová volba "Namluvit jídlo" u zápisu jídla — Whisper přepíše řeč na text, který appka zpracuje stejnou cestou jako psaný popis, s možností přepis před odesláním zkontrolovat a opravit.
+- **Mya Voice Mode**: tlačítko reproduktoru u denního pozdravu na Home ho přečte nahlas (Web Speech API, česká výslovnost).
+
+### Změněno
+- Cloud Functions runtime upgradován z Node 20 na Node 22 — Node 20 byl mezitím u Firebase označen jako deprecated.
+
 ## [0.11.0] - 2026-08-08
 ### Přidáno
 - **Testovací sada** — appka dřív neměla žádný test. Vitest (`npm test`): 46 unit/regresních testů pro `nutrition.ts`, `format.ts`, `weighIn.ts` a `cloudSync.ts` (mockovaný Firestore), včetně explicitních regresních testů na obě chyby nahlášené v ostrém provozu. Playwright E2E (`npm run test:e2e`): automatizuje ověření adaptivní kalibrace — jednorázový testovací účet, syntetická historie přes reálný appkový kód, kontrola karty a zápisu, úklid po sobě. Běží proti reálnému Firebase, spouští se jen na vyžádání.
