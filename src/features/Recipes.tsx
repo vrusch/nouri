@@ -1,25 +1,54 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ChefHat, Sparkles, Camera, Loader2, Clock, AlertCircle, RefreshCw, ChevronLeft } from "lucide-react";
+import {
+  ChefHat,
+  Sparkles,
+  Camera,
+  Loader2,
+  Clock,
+  AlertCircle,
+  RefreshCw,
+  ChevronLeft,
+  ShoppingCart,
+  CheckCircle2,
+  X,
+} from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, computeRemainingMacros, getRecipeAvailability } from "../lib/nutrition";
 import { MyaRecipes, type RecipeResult } from "../lib/recipes";
 import { fileToCompressedDataUrl } from "../lib/image";
+import {
+  addShoppingListItems,
+  removeShoppingListItem,
+  subscribeShoppingList,
+  toggleShoppingListItem,
+  type ShoppingListEntry,
+} from "../lib/cloudSync";
+import { buildShoppingListItems, countUnbought } from "../lib/shoppingList";
 
 type Status = "idle" | "photo-preview" | "loading" | "result" | "error";
+type View = "generate" | "list";
 
 export default function Recipes() {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [status, setStatus] = useState<Status>("idle");
   const [recipe, setRecipe] = useState<RecipeResult | null>(null);
   const [preferences, setPreferences] = useState("");
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
+  const [view, setView] = useState<View>("generate");
+  const [shoppingList, setShoppingList] = useState<ShoppingListEntry[]>([]);
+  const [addedToList, setAddedToList] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const today = new Date().toISOString().split("T")[0];
   const todaysMeals = useLiveQuery(() => db.meals.where("date").equals(today).toArray()) || [];
+
+  useEffect(() => {
+    if (!user) return;
+    return subscribeShoppingList(user.uid, setShoppingList);
+  }, [user]);
 
   if (!profile) return null;
 
@@ -84,6 +113,7 @@ export default function Recipes() {
     setRecipe(null);
     setPhotoDataUrl(null);
     setPhotoError(null);
+    setAddedToList(false);
     setStatus("idle");
   };
 
@@ -93,11 +123,48 @@ export default function Recipes() {
     setStatus("idle");
   };
 
+  const handleAddToShoppingList = async () => {
+    if (!user || !recipe) return;
+    await addShoppingListItems(user.uid, buildShoppingListItems(recipe));
+    setAddedToList(true);
+  };
+
+  const handleToggleItem = (item: ShoppingListEntry) => {
+    if (!user) return;
+    toggleShoppingListItem(user.uid, item.id, !item.bought);
+  };
+
+  const handleRemoveItem = (item: ShoppingListEntry) => {
+    if (!user) return;
+    removeShoppingListItem(user.uid, item.id);
+  };
+
+  const unboughtCount = countUnbought(shoppingList);
+
   return (
     <div className="space-y-6 pt-6 transition-colors">
-      <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">AI Recepty</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">
+          {view === "list" ? "Nákupní seznam" : "AI Recepty"}
+        </h1>
+        <button
+          onClick={() => setView(view === "list" ? "generate" : "list")}
+          className="relative w-11 h-11 rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 transition-colors"
+        >
+          {view === "list" ? <ChefHat className="w-5 h-5" /> : <ShoppingCart className="w-5 h-5" />}
+          {view === "generate" && unboughtCount > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+              {unboughtCount}
+            </span>
+          )}
+        </button>
+      </div>
 
-      {availability === "over-target" && status === "idle" && (
+      {view === "list" && (
+        <ShoppingListView items={shoppingList} onToggle={handleToggleItem} onRemove={handleRemoveItem} />
+      )}
+
+      {view === "generate" && availability === "over-target" && status === "idle" && (
         <EmptyState
           icon={<ChefHat className="w-7 h-7" />}
           title="Dnešní cíl máš splněný"
@@ -105,7 +172,7 @@ export default function Recipes() {
         />
       )}
 
-      {availability === "too-little-remaining" && status === "idle" && (
+      {view === "generate" && availability === "too-little-remaining" && status === "idle" && (
         <EmptyState
           icon={<ChefHat className="w-7 h-7" />}
           title="Zbývá už jen málo"
@@ -113,7 +180,7 @@ export default function Recipes() {
         />
       )}
 
-      {availability === "ready" && status === "idle" && (
+      {view === "generate" && availability === "ready" && status === "idle" && (
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 space-y-5 transition-colors">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-500 dark:text-blue-400 shrink-0">
@@ -185,7 +252,7 @@ export default function Recipes() {
         </div>
       )}
 
-      {status === "photo-preview" && photoDataUrl && (
+      {view === "generate" && status === "photo-preview" && photoDataUrl && (
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 space-y-4 transition-colors">
           <button
             onClick={handleBackFromPreview}
@@ -205,7 +272,7 @@ export default function Recipes() {
         </div>
       )}
 
-      {status === "loading" && (
+      {view === "generate" && status === "loading" && (
         <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center gap-4 py-16 transition-colors">
           <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
           <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -214,7 +281,7 @@ export default function Recipes() {
         </div>
       )}
 
-      {status === "error" && (
+      {view === "generate" && status === "error" && (
         <div className="space-y-3">
           <EmptyState
             icon={<AlertCircle className="w-7 h-7" />}
@@ -235,7 +302,7 @@ export default function Recipes() {
         </div>
       )}
 
-      {status === "result" && recipe && (
+      {view === "generate" && status === "result" && recipe && (
         <div className="space-y-4">
           <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 space-y-4 transition-colors">
             <div>
@@ -289,6 +356,19 @@ export default function Recipes() {
           </div>
 
           <button
+            onClick={handleAddToShoppingList}
+            disabled={addedToList}
+            className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
+              addedToList
+                ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
+                : "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+            }`}
+          >
+            {addedToList ? <CheckCircle2 className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
+            {addedToList ? "Přidáno do seznamu" : "Přidat do nákupního seznamu"}
+          </button>
+
+          <button
             onClick={handleReset}
             className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all"
           >
@@ -309,6 +389,71 @@ function MacroTile({ label, value, unit }: { label: string; value: number; unit?
         {unit && <span className="text-[10px] font-bold text-slate-400 ml-0.5">{unit}</span>}
       </div>
       <div className="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider mt-0.5">{label}</div>
+    </div>
+  );
+}
+
+function ShoppingListView({
+  items,
+  onToggle,
+  onRemove,
+}: {
+  items: ShoppingListEntry[];
+  onToggle: (item: ShoppingListEntry) => void;
+  onRemove: (item: ShoppingListEntry) => void;
+}) {
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        icon={<ShoppingCart className="w-7 h-7" />}
+        title="Seznam je prázdný"
+        text="Vygeneruj recept a přidej jeho suroviny do nákupního seznamu."
+      />
+    );
+  }
+
+  const groups = new Map<string, ShoppingListEntry[]>();
+  items.forEach((item) => {
+    const group = groups.get(item.recipeName) ?? [];
+    group.push(item);
+    groups.set(item.recipeName, group);
+  });
+
+  return (
+    <div className="space-y-4">
+      {[...groups.entries()].map(([recipeName, groupItems]) => (
+        <div
+          key={recipeName}
+          className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors"
+        >
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">{recipeName}</h3>
+          <ul className="space-y-2.5">
+            {groupItems.map((item) => (
+              <li key={item.id} className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={item.bought}
+                  onChange={() => onToggle(item)}
+                  className="w-5 h-5 rounded accent-blue-600 shrink-0"
+                />
+                <span
+                  className={`flex-1 text-sm ${
+                    item.bought ? "line-through text-slate-400 dark:text-slate-600" : "text-slate-700 dark:text-slate-300"
+                  }`}
+                >
+                  {item.text}
+                </span>
+                <button
+                  onClick={() => onRemove(item)}
+                  className="p-1 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }

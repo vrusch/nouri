@@ -1,6 +1,18 @@
-import { collection, doc, getDocs, onSnapshot, orderBy, query, setDoc, writeBatch, type Unsubscribe } from "firebase/firestore";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  setDoc,
+  writeBatch,
+  type Unsubscribe,
+} from "firebase/firestore";
 import { db as firestoreDb } from "./firebase";
 import { db as dexieDb, type MealItem } from "../db/db";
+import type { ShoppingListItemDraft } from "./shoppingList";
 
 function mealsCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "meals");
@@ -8,6 +20,10 @@ function mealsCollection(uid: string) {
 
 function weightLogsCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "weightLogs");
+}
+
+function shoppingListCollection(uid: string) {
+  return collection(firestoreDb, "users", uid, "shoppingList");
 }
 
 // Odloží cloud zálohu, aby nikdy neblokovala lokální (Dexie) zápis — chyba se jen zaloguje.
@@ -125,4 +141,44 @@ export async function seedWeightLogIfEmpty(uid: string, currentWeight: number): 
   } catch (error) {
     console.error("Založení výchozí váhové historie selhalo:", error);
   }
+}
+
+export interface ShoppingListEntry extends ShoppingListItemDraft {
+  id: string;
+  bought: boolean;
+}
+
+// Živě streamuje users/{uid}/shoppingList — jeden běžící nákupní seznam napříč recepty,
+// stejný vzor jako subscribeWeightLogs (malá kolekce, čte se na jednom místě, žádná
+// lokální Dexie cache navíc).
+export function subscribeShoppingList(
+  uid: string,
+  callback: (items: ShoppingListEntry[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  return onSnapshot(
+    shoppingListCollection(uid),
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...(d.data() as ShoppingListItemDraft & { bought: boolean }) }))),
+    (error) => {
+      console.error("Synchronizace nákupního seznamu selhala:", error);
+      onError?.(error);
+    }
+  );
+}
+
+export async function addShoppingListItems(uid: string, items: ShoppingListItemDraft[]): Promise<void> {
+  if (items.length === 0) return;
+  const batch = writeBatch(firestoreDb);
+  items.forEach((item) => {
+    batch.set(doc(shoppingListCollection(uid)), { text: item.text, recipeName: item.recipeName, bought: false });
+  });
+  await batch.commit();
+}
+
+export async function toggleShoppingListItem(uid: string, itemId: string, bought: boolean): Promise<void> {
+  await setDoc(doc(shoppingListCollection(uid), itemId), { bought }, { merge: true });
+}
+
+export async function removeShoppingListItem(uid: string, itemId: string): Promise<void> {
+  await deleteDoc(doc(shoppingListCollection(uid), itemId));
 }

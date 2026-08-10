@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.mock("./firebase", () => ({ db: {} }));
 vi.mock("firebase/firestore", () => ({
   collection: vi.fn(() => "mock-collection"),
-  doc: vi.fn((_collection: unknown, id: string) => `mock-doc:${id}`),
+  deleteDoc: vi.fn(),
+  doc: vi.fn((_collection: unknown, id?: string) => (id === undefined ? "mock-doc:auto" : `mock-doc:${id}`)),
   getDocs: vi.fn(),
   setDoc: vi.fn(),
   onSnapshot: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock("firebase/firestore", () => ({
 }));
 
 import { collection, doc, getDocs, onSnapshot, orderBy, setDoc } from "firebase/firestore";
-import { logWeight, seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs } from "./cloudSync";
+import { logWeight, seedWeightLogIfEmpty, subscribeMeals, subscribeShoppingList, subscribeWeightLogs } from "./cloudSync";
 import { db as dexieDb, type MealItem } from "../db/db";
 
 type SnapshotHandler = (snap: { docChanges(): unknown[] }) => void;
@@ -173,5 +174,27 @@ describe("subscribeWeightLogs", () => {
   it("řadí dotaz podle data vzestupně", () => {
     subscribeWeightLogs("uid1", vi.fn());
     expect(orderBy).toHaveBeenCalledWith("date", "asc");
+  });
+});
+
+describe("subscribeShoppingList", () => {
+  it("zavolá callback s položkami včetně doc id při každém snímku", () => {
+    const callback = vi.fn();
+    subscribeShoppingList("uid1", callback);
+
+    const onNext = vi.mocked(onSnapshot).mock.calls.at(-1)?.[1] as (snap: {
+      docs: { id: string; data(): unknown }[];
+    }) => void;
+    onNext({
+      docs: [
+        { id: "item-1", data: () => ({ text: "200g cizrny", recipeName: "Cizrnové kari", bought: false }) },
+        { id: "item-2", data: () => ({ text: "1 cibule", recipeName: "Cizrnové kari", bought: true }) },
+      ],
+    });
+
+    expect(callback).toHaveBeenCalledWith([
+      { id: "item-1", text: "200g cizrny", recipeName: "Cizrnové kari", bought: false },
+      { id: "item-2", text: "1 cibule", recipeName: "Cizrnové kari", bought: true },
+    ]);
   });
 });
