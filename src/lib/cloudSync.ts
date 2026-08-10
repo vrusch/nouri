@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, limit, orderBy, query, setDoc, writeBatch } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, orderBy, query, setDoc, writeBatch, type Unsubscribe } from "firebase/firestore";
 import { db as firestoreDb } from "./firebase";
 import { db as dexieDb, type MealItem } from "../db/db";
 
@@ -36,21 +36,42 @@ export async function clearMealsBackup(uid: string): Promise<void> {
   }
 }
 
-// Jednorázová obnova pro případ, kdy je lokální Dexie prázdná (např. po evikci
-// IndexedDB na iOS nebo po přeinstalaci) — natáhne historii zpět z cloudové zálohy.
-export async function hydrateMealsIfEmpty(uid: string): Promise<void> {
-  try {
-    const localCount = await dexieDb.meals.count();
-    if (localCount > 0) return;
+// Živě zrcadlí users/{uid}/meals do lokální Dexie — nahrazuje starší jednorázový
+// hydrateMealsIfEmpty (první snímek listeneru dorazí se všemi existujícími dokumenty,
+// takže obnova prázdné lokální DB funguje stejně, jen appka navíc zůstává v syncu
+// průběžně i mezi víc zařízeními/taby). Upsertuje/maže podle syncId, ne podle Dexie id,
+// protože to je jediný identifikátor sdílený mezi lokální DB a cloudem.
+export function subscribeMeals(uid: string, onError?: (error: unknown) => void): Unsubscribe {
+  return onSnapshot(
+    mealsCollection(uid),
+    (snap) => {
+      snap.docChanges().forEach((change) => {
+        const meal = change.doc.data() as MealItem;
+        if (!meal.syncId) return;
 
-    const snap = await getDocs(mealsCollection(uid));
-    if (snap.empty) return;
+        if (change.type === "removed") {
+          dexieDb.meals.where("syncId").equals(meal.syncId).delete();
+          return;
+        }
 
-    const meals = snap.docs.map((d) => d.data() as MealItem);
-    await dexieDb.meals.bulkAdd(meals);
-  } catch (error) {
-    console.error("Obnova jídel z cloudu selhala:", error);
-  }
+        dexieDb.meals
+          .where("syncId")
+          .equals(meal.syncId)
+          .first()
+          .then((existing) => {
+            if (existing?.id !== undefined) {
+              dexieDb.meals.update(existing.id, meal);
+            } else {
+              dexieDb.meals.add(meal);
+            }
+          });
+      });
+    },
+    (error) => {
+      console.error("Synchronizace jídel selhala:", error);
+      onError?.(error);
+    }
+  );
 }
 
 // Doc id = datum (YYYY-MM-DD), takže oprava překlepu ve stejný den přepíše
@@ -74,27 +95,23 @@ export interface WeightLogEntry {
   source?: "seed" | "manual";
 }
 
-export async function fetchWeightLogs(uid: string): Promise<WeightLogEntry[]> {
-  try {
-    const q = query(weightLogsCollection(uid), orderBy("date", "asc"));
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => d.data() as WeightLogEntry);
-  } catch (error) {
-    console.error("Načtení historie váhy selhalo:", error);
-    return [];
-  }
-}
-
-// Jen poslední záznam — pro rychlou kontrolu "je vážení po termínu?" bez tažení celé historie.
-export async function fetchLatestWeightLog(uid: string): Promise<WeightLogEntry | null> {
-  try {
-    const q = query(weightLogsCollection(uid), orderBy("date", "desc"), limit(1));
-    const snap = await getDocs(q);
-    return snap.empty ? null : (snap.docs[0].data() as WeightLogEntry);
-  } catch (error) {
-    console.error("Načtení posledního záznamu váhy selhalo:", error);
-    return null;
-  }
+// Živě streamuje users/{uid}/weightLogs (řazeno podle data) — nahrazuje starší
+// jednorázové fetchWeightLogs/fetchLatestWeightLog, ať trend i připomínka vážení
+// reagují na zápis z jiného zařízení bez nutnosti appku restartovat.
+export function subscribeWeightLogs(
+  uid: string,
+  callback: (entries: WeightLogEntry[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(weightLogsCollection(uid), orderBy("date", "asc"));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => d.data() as WeightLogEntry)),
+    (error) => {
+      console.error("Synchronizace historie váhy selhala:", error);
+      onError?.(error);
+    }
+  );
 }
 
 // Založí první bod váhové historie z aktuální hodnoty v profilu, pokud appka

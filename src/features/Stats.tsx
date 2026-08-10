@@ -4,7 +4,7 @@ import { Gauge } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
-import { fetchWeightLogs, type WeightLogEntry } from "../lib/cloudSync";
+import { subscribeWeightLogs, type WeightLogEntry } from "../lib/cloudSync";
 
 const DAY_LABELS = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
 
@@ -34,7 +34,7 @@ export default function Stats() {
   const [weightLogs, setWeightLogs] = useState<WeightLogEntry[]>([]);
   useEffect(() => {
     if (!user) return;
-    fetchWeightLogs(user.uid).then(setWeightLogs);
+    return subscribeWeightLogs(user.uid, setWeightLogs);
   }, [user]);
 
   const totalsByDay = new Map<string, number>(days.map((d) => [d, 0]));

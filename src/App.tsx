@@ -8,7 +8,7 @@ import Recipes from "./features/Recipes";
 import Profile from "./features/Profile";
 import Onboarding from "./features/Onboarding";
 import { useAuth } from "./context/useAuth";
-import { fetchLatestWeightLog, hydrateMealsIfEmpty, seedWeightLogIfEmpty } from "./lib/cloudSync";
+import { seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs } from "./lib/cloudSync";
 import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
 import { Bell } from "lucide-react";
@@ -25,15 +25,30 @@ export default function App() {
   useEffect(() => {
     if (!user || !profile?.setupComplete) return;
     const uid = user.uid;
+    let unsubscribeMeals: (() => void) | undefined;
+    let unsubscribeWeights: (() => void) | undefined;
+    let cancelled = false;
 
     (async () => {
-      await hydrateMealsIfEmpty(uid);
       await seedWeightLogIfEmpty(uid, profile.weight);
-      const latest = await fetchLatestWeightLog(uid);
-      const status = computeWeighInStatus(latest, reminderDays);
-      setDaysSinceWeighIn(status.daysSinceWeighIn);
-      setWeighInOverdue(status.weighInOverdue);
+      if (cancelled) return;
+
+      // Živé listenery místo jednorázového čtení — appka se drží v syncu i s dalšími
+      // zařízeními/taby, dokud běží (Fáze 5 synchronizace, viz REFERENCE/IMPLEMENTATION_PLAN.md).
+      unsubscribeMeals = subscribeMeals(uid);
+      unsubscribeWeights = subscribeWeightLogs(uid, (entries) => {
+        const latest = entries.length > 0 ? entries[entries.length - 1] : null;
+        const status = computeWeighInStatus(latest, reminderDays);
+        setDaysSinceWeighIn(status.daysSinceWeighIn);
+        setWeighInOverdue(status.weighInOverdue);
+      });
     })();
+
+    return () => {
+      cancelled = true;
+      unsubscribeMeals?.();
+      unsubscribeWeights?.();
+    };
   }, [user, profile?.setupComplete, profile?.weight, reminderDays]);
 
   if (loading) {
