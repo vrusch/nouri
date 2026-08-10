@@ -9,8 +9,12 @@ import {
   AlertCircle,
   RefreshCw,
   ChevronLeft,
+  ChevronDown,
+  ChevronUp,
   ShoppingCart,
+  BookMarked,
   CheckCircle2,
+  Trash2,
   X,
 } from "lucide-react";
 import { db } from "../db/db";
@@ -20,26 +24,40 @@ import { MyaRecipes, type RecipeResult } from "../lib/recipes";
 import { fileToCompressedDataUrl } from "../lib/image";
 import {
   addShoppingListItems,
+  deleteSavedRecipe,
   removeShoppingListItem,
+  saveRecipe,
+  subscribeSavedRecipes,
   subscribeShoppingList,
   toggleShoppingListItem,
+  type SavedRecipeEntry,
   type ShoppingListEntry,
 } from "../lib/cloudSync";
 import { buildShoppingListItems, countUnbought } from "../lib/shoppingList";
 
 type Status = "idle" | "photo-preview" | "loading" | "result" | "error";
-type View = "generate" | "list";
+type View = "generate" | "saved" | "list";
+
+const VIEW_OPTIONS: { id: View; label: string }[] = [
+  { id: "generate", label: "Generovat" },
+  { id: "saved", label: "Uložené" },
+  { id: "list", label: "Seznam" },
+];
 
 export default function Recipes() {
   const { profile, user } = useAuth();
   const [status, setStatus] = useState<Status>("idle");
   const [recipe, setRecipe] = useState<RecipeResult | null>(null);
+  const [recipeSource, setRecipeSource] = useState<"text" | "photo">("text");
   const [preferences, setPreferences] = useState("");
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [view, setView] = useState<View>("generate");
   const [shoppingList, setShoppingList] = useState<ShoppingListEntry[]>([]);
+  const [savedRecipes, setSavedRecipes] = useState<SavedRecipeEntry[]>([]);
   const [addedToList, setAddedToList] = useState(false);
+  const [savedToLibrary, setSavedToLibrary] = useState(false);
+  const [expandedSavedId, setExpandedSavedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const today = new Date().toISOString().split("T")[0];
@@ -48,6 +66,11 @@ export default function Recipes() {
   useEffect(() => {
     if (!user) return;
     return subscribeShoppingList(user.uid, setShoppingList);
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    return subscribeSavedRecipes(user.uid, setSavedRecipes);
   }, [user]);
 
   if (!profile) return null;
@@ -68,6 +91,7 @@ export default function Recipes() {
     });
     if (result) {
       setRecipe(result);
+      setRecipeSource("text");
       setStatus("result");
     } else {
       setStatus("error");
@@ -103,6 +127,7 @@ export default function Recipes() {
     });
     if (result) {
       setRecipe(result);
+      setRecipeSource("photo");
       setStatus("result");
     } else {
       setStatus("error");
@@ -114,6 +139,7 @@ export default function Recipes() {
     setPhotoDataUrl(null);
     setPhotoError(null);
     setAddedToList(false);
+    setSavedToLibrary(false);
     setStatus("idle");
   };
 
@@ -123,10 +149,15 @@ export default function Recipes() {
     setStatus("idle");
   };
 
-  const handleAddToShoppingList = async () => {
+  const handleAddToShoppingList = async (recipeToAdd: RecipeResult) => {
+    if (!user) return;
+    await addShoppingListItems(user.uid, buildShoppingListItems(recipeToAdd));
+  };
+
+  const handleSaveRecipe = async () => {
     if (!user || !recipe) return;
-    await addShoppingListItems(user.uid, buildShoppingListItems(recipe));
-    setAddedToList(true);
+    await saveRecipe(user.uid, recipe, recipeSource);
+    setSavedToLibrary(true);
   };
 
   const handleToggleItem = (item: ShoppingListEntry) => {
@@ -139,29 +170,51 @@ export default function Recipes() {
     removeShoppingListItem(user.uid, item.id);
   };
 
+  const handleDeleteSavedRecipe = (id: string) => {
+    if (!user) return;
+    if (expandedSavedId === id) setExpandedSavedId(null);
+    deleteSavedRecipe(user.uid, id);
+  };
+
   const unboughtCount = countUnbought(shoppingList);
 
   return (
     <div className="space-y-6 pt-6 transition-colors">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">
-          {view === "list" ? "Nákupní seznam" : "AI Recepty"}
-        </h1>
-        <button
-          onClick={() => setView(view === "list" ? "generate" : "list")}
-          className="relative w-11 h-11 rounded-2xl bg-white dark:bg-slate-900 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center justify-center text-slate-500 dark:text-slate-400 transition-colors"
-        >
-          {view === "list" ? <ChefHat className="w-5 h-5" /> : <ShoppingCart className="w-5 h-5" />}
-          {view === "generate" && unboughtCount > 0 && (
-            <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
-              {unboughtCount}
-            </span>
-          )}
-        </button>
+      <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">AI Recepty</h1>
+
+      <div className="flex bg-slate-50 dark:bg-slate-800 p-1 rounded-2xl gap-1 border border-slate-100 dark:border-slate-700 transition-colors">
+        {VIEW_OPTIONS.map((opt) => (
+          <button
+            key={opt.id}
+            onClick={() => setView(opt.id)}
+            className={`relative flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${
+              view === opt.id
+                ? "bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-white"
+                : "text-slate-400 dark:text-slate-500"
+            }`}
+          >
+            {opt.label}
+            {opt.id === "list" && unboughtCount > 0 && (
+              <span className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+                {unboughtCount}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
       {view === "list" && (
         <ShoppingListView items={shoppingList} onToggle={handleToggleItem} onRemove={handleRemoveItem} />
+      )}
+
+      {view === "saved" && (
+        <SavedRecipesView
+          recipes={savedRecipes}
+          expandedId={expandedSavedId}
+          onToggleExpand={(id) => setExpandedSavedId(expandedSavedId === id ? null : id)}
+          onAddToShoppingList={handleAddToShoppingList}
+          onDelete={handleDeleteSavedRecipe}
+        />
       )}
 
       {view === "generate" && availability === "over-target" && status === "idle" && (
@@ -304,69 +357,40 @@ export default function Recipes() {
 
       {view === "generate" && status === "result" && recipe && (
         <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 space-y-4 transition-colors">
-            <div>
-              <h2 className="font-bold text-lg text-slate-800 dark:text-white">{recipe.name}</h2>
-              {recipe.description && (
-                <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{recipe.description}</p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 dark:text-slate-500">
-              <Clock className="w-3.5 h-3.5" />
-              {recipe.prepMinutes} min
-            </div>
-
-            <div className="grid grid-cols-4 gap-2 text-center">
-              <MacroTile label="Kcal" value={recipe.calories} />
-              <MacroTile label="Bílkoviny" value={recipe.protein} unit="g" />
-              <MacroTile label="Tuky" value={recipe.fat} unit="g" />
-              <MacroTile label="Sacharidy" value={recipe.carbs} unit="g" />
-            </div>
-
-            {recipe.ingredients.length > 0 && (
-              <div>
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Suroviny</h3>
-                <ul className="space-y-1.5">
-                  {recipe.ingredients.map((item, i) => (
-                    <li key={i} className="text-sm text-slate-700 dark:text-slate-300 flex gap-2">
-                      <span className="text-blue-400">•</span>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {recipe.instructions.length > 0 && (
-              <div>
-                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Postup</h3>
-                <ol className="space-y-2">
-                  {recipe.instructions.map((step, i) => (
-                    <li key={i} className="text-sm text-slate-700 dark:text-slate-300 flex gap-3">
-                      <span className="shrink-0 w-5 h-5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400 text-xs font-bold flex items-center justify-center">
-                        {i + 1}
-                      </span>
-                      {step}
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            )}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+            <RecipeCard recipe={recipe} />
           </div>
 
-          <button
-            onClick={handleAddToShoppingList}
-            disabled={addedToList}
-            className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
-              addedToList
-                ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
-                : "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
-            }`}
-          >
-            {addedToList ? <CheckCircle2 className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
-            {addedToList ? "Přidáno do seznamu" : "Přidat do nákupního seznamu"}
-          </button>
+          <div className="flex gap-2.5">
+            <button
+              onClick={handleSaveRecipe}
+              disabled={savedToLibrary}
+              className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
+                savedToLibrary
+                  ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
+                  : "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+              }`}
+            >
+              {savedToLibrary ? <CheckCircle2 className="w-4 h-4" /> : <BookMarked className="w-4 h-4" />}
+              {savedToLibrary ? "Uloženo" : "Uložit recept"}
+            </button>
+
+            <button
+              onClick={async () => {
+                await handleAddToShoppingList(recipe);
+                setAddedToList(true);
+              }}
+              disabled={addedToList}
+              className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
+                addedToList
+                  ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
+                  : "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+              }`}
+            >
+              {addedToList ? <CheckCircle2 className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
+              {addedToList ? "Přidáno" : "Do seznamu"}
+            </button>
+          </div>
 
           <button
             onClick={handleReset}
@@ -375,6 +399,61 @@ export default function Recipes() {
             <RefreshCw className="w-4 h-4" />
             Zkusit jiný recept
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RecipeCard({ recipe }: { recipe: RecipeResult }) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-bold text-lg text-slate-800 dark:text-white">{recipe.name}</h2>
+        {recipe.description && (
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{recipe.description}</p>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 dark:text-slate-500">
+        <Clock className="w-3.5 h-3.5" />
+        {recipe.prepMinutes} min
+      </div>
+
+      <div className="grid grid-cols-4 gap-2 text-center">
+        <MacroTile label="Kcal" value={recipe.calories} />
+        <MacroTile label="Bílkoviny" value={recipe.protein} unit="g" />
+        <MacroTile label="Tuky" value={recipe.fat} unit="g" />
+        <MacroTile label="Sacharidy" value={recipe.carbs} unit="g" />
+      </div>
+
+      {recipe.ingredients.length > 0 && (
+        <div>
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Suroviny</h3>
+          <ul className="space-y-1.5">
+            {recipe.ingredients.map((item, i) => (
+              <li key={i} className="text-sm text-slate-700 dark:text-slate-300 flex gap-2">
+                <span className="text-blue-400">•</span>
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {recipe.instructions.length > 0 && (
+        <div>
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Postup</h3>
+          <ol className="space-y-2">
+            {recipe.instructions.map((step, i) => (
+              <li key={i} className="text-sm text-slate-700 dark:text-slate-300 flex gap-3">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400 text-xs font-bold flex items-center justify-center">
+                  {i + 1}
+                </span>
+                {step}
+              </li>
+            ))}
+          </ol>
         </div>
       )}
     </div>
@@ -454,6 +533,83 @@ function ShoppingListView({
           </ul>
         </div>
       ))}
+    </div>
+  );
+}
+
+function SavedRecipesView({
+  recipes,
+  expandedId,
+  onToggleExpand,
+  onAddToShoppingList,
+  onDelete,
+}: {
+  recipes: SavedRecipeEntry[];
+  expandedId: string | null;
+  onToggleExpand: (id: string) => void;
+  onAddToShoppingList: (recipe: RecipeResult) => Promise<void>;
+  onDelete: (id: string) => void;
+}) {
+  if (recipes.length === 0) {
+    return (
+      <EmptyState
+        icon={<BookMarked className="w-7 h-7" />}
+        title="Zatím nemáš žádné uložené recepty"
+        text="Vygeneruj recept v záložce Generovat a ulož si ho na později."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {recipes.map((entry) => {
+        const expanded = expandedId === entry.id;
+        return (
+          <div
+            key={entry.id}
+            className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden transition-colors"
+          >
+            <button
+              onClick={() => onToggleExpand(entry.id)}
+              className="w-full flex items-center justify-between gap-3 p-5 text-left"
+            >
+              <div className="min-w-0">
+                <h3 className="font-bold text-slate-800 dark:text-white truncate">{entry.name}</h3>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                  {entry.calories} kcal · {entry.prepMinutes} min
+                </p>
+              </div>
+              {expanded ? (
+                <ChevronUp className="w-5 h-5 text-slate-400 shrink-0" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-slate-400 shrink-0" />
+              )}
+            </button>
+
+            {expanded && (
+              <div className="px-5 pb-5 space-y-4">
+                <RecipeCard recipe={entry} />
+                <div className="flex gap-2.5">
+                  <button
+                    onClick={() => onAddToShoppingList(entry)}
+                    className="flex-1 flex items-center justify-center gap-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 py-3 rounded-2xl font-bold active:scale-[0.98] transition-all"
+                  >
+                    <ShoppingCart className="w-4 h-4" />
+                    Do seznamu
+                  </button>
+                  <button
+                    onClick={() => onDelete(entry.id)}
+                    className="flex-1 flex items-center justify-center gap-2 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 py-3 rounded-2xl font-bold active:scale-[0.98] transition-all"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Smazat
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

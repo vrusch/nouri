@@ -15,7 +15,14 @@ vi.mock("firebase/firestore", () => ({
 }));
 
 import { collection, doc, getDocs, onSnapshot, orderBy, setDoc } from "firebase/firestore";
-import { logWeight, seedWeightLogIfEmpty, subscribeMeals, subscribeShoppingList, subscribeWeightLogs } from "./cloudSync";
+import {
+  logWeight,
+  seedWeightLogIfEmpty,
+  subscribeMeals,
+  subscribeSavedRecipes,
+  subscribeShoppingList,
+  subscribeWeightLogs,
+} from "./cloudSync";
 import { db as dexieDb, type MealItem } from "../db/db";
 
 type SnapshotHandler = (snap: { docChanges(): unknown[] }) => void;
@@ -196,5 +203,45 @@ describe("subscribeShoppingList", () => {
       { id: "item-1", text: "200g cizrny", recipeName: "Cizrnové kari", bought: false },
       { id: "item-2", text: "1 cibule", recipeName: "Cizrnové kari", bought: true },
     ]);
+  });
+});
+
+describe("subscribeSavedRecipes", () => {
+  it("zavolá callback s recepty včetně doc id při každém snímku", () => {
+    const callback = vi.fn();
+    subscribeSavedRecipes("uid1", callback);
+
+    const onNext = vi.mocked(onSnapshot).mock.calls.at(-1)?.[1] as (snap: {
+      docs: { id: string; data(): unknown }[];
+    }) => void;
+    onNext({
+      docs: [
+        {
+          id: "recipe-1",
+          data: () => ({
+            name: "Cizrnové kari",
+            description: "",
+            ingredients: ["200g cizrny"],
+            instructions: ["Uvař cizrnu."],
+            prepMinutes: 30,
+            calories: 400,
+            protein: 20,
+            fat: 10,
+            carbs: 50,
+            source: "text",
+            savedAt: "2026-08-10T10:00:00.000Z",
+          }),
+        },
+      ],
+    });
+
+    expect(callback).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "recipe-1", name: "Cizrnové kari", source: "text" }),
+    ]);
+  });
+
+  it("řadí dotaz podle savedAt sestupně (nejnovější první)", () => {
+    subscribeSavedRecipes("uid1", vi.fn());
+    expect(orderBy).toHaveBeenCalledWith("savedAt", "desc");
   });
 });

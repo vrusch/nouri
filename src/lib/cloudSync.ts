@@ -13,6 +13,7 @@ import {
 import { db as firestoreDb } from "./firebase";
 import { db as dexieDb, type MealItem } from "../db/db";
 import type { ShoppingListItemDraft } from "./shoppingList";
+import type { RecipeResult } from "./recipes";
 
 function mealsCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "meals");
@@ -24,6 +25,10 @@ function weightLogsCollection(uid: string) {
 
 function shoppingListCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "shoppingList");
+}
+
+function savedRecipesCollection(uid: string) {
+  return collection(firestoreDb, "users", uid, "savedRecipes");
 }
 
 // Odloží cloud zálohu, aby nikdy neblokovala lokální (Dexie) zápis — chyba se jen zaloguje.
@@ -181,4 +186,38 @@ export async function toggleShoppingListItem(uid: string, itemId: string, bought
 
 export async function removeShoppingListItem(uid: string, itemId: string): Promise<void> {
   await deleteDoc(doc(shoppingListCollection(uid), itemId));
+}
+
+export interface SavedRecipeEntry extends RecipeResult {
+  id: string;
+  savedAt: string;
+  source: "text" | "photo";
+}
+
+// Živě streamuje users/{uid}/savedRecipes, nejnovější první — knihovna receptů, kterou
+// appka nabízela jen efemérně (ve stavu komponenty), dokud appka neuměla recept uložit.
+// Stejný vzor jako subscribeShoppingList/subscribeWeightLogs — žádná Dexie cache.
+export function subscribeSavedRecipes(
+  uid: string,
+  callback: (recipes: SavedRecipeEntry[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(savedRecipesCollection(uid), orderBy("savedAt", "desc"));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SavedRecipeEntry, "id">) }))),
+    (error) => {
+      console.error("Synchronizace uložených receptů selhala:", error);
+      onError?.(error);
+    }
+  );
+}
+
+export async function saveRecipe(uid: string, recipe: RecipeResult, source: "text" | "photo"): Promise<void> {
+  const entry: Omit<SavedRecipeEntry, "id"> = { ...recipe, source, savedAt: new Date().toISOString() };
+  await setDoc(doc(savedRecipesCollection(uid)), entry);
+}
+
+export async function deleteSavedRecipe(uid: string, id: string): Promise<void> {
+  await deleteDoc(doc(savedRecipesCollection(uid), id));
 }
