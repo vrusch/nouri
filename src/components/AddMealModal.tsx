@@ -5,6 +5,7 @@ import { MyaVision, type VisionResult, type MealType } from "../lib/vision";
 import { MyaAI } from "../lib/ai";
 import { backupMeal } from "../lib/cloudSync";
 import { calculateNutrition } from "../lib/nutrition";
+import { fileToCompressedDataUrl } from "../lib/image";
 import { useAuth } from "../context/useAuth";
 
 interface AddMealModalProps {
@@ -31,34 +32,6 @@ function guessMealType(): MealType {
 function currentTime(): string {
   const now = new Date();
   return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-}
-
-function fileToCompressedDataUrl(file: File, maxDim = 1024, quality = 0.82): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = () => reject(new Error("Nepodařilo se načíst obrázek"));
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          const scale = maxDim / Math.max(width, height);
-          width = Math.round(width * scale);
-          height = Math.round(height * scale);
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return reject(new Error("Canvas není podporován"));
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
 }
 
 export default function AddMealModal({ onClose }: AddMealModalProps) {

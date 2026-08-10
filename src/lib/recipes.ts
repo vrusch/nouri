@@ -23,7 +23,15 @@ export interface GenerateRecipeInput {
   preferences?: string;
 }
 
+export interface GenerateRecipeFromFridgeInput extends GenerateRecipeInput {
+  imageDataUrl: string;
+}
+
 const generateRecipeFn = httpsCallable<GenerateRecipeInput, RecipeResult | null>(functions, "generateRecipe");
+const generateRecipeFromFridgeFn = httpsCallable<GenerateRecipeFromFridgeInput, RecipeResult | null>(
+  functions,
+  "generateRecipeFromFridge"
+);
 
 export const MyaRecipes = {
   /**
@@ -36,6 +44,20 @@ export const MyaRecipes = {
       return response.data;
     } catch (error) {
       console.error("Mya Recipe Error:", error);
+      return null;
+    }
+  },
+
+  /**
+   * Rozpozná suroviny z fotky lednice/spíže a vygeneruje recept sedící do zbývajících maker.
+   * Vrací null jak při chybě, tak když Mya na fotce nerozpozná použitelné suroviny.
+   */
+  async generateRecipeFromFridgePhoto(input: GenerateRecipeFromFridgeInput): Promise<RecipeResult | null> {
+    try {
+      const response = await generateRecipeFromFridgeFn(input);
+      return response.data;
+    } catch (error) {
+      console.error("Mya Fridge Recipe Error:", error);
       return null;
     }
   },

@@ -434,6 +434,20 @@ function sanitizeStringList(value: unknown, maxItems: number): string[] {
     .slice(0, maxItems);
 }
 
+function sanitizeRecipeResult(parsed: Record<string, unknown>): RecipeResult {
+  return {
+    name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Recept",
+    description: typeof parsed.description === "string" ? parsed.description.trim() : "",
+    ingredients: sanitizeStringList(parsed.ingredients, 20),
+    instructions: sanitizeStringList(parsed.instructions, 15),
+    prepMinutes: Math.min(240, Math.max(1, Math.round(Number(parsed.prepMinutes) || 20))),
+    calories: Math.max(0, Math.round(Number(parsed.calories) || 0)),
+    protein: Math.max(0, Math.round(Number(parsed.protein) || 0)),
+    fat: Math.max(0, Math.round(Number(parsed.fat) || 0)),
+    carbs: Math.max(0, Math.round(Number(parsed.carbs) || 0)),
+  };
+}
+
 export const generateRecipe = onCall(
   { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 45 },
   async (request): Promise<RecipeResult | null> => {
@@ -497,19 +511,105 @@ Cíl uživatele: ${goalLabel}.${input.preferences?.trim() ? `\nPreference/omezen
 
       const parsed = JSON.parse(content);
 
-      return {
-        name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Recept",
-        description: typeof parsed.description === "string" ? parsed.description.trim() : "",
-        ingredients: sanitizeStringList(parsed.ingredients, 20),
-        instructions: sanitizeStringList(parsed.instructions, 15),
-        prepMinutes: Math.min(240, Math.max(1, Math.round(Number(parsed.prepMinutes) || 20))),
-        calories: Math.max(0, Math.round(Number(parsed.calories) || 0)),
-        protein: Math.max(0, Math.round(Number(parsed.protein) || 0)),
-        fat: Math.max(0, Math.round(Number(parsed.fat) || 0)),
-        carbs: Math.max(0, Math.round(Number(parsed.carbs) || 0)),
-      };
+      return sanitizeRecipeResult(parsed);
     } catch (error) {
       console.error("Mya Recipe Error:", error);
+      return null;
+    }
+  }
+);
+
+interface FridgeRecipeInput {
+  imageDataUrl: string;
+  remainingCalories: number;
+  remainingProtein: number;
+  remainingFat: number;
+  remainingCarbs: number;
+  goal: Goal;
+  preferences?: string;
+}
+
+export const generateRecipeFromFridge = onCall(
+  { secrets: [openaiApiKey], region: "us-central1", memory: "512MiB", timeoutSeconds: 60 },
+  async (request): Promise<RecipeResult | null> => {
+    requireAuth(request);
+    const input = request.data as FridgeRecipeInput | undefined;
+    if (!input?.imageDataUrl || !input.imageDataUrl.startsWith("data:image/")) {
+      throw new HttpsError("invalid-argument", "Chybí platný obrázek.");
+    }
+    if (!Number.isFinite(input.remainingCalories) || input.remainingCalories <= 0) {
+      throw new HttpsError("invalid-argument", "Chybí platný zbývající kalorický rozpočet.");
+    }
+
+    const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
+
+    const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti pošle fotku obsahu lednice nebo spíže.
+Podívej se, jaké potravinové suroviny jsou na fotce rozpoznatelné, a navrhni JEDEN recept, který z nich (klidně i s
+běžnými základními surovinami jako sůl, pepř, olej, mouka, i když nejsou na fotce vidět) jde reálně uvařit doma.
+Nutriční hodnoty (kalorie, bílkoviny, tuky, sacharidy) se musí co nejvíc blížit zadaným zbývajícím hodnotám —
+klidně mírně pod nimi, ale nikdy výrazně nad.
+
+Pokud na fotce nejde rozpoznat žádné použitelné potravinové suroviny (např. prázdná lednice, nesouvisející fotka),
+nastav "recognized": false a ostatní pole nech prázdná nebo nulová.
+
+Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný markdown, žádný text okolo):
+{
+  "recognized": true nebo false,
+  "name": "krátký český název receptu",
+  "description": "jedna věta, proč recept sedí do zbytku dne a co z fotky použil",
+  "ingredients": ["surovina s množstvím", ...],
+  "instructions": ["krok 1", "krok 2", ...],
+  "prepMinutes": číslo (odhad doby přípravy v minutách),
+  "calories": číslo,
+  "protein": číslo (g),
+  "fat": číslo (g),
+  "carbs": číslo (g)
+}`;
+
+    const userPrompt = `Zbývá do dnešního cíle: ${Math.round(input.remainingCalories)} kcal, ${Math.round(
+      input.remainingProtein
+    )}g bílkovin, ${Math.round(input.remainingFat)}g tuků, ${Math.round(input.remainingCarbs)}g sacharidů.
+Cíl uživatele: ${goalLabel}.${input.preferences?.trim() ? `\nPreference/omezení: ${input.preferences.trim()}.` : ""}`;
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [
+            { role: "system", content: systemPrompt },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: userPrompt },
+                { type: "image_url", image_url: { url: input.imageDataUrl } },
+              ],
+            },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.7,
+        }),
+      });
+
+      if (response.status === 429) throw new Error("Rate limit exceeded");
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      const content = json.choices?.[0]?.message?.content;
+      if (!content) {
+        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
+        throw new Error("Invalid AI response");
+      }
+
+      const parsed = JSON.parse(content);
+      if (parsed.recognized !== true) return null;
+
+      return sanitizeRecipeResult(parsed);
+    } catch (error) {
+      console.error("Mya Fridge Recipe Error:", error);
       return null;
     }
   }

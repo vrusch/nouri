@@ -1,18 +1,22 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ChefHat, Sparkles, Loader2, Clock, AlertCircle, RefreshCw } from "lucide-react";
+import { ChefHat, Sparkles, Camera, Loader2, Clock, AlertCircle, RefreshCw, ChevronLeft } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, computeRemainingMacros, getRecipeAvailability } from "../lib/nutrition";
 import { MyaRecipes, type RecipeResult } from "../lib/recipes";
+import { fileToCompressedDataUrl } from "../lib/image";
 
-type Status = "idle" | "loading" | "result" | "error";
+type Status = "idle" | "photo-preview" | "loading" | "result" | "error";
 
 export default function Recipes() {
   const { profile } = useAuth();
   const [status, setStatus] = useState<Status>("idle");
   const [recipe, setRecipe] = useState<RecipeResult | null>(null);
   const [preferences, setPreferences] = useState("");
+  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const today = new Date().toISOString().split("T")[0];
   const todaysMeals = useLiveQuery(() => db.meals.where("date").equals(today).toArray()) || [];
@@ -23,7 +27,7 @@ export default function Recipes() {
   const remaining = computeRemainingMacros(target, todaysMeals);
   const availability = getRecipeAvailability(remaining.calories);
 
-  const handleGenerate = async () => {
+  const handleGenerateText = async () => {
     setStatus("loading");
     const result = await MyaRecipes.generateRecipe({
       remainingCalories: remaining.calories,
@@ -41,8 +45,51 @@ export default function Recipes() {
     }
   };
 
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file);
+      setPhotoDataUrl(dataUrl);
+      setPhotoError(null);
+      setStatus("photo-preview");
+    } catch (error) {
+      console.error(error);
+      setPhotoError("Fotku se nepodařilo načíst. Zkus to znovu.");
+    }
+  };
+
+  const handleGenerateFromPhoto = async () => {
+    if (!photoDataUrl) return;
+    setStatus("loading");
+    const result = await MyaRecipes.generateRecipeFromFridgePhoto({
+      imageDataUrl: photoDataUrl,
+      remainingCalories: remaining.calories,
+      remainingProtein: remaining.protein,
+      remainingFat: remaining.fat,
+      remainingCarbs: remaining.carbs,
+      goal: profile.goal,
+      preferences: preferences.trim() || undefined,
+    });
+    if (result) {
+      setRecipe(result);
+      setStatus("result");
+    } else {
+      setStatus("error");
+    }
+  };
+
   const handleReset = () => {
     setRecipe(null);
+    setPhotoDataUrl(null);
+    setPhotoError(null);
+    setStatus("idle");
+  };
+
+  const handleBackFromPreview = () => {
+    setPhotoDataUrl(null);
+    setPhotoError(null);
     setStatus("idle");
   };
 
@@ -66,7 +113,7 @@ export default function Recipes() {
         />
       )}
 
-      {availability === "ready" && (status === "idle" || status === "loading") && (
+      {availability === "ready" && status === "idle" && (
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 space-y-5 transition-colors">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-500 dark:text-blue-400 shrink-0">
@@ -99,28 +146,71 @@ export default function Recipes() {
               value={preferences}
               onChange={(e) => setPreferences(e.target.value)}
               placeholder="Např. vegetariánské, bez lepku, rychlovka do 15 minut"
-              disabled={status === "loading"}
-              className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 text-sm font-semibold outline-blue-500 dark:text-white transition-all disabled:opacity-50"
+              className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 text-sm font-semibold outline-blue-500 dark:text-white transition-all"
             />
           </div>
 
+          {photoError && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{photoError}</span>
+            </div>
+          )}
+
+          <div className="space-y-2.5">
+            <button
+              onClick={handleGenerateText}
+              className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            >
+              <Sparkles className="w-4 h-4" />
+              Navrhni mi recept
+            </button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleFileSelected}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all"
+            >
+              <Camera className="w-4 h-4" />
+              Vyfoť lednici
+            </button>
+          </div>
+        </div>
+      )}
+
+      {status === "photo-preview" && photoDataUrl && (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 space-y-4 transition-colors">
           <button
-            onClick={handleGenerate}
-            disabled={status === "loading"}
-            className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all disabled:opacity-70 flex items-center justify-center gap-2"
+            onClick={handleBackFromPreview}
+            className="flex items-center gap-1 text-sm font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
           >
-            {status === "loading" ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Mya vymýšlí recept...
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                Navrhni mi recept
-              </>
-            )}
+            <ChevronLeft className="w-4 h-4" />
+            Zpět
           </button>
+          <img src={photoDataUrl} alt="Fotka lednice" className="w-full aspect-square object-cover rounded-2xl" />
+          <button
+            onClick={handleGenerateFromPhoto}
+            className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+          >
+            <Sparkles className="w-4 h-4" />
+            Najít recept z fotky
+          </button>
+        </div>
+      )}
+
+      {status === "loading" && (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center gap-4 py-16 transition-colors">
+          <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {photoDataUrl ? "Mya kouká na lednici a hledá recept..." : "Mya vymýšlí recept..."}
+          </p>
         </div>
       )}
 
@@ -129,7 +219,11 @@ export default function Recipes() {
           <EmptyState
             icon={<AlertCircle className="w-7 h-7" />}
             title="Nepovedlo se"
-            text="Mye se teď nepodařilo recept vymyslet. Zkus to prosím znovu."
+            text={
+              photoDataUrl
+                ? "Mya na fotce nerozpoznala použitelné suroviny, nebo se něco pokazilo. Zkus jinou fotku nebo to zkus znovu."
+                : "Mye se teď nepodařilo recept vymyslet. Zkus to prosím znovu."
+            }
           />
           <button
             onClick={handleReset}
