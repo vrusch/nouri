@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
-import { X, Camera, PenLine, Loader2, ChevronLeft, AlertCircle, CheckCircle2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2 } from "lucide-react";
 import { db, type MealItem } from "../db/db";
 import { MyaVision, type VisionResult, type MealType } from "../lib/vision";
+import { MyaVoice } from "../lib/voice";
 import { MyaAI } from "../lib/ai";
 import { backupMeal } from "../lib/cloudSync";
 import { calculateNutrition } from "../lib/nutrition";
@@ -12,7 +13,18 @@ interface AddMealModalProps {
   onClose: () => void;
 }
 
-type Step = "choose" | "photo-preview" | "describe" | "analyzing" | "form" | "feedback";
+type Step = "choose" | "photo-preview" | "describe" | "recording" | "analyzing" | "form" | "feedback";
+
+const RECORDING_MIME_TYPES = ["audio/webm", "audio/mp4", "audio/ogg"];
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve(reader.result as string);
+    reader.readAsDataURL(blob);
+  });
+}
 
 const MEAL_TYPE_OPTIONS: { id: MealType; label: string }[] = [
   { id: "breakfast", label: "Snídaně" },
@@ -43,7 +55,11 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [feedbackText, setFeedbackText] = useState<string | null>(null);
+  const [analyzingMessage, setAnalyzingMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const [name, setName] = useState("");
   const [calories, setCalories] = useState("");
@@ -52,6 +68,14 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
   const [carbs, setCarbs] = useState("");
   const [type, setType] = useState<MealType>(guessMealType());
   const [time, setTime] = useState(currentTime());
+
+  // Jistota proti mikrofonu, který zůstane "otevřený" (indikátor v prohlížeči), když
+  // se modál zavře jinak než přes handleClose/handleBack (např. odhlášení, navigace).
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
 
   const resetFormFromVision = (result: VisionResult | null, failureNotice: string) => {
     if (result) {
@@ -91,6 +115,7 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
 
   const handleAnalyze = async () => {
     if (!photoDataUrl) return;
+    setAnalyzingMessage("Mya kouká na fotku a počítá kalorie...");
     setStep("analyzing");
     const result = await MyaVision.analyzeFood(photoDataUrl);
     resetFormFromVision(result, "Mya se nepodařilo rozpoznat jídlo z fotky. Zapiš prosím hodnoty ručně.");
@@ -107,10 +132,64 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
 
   const handleAnalyzeText = async () => {
     if (!description.trim()) return;
+    setAnalyzingMessage("Mya čte popis a počítá kalorie...");
     setStep("analyzing");
     const result = await MyaVision.analyzeFoodText(description.trim());
     resetFormFromVision(result, "Mya nerozpoznala jídlo z popisu. Zapiš prosím hodnoty ručně.");
     setStep("form");
+  };
+
+  const handleRecordingStopped = async () => {
+    // Track se zastavuje až tady, ne v handleStopRecording — MediaRecorder.stop() je
+    // asynchronní (dovnitř ještě doteče poslední "dataavailable"), zastavení tracku
+    // dřív může na iOS Safari/některých Chrome buildech uříznout poslední kus nahrávky.
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+
+    const mimeType = mediaRecorderRef.current?.mimeType || "audio/webm";
+    const blob = new Blob(audioChunksRef.current, { type: mimeType });
+    audioChunksRef.current = [];
+
+    setAnalyzingMessage("Mya poslouchá a přepisuje...");
+    setStep("analyzing");
+    const dataUrl = await blobToDataUrl(blob);
+    const text = await MyaVoice.transcribeAudio(dataUrl);
+
+    if (text) {
+      setSource("manual");
+      setDescription(text);
+      setNotice(null);
+      setStep("describe");
+    } else {
+      setNotice("Mye se nepodařilo rozpoznat řeč. Zkus to znovu nebo popiš jídlo textem.");
+      setStep("choose");
+    }
+  };
+
+  const handleVoiceStart = async () => {
+    setNotice(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const supportedMimeType = RECORDING_MIME_TYPES.find((t) => MediaRecorder.isTypeSupported(t));
+      const recorder = supportedMimeType ? new MediaRecorder(stream, { mimeType: supportedMimeType }) : new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = handleRecordingStopped;
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setSource("manual");
+      setPhotoDataUrl(null);
+      setStep("recording");
+    } catch (error) {
+      console.error(error);
+      setNotice("Nepodařilo se získat přístup k mikrofonu. Zkontroluj oprávnění nebo popiš jídlo textem.");
+    }
+  };
+
+  const handleStopRecording = () => {
+    mediaRecorderRef.current?.stop();
   };
 
   const handleManualStart = () => {
@@ -128,10 +207,20 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
   };
 
   const handleBack = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.onstop = null; // zpět uprostřed nahrávání nesmí spustit přepis
+      mediaRecorderRef.current.stop();
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
     setStep("choose");
     setPhotoDataUrl(null);
     setDescription("");
     setNotice(null);
+  };
+
+  const handleClose = () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    onClose();
   };
 
   const handleSave = async () => {
@@ -182,13 +271,13 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={handleClose} />
 
       <div className="relative w-full max-w-md max-h-[92dvh] bg-white dark:bg-slate-900 rounded-t-3xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden transition-colors">
         {/* HLAVIČKA */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-2">
-            {(step === "photo-preview" || step === "describe" || step === "form") && (
+            {(step === "photo-preview" || step === "describe" || step === "recording" || step === "form") && (
               <button
                 onClick={handleBack}
                 className="p-1 -ml-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
@@ -200,12 +289,13 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
               {step === "choose" && "Přidat jídlo"}
               {step === "photo-preview" && "Zkontroluj fotku"}
               {step === "describe" && "Popiš jídlo"}
+              {step === "recording" && "Nahrávám..."}
               {step === "analyzing" && "Mya analyzuje..."}
               {step === "form" && (source === "photo" ? "Potvrď jídlo" : "Zapsat jídlo")}
               {step === "feedback" && "Uloženo"}
             </h2>
           </div>
-          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+          <button onClick={handleClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -245,6 +335,19 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
                 <div className="text-left">
                   <div className="font-bold text-slate-800 dark:text-white">Popsat jídlo</div>
                   <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Mya odhadne kalorie z popisu</div>
+                </div>
+              </button>
+
+              <button
+                onClick={handleVoiceStart}
+                className="w-full flex items-center gap-4 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-3xl active:scale-[0.98] transition-all"
+              >
+                <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 shadow-sm flex items-center justify-center text-slate-500 dark:text-slate-400 shrink-0">
+                  <Mic className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <div className="font-bold text-slate-800 dark:text-white">Namluvit jídlo</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Mya přepíše, co řekneš, a odhadne kalorie</div>
                 </div>
               </button>
 
@@ -304,12 +407,22 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
             </div>
           )}
 
+          {step === "recording" && (
+            <div className="flex flex-col items-center justify-center gap-6 py-16">
+              <button
+                onClick={handleStopRecording}
+                className="w-24 h-24 rounded-full flex items-center justify-center text-white shadow-lg shadow-red-500/30 bg-red-500 animate-pulse active:scale-95 transition-all"
+              >
+                <Square className="w-8 h-8" fill="currentColor" />
+              </button>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Nahrávám... klepnutím ukončíš</p>
+            </div>
+          )}
+
           {step === "analyzing" && (
             <div className="flex flex-col items-center justify-center gap-4 py-16">
               <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                {photoDataUrl ? "Mya kouká na fotku a počítá kalorie..." : "Mya čte popis a počítá kalorie..."}
-              </p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{analyzingMessage}</p>
             </div>
           )}
 

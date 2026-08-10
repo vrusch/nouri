@@ -519,6 +519,64 @@ Cíl uživatele: ${goalLabel}.${input.preferences?.trim() ? `\nPreference/omezen
   }
 );
 
+const AUDIO_EXTENSIONS: Record<string, string> = {
+  "audio/webm": "webm",
+  "audio/mp4": "mp4",
+  "audio/m4a": "m4a",
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/wav": "wav",
+  "audio/x-wav": "wav",
+  "audio/ogg": "ogg",
+};
+
+export const transcribeAudio = onCall(
+  { secrets: [openaiApiKey], region: "us-central1", memory: "512MiB", timeoutSeconds: 30 },
+  async (request): Promise<{ text: string } | null> => {
+    requireAuth(request);
+    const audioDataUrl = request.data?.audioDataUrl as string | undefined;
+    if (!audioDataUrl || !audioDataUrl.startsWith("data:audio/")) {
+      throw new HttpsError("invalid-argument", "Chybí platná nahrávka.");
+    }
+
+    try {
+      const [header, base64Data] = audioDataUrl.split(",");
+      const mimeMatch = header.match(/^data:(audio\/[a-zA-Z0-9.+-]+)/);
+      const mimeType = mimeMatch?.[1] ?? "audio/webm";
+      // Přípona podle skutečného MIME typu nahrávky — iOS Safari nahrává audio/mp4,
+      // ne webm jako Chrome/Android. Whisper validuje podle přípony souboru, takže
+      // natvrdo ".webm" na mp4 datech by na iPhonu vrátilo chybu.
+      const extension = AUDIO_EXTENSIONS[mimeType] ?? "webm";
+      const buffer = Buffer.from(base64Data, "base64");
+
+      const formData = new FormData();
+      formData.append("file", new Blob([buffer], { type: mimeType }), `recording.${extension}`);
+      formData.append("model", "whisper-1");
+      formData.append("language", "cs");
+
+      const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${openaiApiKey.value()}` },
+        body: formData,
+      });
+
+      if (response.status === 429) throw new Error("Rate limit exceeded");
+
+      const json = (await response.json()) as { text?: string };
+      const text = json.text?.trim();
+      if (!text) {
+        console.error("Whisper response missing text:", response.status, JSON.stringify(json));
+        throw new Error("Invalid transcription response");
+      }
+
+      return { text };
+    } catch (error) {
+      console.error("Mya Voice Transcription Error:", error);
+      return null;
+    }
+  }
+);
+
 interface FridgeRecipeInput {
   imageDataUrl: string;
   remainingCalories: number;
