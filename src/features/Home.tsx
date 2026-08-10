@@ -2,13 +2,16 @@ import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
-import { Zap } from "lucide-react";
+import { Zap, Volume2, Square } from "lucide-react";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition, getProgressCaption } from "../lib/nutrition";
+
+const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
 
 export default function Home() {
   const { profile } = useAuth();
   const [greeting, setGreeting] = useState<string>("Přemýšlím o tvém dni...");
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const GOAL_CALORIES = profile ? calculateNutrition(profile).targetCalories : 1800;
   
   const today = new Date().toISOString().split('T')[0];
@@ -43,6 +46,32 @@ export default function Home() {
 
     fetchGreeting();
   }, [profile, today, meals.length, consumedCalories, consumedProtein]);
+
+  // Nová zpráva (nový den / nově zapsané jídlo) nesmí nechat dobíhat přečtení té staré —
+  // zastaví se i při odchodu ze záložky Home (odhlášení posluchače na unmount).
+  useEffect(() => {
+    return () => {
+      if (speechSupported) {
+        window.speechSynthesis.cancel();
+        setIsSpeaking(false);
+      }
+    };
+  }, [greeting]);
+
+  const handleToggleSpeech = () => {
+    if (!speechSupported) return;
+    window.speechSynthesis.cancel();
+    if (isSpeaking) {
+      setIsSpeaking(false);
+      return;
+    }
+    const utterance = new SpeechSynthesisUtterance(greeting);
+    utterance.lang = "cs-CZ";
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+    setIsSpeaking(true);
+  };
 
   return (
     <div className="space-y-6 pt-6 transition-colors">
@@ -103,13 +132,24 @@ export default function Home() {
           <div className="w-12 h-12 rounded-2xl bg-white dark:bg-slate-800 shadow-sm flex items-center justify-center shrink-0 text-blue-500 dark:text-blue-400 transition-colors">
             <Zap className="w-6 h-6 fill-current" />
           </div>
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <h3 className="font-bold text-slate-800 dark:text-slate-100">Zpráva od Mya (AI)</h3>
-              <span className="flex h-2 w-2 relative">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-              </span>
+          <div className="flex-1">
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-slate-800 dark:text-slate-100">Zpráva od Mya (AI)</h3>
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                </span>
+              </div>
+              {speechSupported && (
+                <button
+                  onClick={handleToggleSpeech}
+                  aria-label={isSpeaking ? "Zastavit přehrávání" : "Přečíst nahlas"}
+                  className="p-1.5 -m-1.5 rounded-full text-blue-500 dark:text-blue-400 hover:bg-white/60 dark:hover:bg-slate-800/40 transition-colors shrink-0"
+                >
+                  {isSpeaking ? <Square className="w-4 h-4" fill="currentColor" /> : <Volume2 className="w-4 h-4" />}
+                </button>
+              )}
             </div>
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed italic">
               "{greeting}"
