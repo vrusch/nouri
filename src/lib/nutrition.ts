@@ -111,6 +111,23 @@ export function getProgressCaption(consumedCalories: number, progressPercent: nu
   return "Skvělé tempo! K obědu si můžeš dát něco vydatnějšího.";
 }
 
+export type DayTrafficLight = "neutral" | "green" | "yellow" | "red";
+
+/**
+ * "Semafor" dne pro Home — rychlý odhad dne vůči cíli bez čtení čísel. Sdílí 80% hranici
+ * s getProgressCaption výše (appka i tam varuje "Pozor na večeři!" nad 80 %). Bez zapsaných
+ * kalorií appka vrací "neutral", ne "green" — stejná past jako u getProgressCaption
+ * (viz REGRESE test tam): appka nezná rozdíl mezi "8:00 ráno, nic zapsáno" a "v pohodě".
+ */
+export function getDayTrafficLight(consumedCalories: number, targetCalories: number): DayTrafficLight {
+  if (consumedCalories === 0) return "neutral";
+  if (targetCalories <= 0) return "neutral";
+  const progressPercent = (consumedCalories / targetCalories) * 100;
+  if (progressPercent > 100) return "red";
+  if (progressPercent > 80) return "yellow";
+  return "green";
+}
+
 export interface RemainingMacros {
   calories: number; // signed — může být záporné, pokud je uživatel už nad cílem
   protein: number;

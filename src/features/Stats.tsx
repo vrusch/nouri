@@ -4,15 +4,18 @@ import { Gauge } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
+import { summarizeWeek } from "../lib/weekSummary";
 import { subscribeWeightLogs, type WeightLogEntry } from "../lib/cloudSync";
 
 const DAY_LABELS = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
 
-function lastNDates(n: number): string[] {
+// offsetDays posouvá celé okno dál do minulosti — lastNDates(7, 7) je týden bezprostředně
+// před lastNDates(7), použito pro porovnání "tento týden vs. minulý týden".
+function lastNDates(n: number, offsetDays: number = 0): string[] {
   const dates: string[] = [];
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date();
-    d.setDate(d.getDate() - i);
+    d.setDate(d.getDate() - i - offsetDays);
     dates.push(d.toISOString().split("T")[0]);
   }
   return dates;
@@ -24,12 +27,13 @@ export default function Stats() {
   const targetCalories = nutrition ? nutrition.targetCalories : 1800;
 
   const days = lastNDates(7);
+  const previousWeekDays = lastNDates(7, 7);
   const today = days[days.length - 1];
   const [selectedDay, setSelectedDay] = useState<string>(today);
 
-  // Všechna jídla, ne jen posledních 7 dní — kalibrace cíle (níže) potřebuje delší historii.
+  // Všechna jídla, ne jen posledních 7 dní — kalibrace cíle a porovnání s minulým týdnem
+  // (obojí níže) potřebují delší historii.
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
-  const meals = allMeals.filter((m) => m.date >= days[0]);
 
   const [weightLogs, setWeightLogs] = useState<WeightLogEntry[]>([]);
   useEffect(() => {
@@ -37,13 +41,14 @@ export default function Stats() {
     return subscribeWeightLogs(user.uid, setWeightLogs);
   }, [user]);
 
-  const totalsByDay = new Map<string, number>(days.map((d) => [d, 0]));
-  meals.forEach((m) => totalsByDay.set(m.date, (totalsByDay.get(m.date) || 0) + m.value));
+  const totalsByDay = new Map<string, number>();
+  allMeals.forEach((m) => totalsByDay.set(m.date, (totalsByDay.get(m.date) || 0) + m.value));
 
   const values = days.map((d) => totalsByDay.get(d) || 0);
+  const previousWeekValues = previousWeekDays.map((d) => totalsByDay.get(d) || 0);
   const maxValue = Math.max(targetCalories, ...values, 1);
-  const daysLogged = values.filter((v) => v > 0).length;
-  const avgCalories = daysLogged > 0 ? Math.round(values.reduce((a, b) => a + b, 0) / daysLogged) : 0;
+  const { avgCalories, daysLogged } = summarizeWeek(values);
+  const { avgCalories: previousAvgCalories, daysLogged: previousDaysLogged } = summarizeWeek(previousWeekValues);
   const targetLinePercent = Math.min(100, (targetCalories / maxValue) * 100);
 
   const chartWeights = weightLogs.slice(-30);
@@ -62,9 +67,7 @@ export default function Stats() {
     ? Math.round((latestWeight.weight - chartWeights[0].weight) * 10) / 10
     : 0;
 
-  const dailyCalories = Array.from(
-    allMeals.reduce((map, m) => map.set(m.date, (map.get(m.date) || 0) + m.value), new Map<string, number>())
-  ).map(([date, calories]) => ({ date, calories }));
+  const dailyCalories = Array.from(totalsByDay, ([date, calories]) => ({ date, calories }));
   const manualWeighIns = weightLogs.filter((w) => w.source === "manual");
   const calibration =
     profile && nutrition
@@ -79,11 +82,28 @@ export default function Stats() {
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
         <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Průměr za posledních 7 dní</div>
         {daysLogged > 0 ? (
-          <div className="text-3xl font-extrabold text-slate-800 dark:text-white">
-            {avgCalories} <span className="text-sm font-medium text-slate-400 dark:text-slate-500">kcal / den</span>
-          </div>
+          <>
+            <div className="text-3xl font-extrabold text-slate-800 dark:text-white">
+              {avgCalories} <span className="text-sm font-medium text-slate-400 dark:text-slate-500">kcal / den</span>
+            </div>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{daysLogged}/7 dní zapsáno</p>
+          </>
         ) : (
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Zatím žádná zapsaná jídla za posledních 7 dní.</p>
+        )}
+
+        {previousDaysLogged > 0 && (
+          <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-slate-50 dark:border-slate-800">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              Minulý týden: {previousAvgCalories} kcal/den · {previousDaysLogged}/7 dní zapsáno
+            </span>
+            {daysLogged > 0 && (
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-300 tabular-nums shrink-0">
+                {avgCalories - previousAvgCalories > 0 ? "+" : ""}
+                {avgCalories - previousAvgCalories} kcal
+              </span>
+            )}
+          </div>
         )}
       </div>
 

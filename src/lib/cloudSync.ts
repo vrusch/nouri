@@ -145,9 +145,17 @@ export interface WeightLogEntry {
   source?: "seed" | "manual";
 }
 
-// Živě streamuje users/{uid}/weightLogs (řazeno podle data) — nahrazuje starší
-// jednorázové fetchWeightLogs/fetchLatestWeightLog, ať trend i připomínka vážení
-// reagují na zápis z jiného zařízení bez nutnosti appku restartovat.
+// Jednorázové načtení pro JSON export (viz Profile.tsx handleExportJson) — na rozdíl od
+// subscribeWeightLogs níže appka tady nepotřebuje živý listener, jen snímek pro stažení.
+export async function fetchWeightLogs(uid: string): Promise<WeightLogEntry[]> {
+  const q = query(weightLogsCollection(uid), orderBy("date", "asc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data() as WeightLogEntry);
+}
+
+// Živě streamuje users/{uid}/weightLogs (řazeno podle data), ať trend i připomínka vážení
+// reagují na zápis z jiného zařízení bez nutnosti appku restartovat. Pro jednorázové
+// čtení (JSON export) viz fetchWeightLogs výše.
 export function subscribeWeightLogs(
   uid: string,
   callback: (entries: WeightLogEntry[]) => void,

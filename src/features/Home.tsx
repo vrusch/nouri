@@ -4,10 +4,16 @@ import { db, type MealItem } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { Volume2, Square, Flame } from "lucide-react";
 import { MyaAI } from "../lib/ai";
-import { calculateNutrition, computeRemainingMacros, getProgressCaption } from "../lib/nutrition";
+import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight } from "../lib/nutrition";
 import { computeLoggingStreak } from "../lib/streak";
 
 const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+
+const TRAFFIC_LIGHT_STYLE = {
+  green: { bg: "bg-emerald-50 dark:bg-emerald-900/20", text: "text-emerald-700 dark:text-emerald-400", dot: "bg-emerald-500", label: "V pohodě" },
+  yellow: { bg: "bg-amber-50 dark:bg-amber-900/20", text: "text-amber-700 dark:text-amber-400", dot: "bg-amber-500", label: "Pozor" },
+  red: { bg: "bg-red-50 dark:bg-red-900/20", text: "text-red-600 dark:text-red-400", dot: "bg-red-500", label: "Nad cílem" },
+} as const;
 
 interface HomeProps {
   onEditMeal: (meal: MealItem) => void;
@@ -27,6 +33,8 @@ export default function Home({ onEditMeal }: HomeProps) {
   const consumedCalories = meals.reduce((sum, meal) => sum + meal.value, 0);
   const remainingCalories = Math.max(0, GOAL_CALORIES - consumedCalories);
   const progressPercent = Math.min(100, (consumedCalories / GOAL_CALORIES) * 100);
+
+  const trafficLight = getDayTrafficLight(consumedCalories, GOAL_CALORIES);
 
   const remainingMacros = nutrition ? computeRemainingMacros(nutrition, meals) : null;
   const consumedProtein = nutrition && remainingMacros ? nutrition.macros.protein - remainingMacros.protein : 0;
@@ -113,6 +121,14 @@ export default function Home({ onEditMeal }: HomeProps) {
 
       {/* Hlavní přehled kalorií */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+        {trafficLight !== "neutral" && (
+          <div className="flex justify-end mb-3">
+            <span className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${TRAFFIC_LIGHT_STYLE[trafficLight].bg} ${TRAFFIC_LIGHT_STYLE[trafficLight].text}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${TRAFFIC_LIGHT_STYLE[trafficLight].dot}`} />
+              {TRAFFIC_LIGHT_STYLE[trafficLight].label}
+            </span>
+          </div>
+        )}
         <div className="flex items-center gap-6">
           <div className="relative w-28 h-28 shrink-0">
             <svg viewBox="0 0 100 100" className="w-full h-full transform -rotate-90">

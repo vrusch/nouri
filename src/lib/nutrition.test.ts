@@ -4,6 +4,7 @@ import {
   calculateNutrition,
   calibrateTarget,
   getProgressCaption,
+  getDayTrafficLight,
   computeRemainingMacros,
   getRecipeAvailability,
   type NutritionResults,
@@ -270,6 +271,32 @@ describe("getProgressCaption (regrese: 'Skvělé tempo' při 0 kcal)", () => {
   it("hranice: přesně 80 % ještě nevaruje před večeří (> práh, ne >=)", () => {
     expect(getProgressCaption(1600, 80)).not.toMatch(/večeři/i);
     expect(getProgressCaption(1601, 80.01)).toMatch(/večeři/i);
+  });
+});
+
+describe("getDayTrafficLight (regrese: 0 kcal nesmí vyjít jako 'green')", () => {
+  it("bez zapsaných kalorií je 'neutral', ne 'green'", () => {
+    expect(getDayTrafficLight(0, 2000)).toBe("neutral");
+  });
+
+  it("do 80 % postupu je 'green'", () => {
+    expect(getDayTrafficLight(1000, 2000)).toBe("green");
+  });
+
+  it("hranice: přesně 80 % je ještě 'green' (> práh, ne >=)", () => {
+    expect(getDayTrafficLight(1600, 2000)).toBe("green");
+  });
+
+  it("nad 80 % a do 100 % je 'yellow'", () => {
+    expect(getDayTrafficLight(1700, 2000)).toBe("yellow");
+  });
+
+  it("hranice: přesně 100 % je ještě 'yellow', ne 'red'", () => {
+    expect(getDayTrafficLight(2000, 2000)).toBe("yellow");
+  });
+
+  it("nad cílem je 'red'", () => {
+    expect(getDayTrafficLight(2200, 2000)).toBe("red");
   });
 });
 

@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
 import { type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
-import { logWeight, clearMealsBackup, bulkBackupMeals } from "../lib/cloudSync";
+import { logWeight, clearMealsBackup, bulkBackupMeals, fetchWeightLogs } from "../lib/cloudSync";
 import { formatDaysCs, formatMealsCs, formatRowsCs } from "../lib/format";
 import { parseMealsCsv } from "../lib/csvImport";
 import { computeProfileCheckStatus } from "../lib/profileCheck";
@@ -24,6 +24,7 @@ export default function Profile() {
 
   // Správa dat stavy
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingJson, setIsExportingJson] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -113,6 +114,44 @@ export default function Profile() {
       URL.revokeObjectURL(url);
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleExportJson = async () => {
+    if (!user) return;
+    setIsExportingJson(true);
+    try {
+      const meals = await db.meals.orderBy('date').toArray();
+      const weightLogs = await fetchWeightLogs(user.uid);
+      const backup = {
+        exportedAt: new Date().toISOString(),
+        version: 1,
+        profile,
+        // Bez lokálního Dexie `id` — to je jen autoincrement téhle jedné instalace appky,
+        // ne stabilní identifikátor. `syncId` (stabilní napříč zařízeními) zůstává.
+        meals: meals.map((m) => ({
+          name: m.name,
+          value: m.value,
+          time: m.time,
+          date: m.date,
+          type: m.type,
+          protein: m.protein,
+          fat: m.fat,
+          carbs: m.carbs,
+          source: m.source,
+          syncId: m.syncId,
+        })),
+        weightLogs,
+      };
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `nouri-zaloha-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsExportingJson(false);
     }
   };
 
@@ -509,6 +548,14 @@ export default function Profile() {
               >
                 {isExporting ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <Download className="w-4 h-4 text-slate-500" />}
                 <span className="text-sm font-bold text-slate-700 dark:text-slate-200">Exportovat do CSV</span>
+              </button>
+              <button
+                onClick={handleExportJson}
+                disabled={isExportingJson}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                {isExportingJson ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <FileJson className="w-4 h-4 text-slate-500" />}
+                <span className="text-sm font-bold text-slate-700 dark:text-slate-200">Plná záloha (JSON)</span>
               </button>
               <div>
                 <button
