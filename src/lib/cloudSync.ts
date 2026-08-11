@@ -41,6 +41,16 @@ export async function backupMeal(uid: string, meal: MealItem): Promise<void> {
   }
 }
 
+// Smaže jen jeden dokument podle syncId — subscribeMeals se o odstranění z lokální
+// Dexie postará sám přes svůj "removed" docChange, nemusí se duplikovat tady.
+export async function deleteMeal(uid: string, syncId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(mealsCollection(uid), syncId));
+  } catch (error) {
+    console.error("Smazání jídla z cloudu selhalo:", error);
+  }
+}
+
 export async function clearMealsBackup(uid: string): Promise<void> {
   try {
     const snap = await getDocs(mealsCollection(uid));

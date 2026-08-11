@@ -160,7 +160,7 @@ export default function Profile() {
           {editing === 'name' ? (
             <input 
               autoFocus
-              className="text-xl font-bold bg-slate-100 dark:bg-slate-800 rounded px-3 py-1 dark:text-white outline-blue-500 text-center"
+              className="text-xl font-bold bg-slate-100 dark:bg-slate-800 rounded px-3 py-1 dark:text-white outline-rose-500 text-center"
               value={tempValue}
               onChange={(e) => setTempValue(e.target.value)}
               onBlur={() => handleSave('name')}
@@ -174,7 +174,7 @@ export default function Profile() {
               <h1 className="text-xl font-bold dark:text-white transition-colors">
                 {profile?.name || user?.displayName || 'Uživatel'}
               </h1>
-              <Edit2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500 transition-colors" />
+              <Edit2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-rose-500 transition-colors" />
             </div>
           )}
           <p className="text-slate-400 text-xs font-medium">{user?.email}</p>
@@ -195,7 +195,7 @@ export default function Profile() {
             {editing === 'weight' ? (
               <input 
                 type="number" autoFocus
-                className="w-16 bg-slate-100 dark:bg-slate-800 rounded px-2 py-1 text-sm font-bold dark:text-white outline-blue-500 text-right"
+                className="w-16 bg-slate-100 dark:bg-slate-800 rounded px-2 py-1 text-sm font-bold dark:text-white outline-rose-500 text-right"
                 value={tempValue}
                 onChange={(e) => setTempValue(e.target.value)}
                 onBlur={() => handleSave('weight')}
@@ -217,7 +217,7 @@ export default function Profile() {
             {editing === 'height' ? (
               <input 
                 type="number" autoFocus
-                className="w-16 bg-slate-100 dark:bg-slate-800 rounded px-2 py-1 text-sm font-bold dark:text-white outline-blue-500 text-right"
+                className="w-16 bg-slate-100 dark:bg-slate-800 rounded px-2 py-1 text-sm font-bold dark:text-white outline-rose-500 text-right"
                 value={tempValue}
                 onChange={(e) => setTempValue(e.target.value)}
                 onBlur={() => handleSave('height')}
@@ -393,7 +393,7 @@ export default function Profile() {
                 <button 
                   onClick={(e) => { e.stopPropagation(); handleGenerateReport(); }}
                   disabled={isGenerating}
-                  className="w-full mt-4 py-3 bg-slate-50 dark:bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-blue-500 transition-all flex items-center justify-center gap-2"
+                  className="w-full mt-4 py-3 bg-slate-50 dark:bg-slate-800 rounded-xl text-[11px] font-bold text-slate-400 hover:text-rose-500 transition-all flex items-center justify-center gap-2"
                 >
                   {isGenerating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />}
                   Aktualizovat analýzu
@@ -408,8 +408,8 @@ export default function Profile() {
       <div className="px-4">
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-2 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center justify-between transition-colors">
           <div className="flex items-center gap-3 pl-2 text-[15px] font-semibold dark:text-slate-200 transition-colors">
-            <Sun className="w-4 h-4 dark:hidden text-indigo-500" />
-            <Moon className="w-4 h-4 hidden dark:block text-indigo-400" />
+            <Sun className="w-4 h-4 dark:hidden text-rose-500" />
+            <Moon className="w-4 h-4 hidden dark:block text-rose-400" />
             Vzhled
           </div>
           <div className="flex bg-slate-50 dark:bg-slate-800 p-1 rounded-xl gap-1 border border-slate-100 dark:border-slate-700 transition-colors">
@@ -419,7 +419,7 @@ export default function Profile() {
                 onClick={() => setTheme(opt.id)}
                 className={`p-1.5 rounded-lg transition-all ${
                   theme === opt.id
-                    ? "bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-white"
+                    ? "bg-white dark:bg-slate-600 shadow-sm text-rose-600 dark:text-white"
                     : "text-slate-400"
                 }`}
               >

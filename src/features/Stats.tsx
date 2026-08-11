@@ -73,7 +73,7 @@ export default function Stats() {
 
   return (
     <div className="space-y-6 pt-6 transition-colors">
-      <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">Statistiky</h1>
+      <h1 className="font-display italic text-2xl font-medium tracking-tight dark:text-slate-100">Statistiky</h1>
 
       {/* Průměr za týden */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
@@ -114,18 +114,22 @@ export default function Stats() {
                 >
                   <div className="relative w-full flex items-end justify-center h-full">
                     {isSelected && value > 0 && (
-                      <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-800 dark:bg-slate-700 text-white text-[11px] font-bold px-2 py-1 rounded-lg whitespace-nowrap">
+                      <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-rose-600 dark:bg-rose-500 text-white text-[11px] font-bold px-2 py-1 rounded-lg whitespace-nowrap">
                         {value} kcal
                       </div>
                     )}
                     <div
                       className={`w-full max-w-7 rounded-t-md transition-all ${
-                        value === 0 ? "h-1 bg-slate-100 dark:bg-slate-800" : "bg-blue-500 dark:bg-blue-400"
-                      } ${isSelected && value > 0 ? "ring-2 ring-blue-200 dark:ring-blue-900" : ""}`}
+                        value === 0
+                          ? "h-1 bg-slate-100 dark:bg-slate-800"
+                          : isToday
+                            ? "bg-linear-to-t from-amber-500 to-amber-300"
+                            : "bg-linear-to-t from-rose-600 to-rose-400"
+                      } ${isSelected && value > 0 ? "ring-2 ring-rose-200 dark:ring-rose-900" : ""}`}
                       style={value > 0 ? { height: `${heightPercent}%` } : undefined}
                     />
                   </div>
-                  <span className={`text-[10px] font-bold ${isToday ? "text-blue-600 dark:text-blue-400" : "text-slate-400 dark:text-slate-500"}`}>
+                  <span className={`text-[10px] font-bold ${isToday ? "text-amber-600 dark:text-amber-400" : "text-slate-400 dark:text-slate-500"}`}>
                     {DAY_LABELS[dayIndex]}
                   </span>
                 </button>
@@ -153,7 +157,7 @@ export default function Stats() {
             <div className="text-3xl font-extrabold text-slate-800 dark:text-white mb-4">
               {latestWeight.weight} <span className="text-sm font-medium text-slate-400 dark:text-slate-500">kg</span>
             </div>
-            <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-16 text-blue-500 dark:text-blue-400">
+            <svg viewBox="0 0 100 30" preserveAspectRatio="none" className="w-full h-16 text-rose-500 dark:text-rose-400">
               <polyline
                 points={weightPoints.map((p) => `${p.x},${p.y}`).join(" ")}
                 fill="none"
@@ -162,7 +166,7 @@ export default function Stats() {
                 vectorEffect="non-scaling-stroke"
               />
               {weightPoints.map((p) => (
-                <circle key={p.date} cx={p.x} cy={p.y} r="1.5" className="fill-blue-500 dark:fill-blue-400" />
+                <circle key={p.date} cx={p.x} cy={p.y} r="1.5" className="fill-rose-500 dark:fill-rose-400" />
               ))}
             </svg>
           </>
@@ -178,9 +182,9 @@ export default function Stats() {
 
       {/* Kalibrace cíle podle skutečných dat */}
       {calibration && (
-        <div className="bg-blue-50/50 dark:bg-blue-950/20 rounded-3xl p-6 border border-blue-100/50 dark:border-blue-900/30 transition-colors">
+        <div className="bg-linear-to-br from-rose-50 to-amber-50/60 dark:from-rose-950/20 dark:to-amber-950/10 rounded-3xl p-6 border border-rose-100/60 dark:border-rose-900/30 transition-colors">
           <div className="flex items-center gap-2 mb-2">
-            <Gauge className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+            <Gauge className="w-4 h-4 text-rose-500 dark:text-rose-400" />
             <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Kalibrace cíle podle dat</h3>
           </div>
           <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
@@ -196,7 +200,7 @@ export default function Stats() {
                 targetCalories: calibration.suggestedTargetCalories,
               })
             }
-            className="w-full bg-blue-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all"
+            className="w-full bg-rose-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all"
           >
             Upravit cíl na {calibration.suggestedTargetCalories} kcal
           </button>

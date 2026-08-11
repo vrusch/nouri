@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2 } from "lucide-react";
+import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2 } from "lucide-react";
 import { db, type MealItem } from "../db/db";
 import { MyaVision, type VisionResult, type MealType } from "../lib/vision";
 import { MyaVoice } from "../lib/voice";
 import { MyaAI } from "../lib/ai";
-import { backupMeal } from "../lib/cloudSync";
+import { backupMeal, deleteMeal } from "../lib/cloudSync";
 import { calculateNutrition } from "../lib/nutrition";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { useAuth } from "../context/useAuth";
 
 interface AddMealModalProps {
   onClose: () => void;
+  /** Když je vyplněné, modál se otevře rovnou na formuláři předvyplněném touhle položkou
+   *  a "Uložit" upraví existující jídlo místo založení nového (viz handleSave). */
+  editMeal?: MealItem;
 }
 
 type Step = "choose" | "photo-preview" | "describe" | "recording" | "analyzing" | "form" | "feedback";
@@ -46,28 +49,31 @@ function currentTime(): string {
   return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 }
 
-export default function AddMealModal({ onClose }: AddMealModalProps) {
+export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
   const { profile, user } = useAuth();
-  const [step, setStep] = useState<Step>("choose");
+  const isEditing = editMeal !== undefined;
+  const [step, setStep] = useState<Step>(editMeal ? "form" : "choose");
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [description, setDescription] = useState("");
-  const [source, setSource] = useState<"photo" | "manual">("manual");
+  const [source, setSource] = useState<"photo" | "manual">(editMeal?.source ?? "manual");
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [feedbackText, setFeedbackText] = useState<string | null>(null);
   const [analyzingMessage, setAnalyzingMessage] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const [name, setName] = useState("");
-  const [calories, setCalories] = useState("");
-  const [protein, setProtein] = useState("");
-  const [fat, setFat] = useState("");
-  const [carbs, setCarbs] = useState("");
-  const [type, setType] = useState<MealType>(guessMealType());
-  const [time, setTime] = useState(currentTime());
+  const [name, setName] = useState(editMeal?.name ?? "");
+  const [calories, setCalories] = useState(editMeal ? String(editMeal.value) : "");
+  const [protein, setProtein] = useState(editMeal?.protein !== undefined ? String(editMeal.protein) : "");
+  const [fat, setFat] = useState(editMeal?.fat !== undefined ? String(editMeal.fat) : "");
+  const [carbs, setCarbs] = useState(editMeal?.carbs !== undefined ? String(editMeal.carbs) : "");
+  const [type, setType] = useState<MealType>(editMeal?.type ?? guessMealType());
+  const [time, setTime] = useState(editMeal?.time ?? currentTime());
 
   // Jistota proti mikrofonu, který zůstane "otevřený" (indikátor v prohlížeči), když
   // se modál zavře jinak než přes handleClose/handleBack (např. odhlášení, navigace).
@@ -229,6 +235,23 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
 
     setSaving(true);
     try {
+      if (isEditing && editMeal) {
+        const updatedFields: Partial<MealItem> = { name: name.trim(), value: Math.round(caloriesNum), time, type };
+        if (protein) updatedFields.protein = Math.round(Number(protein));
+        if (fat) updatedFields.fat = Math.round(Number(fat));
+        if (carbs) updatedFields.carbs = Math.round(Number(carbs));
+
+        if (editMeal.id !== undefined) await db.meals.update(editMeal.id, updatedFields);
+
+        // Firestore backup přepisuje celý dokument (setDoc bez merge), takže musí jít celý
+        // sloučený záznam, ne jen upravená pole — jinak by cloud přišel o zbytek jídla.
+        const fullUpdatedMeal: MealItem = { ...editMeal, ...updatedFields };
+        if (user && fullUpdatedMeal.syncId) backupMeal(user.uid, fullUpdatedMeal);
+
+        onClose();
+        return;
+      }
+
       const meal: MealItem = {
         name: name.trim(),
         value: Math.round(caloriesNum),
@@ -267,6 +290,23 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
     }
   };
 
+  const handleDeleteMeal = async () => {
+    if (!editMeal) return;
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setTimeout(() => setConfirmDelete(false), 4000);
+      return;
+    }
+    setDeleting(true);
+    try {
+      if (editMeal.id !== undefined) await db.meals.delete(editMeal.id);
+      if (user && editMeal.syncId) await deleteMeal(user.uid, editMeal.syncId);
+      onClose();
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const canSave = name.trim().length > 0 && Number(calories) > 0;
 
   return (
@@ -277,7 +317,7 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
         {/* HLAVIČKA */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-2">
-            {(step === "photo-preview" || step === "describe" || step === "recording" || step === "form") && (
+            {!isEditing && (step === "photo-preview" || step === "describe" || step === "recording" || step === "form") && (
               <button
                 onClick={handleBack}
                 className="p-1 -ml-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
@@ -291,7 +331,7 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
               {step === "describe" && "Popiš jídlo"}
               {step === "recording" && "Nahrávám..."}
               {step === "analyzing" && "Mya analyzuje..."}
-              {step === "form" && (source === "photo" ? "Potvrď jídlo" : "Zapsat jídlo")}
+              {step === "form" && (isEditing ? "Upravit jídlo" : source === "photo" ? "Potvrď jídlo" : "Zapsat jídlo")}
               {step === "feedback" && "Uloženo"}
             </h2>
           </div>
@@ -314,9 +354,9 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full flex flex-col items-center gap-3 py-8 bg-blue-50 dark:bg-blue-900/20 rounded-3xl border-2 border-dashed border-blue-200 dark:border-blue-900/50 active:scale-[0.98] transition-all"
+                className="w-full flex flex-col items-center gap-3 py-8 bg-rose-50 dark:bg-rose-900/20 rounded-3xl border-2 border-dashed border-rose-200 dark:border-rose-900/50 active:scale-[0.98] transition-all"
               >
-                <div className="w-14 h-14 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
+                <div className="w-14 h-14 rounded-2xl bg-rose-600 flex items-center justify-center text-white shadow-lg shadow-rose-500/30">
                   <Camera className="w-7 h-7" />
                 </div>
                 <div className="text-center">
@@ -365,7 +405,7 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
               <img src={photoDataUrl} alt="Fotka jídla" className="w-full aspect-square object-cover rounded-3xl" />
               <button
                 onClick={handleAnalyze}
-                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all"
+                className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all"
               >
                 Analyzovat jídlo
               </button>
@@ -388,13 +428,13 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="Např. dvě vejce na měkko, krajíc chleba s máslem a rajče"
-                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-blue-500 dark:text-white transition-all resize-none"
+                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-rose-500 dark:text-white transition-all resize-none"
                 />
               </div>
               <button
                 onClick={handleAnalyzeText}
                 disabled={!description.trim()}
-                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all disabled:opacity-50"
+                className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all disabled:opacity-50"
               >
                 Analyzovat
               </button>
@@ -421,7 +461,7 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
 
           {step === "analyzing" && (
             <div className="flex flex-col items-center justify-center gap-4 py-16">
-              <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+              <Loader2 className="w-8 h-8 text-rose-500 animate-spin" />
               <p className="text-sm text-slate-500 dark:text-slate-400">{analyzingMessage}</p>
             </div>
           )}
@@ -447,7 +487,7 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Např. Kuřecí salát"
-                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-blue-500 dark:text-white transition-all"
+                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-rose-500 dark:text-white transition-all"
                 />
               </div>
 
@@ -459,7 +499,7 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
                   value={calories}
                   onChange={(e) => setCalories(e.target.value)}
                   placeholder="0"
-                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-blue-500 dark:text-white transition-all"
+                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-rose-500 dark:text-white transition-all"
                 />
               </div>
 
@@ -468,21 +508,21 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Bílkoviny</label>
                   <input
                     type="number" inputMode="numeric" value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="g"
-                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-blue-500 dark:text-white transition-all"
+                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
                   />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tuky</label>
                   <input
                     type="number" inputMode="numeric" value={fat} onChange={(e) => setFat(e.target.value)} placeholder="g"
-                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-blue-500 dark:text-white transition-all"
+                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
                   />
                 </div>
                 <div>
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sacharidy</label>
                   <input
                     type="number" inputMode="numeric" value={carbs} onChange={(e) => setCarbs(e.target.value)} placeholder="g"
-                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-blue-500 dark:text-white transition-all"
+                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
                   />
                 </div>
               </div>
@@ -496,7 +536,7 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
                       onClick={() => setType(opt.id)}
                       className={`py-2.5 rounded-xl text-xs font-bold border-2 transition-all ${
                         type === opt.id
-                          ? "border-blue-600 bg-blue-50 dark:bg-blue-900/20 text-blue-600"
+                          ? "border-rose-600 bg-rose-50 dark:bg-rose-900/20 text-rose-600"
                           : "border-transparent bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
                       }`}
                     >
@@ -512,18 +552,33 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
                   type="time"
                   value={time}
                   onChange={(e) => setTime(e.target.value)}
-                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-blue-500 dark:text-white transition-all"
+                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-rose-500 dark:text-white transition-all"
                 />
               </div>
 
               <button
                 onClick={handleSave}
                 disabled={!canSave || saving}
-                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                Uložit jídlo
+                {isEditing ? "Uložit změny" : "Uložit jídlo"}
               </button>
+
+              {isEditing && (
+                <button
+                  onClick={handleDeleteMeal}
+                  disabled={deleting}
+                  className={`w-full flex items-center justify-center gap-2 py-3 rounded-2xl font-bold active:scale-[0.98] transition-all disabled:opacity-50 border ${
+                    confirmDelete
+                      ? "bg-red-50 dark:bg-red-900/20 text-red-500 border-red-200 dark:border-red-900/50"
+                      : "bg-slate-50 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500 border-slate-100 dark:border-slate-800"
+                  }`}
+                >
+                  {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                  {confirmDelete ? "Opravdu smazat? Klikni znovu" : "Smazat jídlo"}
+                </button>
+              )}
             </div>
           )}
 
@@ -541,7 +596,7 @@ export default function AddMealModal({ onClose }: AddMealModalProps) {
               </div>
               <button
                 onClick={onClose}
-                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all"
+                className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all"
               >
                 Hotovo
               </button>

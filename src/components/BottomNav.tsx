@@ -16,43 +16,38 @@ export default function BottomNav({ activeTab, setActiveTab, onOpenAddMeal }: Bo
     { id: 'profile', label: 'Profil', icon: User },
   ] as const;
 
-  return (
-    <div className="shrink-0 w-full bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 px-6 pt-4 pb-8 flex justify-between items-center rounded-t-3xl shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.05)] dark:shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.3)] z-20 transition-colors">
-      {tabs.slice(0, 2).map((tab) => (
-        <button
-          key={tab.id}
-          onClick={() => setActiveTab(tab.id)}
-          className={`flex flex-col items-center gap-1 transition-colors ${
-            activeTab === tab.id ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
-          }`}
-        >
-          <tab.icon className={`w-6 h-6 ${activeTab === tab.id ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span className="text-[10px] font-bold">{tab.label}</span>
-        </button>
-      ))}
+  const navItemClass = (id: NavTab) =>
+    `flex flex-col items-center gap-0.5 px-3.5 py-1.5 rounded-2xl transition-colors ${
+      activeTab === id
+        ? 'bg-rose-50 dark:bg-slate-800 text-rose-600 dark:text-rose-400'
+        : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
+    }`;
 
-      {/* HLAVNÍ AKČNÍ TLAČÍTKO - Přidání jídla (foto / popis / do budoucna hlas) */}
-      <div className="relative -top-6">
+  return (
+    <div className="shrink-0 w-full px-5 pb-6 pt-2 flex justify-center z-20">
+      <div className="w-full flex items-center justify-between rounded-full bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border border-rose-100/70 dark:border-slate-800 shadow-[0_14px_34px_-16px_rgba(196,58,92,0.4)] dark:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.65)] px-2.5 py-2 transition-colors">
+        {tabs.slice(0, 2).map((tab) => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={navItemClass(tab.id)}>
+            <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'stroke-[2.5]' : 'stroke-2'}`} />
+            <span className="text-[9px] font-bold">{tab.label}</span>
+          </button>
+        ))}
+
+        {/* HLAVNÍ AKČNÍ TLAČÍTKO - Přidání jídla (foto / popis / hlas) */}
         <button
           onClick={onOpenAddMeal}
-          className="w-16 h-16 bg-linear-to-tr from-blue-600 to-sky-400 rounded-full flex items-center justify-center text-white shadow-lg shadow-blue-500/30 transform transition-transform active:scale-95 hover:scale-105 border-4 border-white dark:border-slate-900"
+          className="relative -top-4 w-14 h-14 shrink-0 bg-linear-to-tr from-rose-600 to-rose-400 rounded-full flex items-center justify-center text-white shadow-lg shadow-rose-500/40 transform transition-transform active:scale-95 hover:scale-105 border-4 border-white dark:border-slate-900"
         >
-          <Plus className="w-7 h-7" />
+          <Plus className="w-6 h-6" />
         </button>
-      </div>
 
-      {tabs.slice(2).map((tab) => (
-        <button
-          key={tab.id}
-          onClick={() => setActiveTab(tab.id)}
-          className={`flex flex-col items-center gap-1 transition-colors ${
-            activeTab === tab.id ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'
-          }`}
-        >
-          <tab.icon className={`w-6 h-6 ${activeTab === tab.id ? 'stroke-[2.5]' : 'stroke-2'}`} />
-          <span className="text-[10px] font-bold">{tab.label}</span>
-        </button>
-      ))}
+        {tabs.slice(2).map((tab) => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={navItemClass(tab.id)}>
+            <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'stroke-[2.5]' : 'stroke-2'}`} />
+            <span className="text-[9px] font-bold">{tab.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

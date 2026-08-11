@@ -82,7 +82,7 @@ export default function Onboarding() {
           <LogoHorizontal className="scale-110 mx-auto" />
           
           <div className="space-y-2">
-            <h1 className="text-3xl font-extrabold tracking-tight">
+            <h1 className="font-display italic text-3xl font-medium tracking-tight">
               {isRegistering ? "Vytvořit účet" : "Vítej v Nouri"}
             </h1>
             <p className="text-slate-500 dark:text-slate-400">Tvůj osobní AI asistent pro zdravý životní styl.</p>
@@ -94,7 +94,7 @@ export default function Onboarding() {
               onClick={handleGoogleLogin}
               className="w-full flex items-center justify-center gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 py-3.5 px-6 rounded-2xl shadow-sm font-bold text-slate-700 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-all active:scale-[0.97]"
             >
-              <LogIn className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <LogIn className="w-5 h-5 text-rose-600 dark:text-rose-400" />
               Pokračovat přes Google
             </button>
 
@@ -114,7 +114,7 @@ export default function Onboarding() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3.5 pl-12 pr-4 text-sm font-semibold outline-blue-500 transition-all dark:text-white dark:placeholder:text-slate-500"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3.5 pl-12 pr-4 text-sm font-semibold outline-rose-500 transition-all dark:text-white dark:placeholder:text-slate-500"
                 />
               </div>
               <div className="relative">
@@ -125,15 +125,15 @@ export default function Onboarding() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3.5 pl-12 pr-4 text-sm font-semibold outline-blue-500 transition-all dark:text-white dark:placeholder:text-slate-500"
+                  className="w-full bg-slate-50 dark:bg-slate-900 border-none rounded-2xl py-3.5 pl-12 pr-4 text-sm font-semibold outline-rose-500 transition-all dark:text-white dark:placeholder:text-slate-500"
                 />
               </div>
-              
+
               {authError && <p className="text-red-500 text-xs font-bold">{authError}</p>}
 
               <button
                 type="submit"
-                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.97] transition-all mt-2"
+                className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.97] transition-all mt-2"
               >
                 {isRegistering ? "Zaregistrovat se" : "Přihlásit se emailem"}
               </button>
@@ -141,7 +141,7 @@ export default function Onboarding() {
 
             <button
               onClick={() => setIsRegistering(!isRegistering)}
-              className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline"
+              className="text-sm font-bold text-rose-600 dark:text-rose-400 hover:underline"
             >
               {isRegistering ? "Už máš účet? Přihlas se" : "Nemáš účet? Zaregistruj se"}
             </button>
@@ -156,11 +156,11 @@ export default function Onboarding() {
     return (
       <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
         <div className="space-y-8 pt-12">
-          <div className="w-16 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-1/4 h-full bg-blue-600 rounded-full" />
+          <div className="w-16 h-2 bg-rose-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-1/4 h-full bg-rose-600 rounded-full" />
           </div>
           <div className="space-y-2 text-center sm:text-left">
-            <h2 className="text-3xl font-bold tracking-tight">Jak ti máme říkat?</h2>
+            <h2 className="font-display italic text-3xl font-medium tracking-tight">Jak ti máme říkat?</h2>
             <p className="text-slate-500 dark:text-slate-400">Mya tě tak bude oslovovat.</p>
           </div>
           <div className="relative">
@@ -171,7 +171,7 @@ export default function Onboarding() {
               autoFocus
               value={formData.name || user.displayName || ""}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              className="w-full bg-white dark:bg-slate-900 border-none rounded-3xl py-6 pl-16 pr-6 text-xl font-bold shadow-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all dark:text-white"
+              className="w-full bg-white dark:bg-slate-900 border-none rounded-3xl py-6 pl-16 pr-6 text-xl font-bold shadow-sm focus:ring-2 focus:ring-rose-500 outline-none transition-all dark:text-white"
             />
           </div>
           <div className="flex gap-4">
@@ -180,7 +180,7 @@ export default function Onboarding() {
                  key={g}
                  onClick={() => setFormData({...formData, gender: g})}
                  className={`flex-1 py-4 rounded-3xl font-bold border-2 transition-all active:scale-[0.97] ${
-                   formData.gender === g ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20 text-blue-600' : 'border-transparent bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-500'
+                   formData.gender === g ? 'border-rose-600 bg-rose-50 dark:bg-rose-900/20 text-rose-600' : 'border-transparent bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-500'
                  }`}
                >
                  {g === 'female' ? 'Žena' : 'Muž'}
@@ -188,7 +188,7 @@ export default function Onboarding() {
              ))}
           </div>
         </div>
-        <button onClick={handleNext} disabled={!formData.name && !user.displayName} className="bg-blue-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.97] transition-all">
+        <button onClick={handleNext} disabled={!formData.name && !user.displayName} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.97] transition-all">
           Pokračovat <ChevronRight className="w-5 h-5" />
         </button>
       </div>
@@ -200,17 +200,17 @@ export default function Onboarding() {
     return (
       <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
         <div className="space-y-12 pt-12">
-          <div className="w-16 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-2/4 h-full bg-blue-600 rounded-full" />
+          <div className="w-16 h-2 bg-rose-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-2/4 h-full bg-rose-600 rounded-full" />
           </div>
           <div className="space-y-2 text-center sm:text-left">
-            <h2 className="text-3xl font-bold tracking-tight">Tvoje parametry</h2>
+            <h2 className="font-display italic text-3xl font-medium tracking-tight">Tvoje parametry</h2>
             <p className="text-slate-500 dark:text-slate-400">Důležité pro výpočet metabolismu.</p>
           </div>
           
           <div className="space-y-4">
             {/* DATUM NAROZENÍ */}
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-blue-500 transition-all">
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-rose-500 transition-all">
               <div className="flex items-center gap-4 text-slate-400 dark:text-slate-500">
                 <Calendar className="w-6 h-6" />
                 <span className="font-bold">Narození</span>
@@ -223,7 +223,7 @@ export default function Onboarding() {
               />
             </div>
 
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-blue-500 transition-all">
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-rose-500 transition-all">
               <div className="flex items-center gap-4 text-slate-400 dark:text-slate-500">
                 <Ruler className="w-6 h-6" />
                 <span className="font-bold">Výška (cm)</span>
@@ -236,7 +236,7 @@ export default function Onboarding() {
               />
             </div>
             
-            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-blue-500 transition-all">
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-rose-500 transition-all">
               <div className="flex items-center gap-4 text-slate-400 dark:text-slate-500">
                 <Weight className="w-6 h-6" />
                 <span className="font-bold">Váha (kg)</span>
@@ -250,7 +250,7 @@ export default function Onboarding() {
             </div>
           </div>
         </div>
-        <button onClick={handleNext} className="bg-blue-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
+        <button onClick={handleNext} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
           Pokračovat <ChevronRight className="w-5 h-5" />
         </button>
       </div>
@@ -269,11 +269,11 @@ export default function Onboarding() {
     return (
       <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
         <div className="space-y-12 pt-12">
-          <div className="w-16 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-3/4 h-full bg-blue-600 rounded-full" />
+          <div className="w-16 h-2 bg-rose-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-3/4 h-full bg-rose-600 rounded-full" />
           </div>
           <div className="space-y-2 text-center sm:text-left">
-            <h2 className="text-3xl font-bold tracking-tight">Jak aktivní jsi?</h2>
+            <h2 className="font-display italic text-3xl font-medium tracking-tight">Jak aktivní jsi?</h2>
             <p className="text-slate-500 dark:text-slate-400">Pomůže nám to určit tvůj výdej.</p>
           </div>
           
@@ -283,13 +283,13 @@ export default function Onboarding() {
                  key={act.v}
                  onClick={() => setFormData({...formData, activityLevel: act.v})}
                  className={`w-full p-5 rounded-3xl text-left border-2 transition-all active:scale-[0.98] ${
-                   formData.activityLevel === act.v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20' : 'border-transparent bg-white dark:bg-slate-900'
+                   formData.activityLevel === act.v ? 'border-rose-600 bg-rose-50 dark:bg-rose-900/20' : 'border-transparent bg-white dark:bg-slate-900'
                  }`}
                >
                  <div className="flex items-center gap-3">
-                   <Zap className={`w-5 h-5 ${formData.activityLevel === act.v ? 'text-blue-600' : 'text-slate-300'}`} />
+                   <Zap className={`w-5 h-5 ${formData.activityLevel === act.v ? 'text-rose-600' : 'text-slate-300'}`} />
                    <div>
-                     <div className={`font-bold ${formData.activityLevel === act.v ? 'text-blue-600' : 'text-slate-800 dark:text-slate-100'}`}>{act.l}</div>
+                     <div className={`font-bold ${formData.activityLevel === act.v ? 'text-rose-600' : 'text-slate-800 dark:text-slate-100'}`}>{act.l}</div>
                      <div className="text-xs text-slate-500 dark:text-slate-400">{act.d}</div>
                    </div>
                  </div>
@@ -297,7 +297,7 @@ export default function Onboarding() {
              ))}
           </div>
         </div>
-        <button onClick={handleNext} className="bg-blue-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
+        <button onClick={handleNext} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
           Už skoro hotovo <ChevronRight className="w-5 h-5" />
         </button>
       </div>
@@ -309,11 +309,11 @@ export default function Onboarding() {
     return (
       <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
         <div className="space-y-12 pt-12">
-          <div className="w-16 h-2 bg-blue-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div className="w-full h-full bg-blue-600 rounded-full" />
+          <div className="w-16 h-2 bg-rose-100 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div className="w-full h-full bg-rose-600 rounded-full" />
           </div>
           <div className="space-y-2 text-center sm:text-left">
-            <h2 className="text-3xl font-bold tracking-tight">Co je tvůj cíl?</h2>
+            <h2 className="font-display italic text-3xl font-medium tracking-tight">Co je tvůj cíl?</h2>
             <p className="text-slate-500 dark:text-slate-400">Podle toho nastavíme kalorie.</p>
           </div>
           
@@ -327,16 +327,16 @@ export default function Onboarding() {
                  key={g.id}
                  onClick={() => setFormData({...formData, goal: g.id})}
                  className={`w-full p-6 rounded-3xl text-left border-2 transition-all active:scale-[0.98] ${
-                   formData.goal === g.id ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/20' : 'border-transparent bg-white dark:bg-slate-900'
+                   formData.goal === g.id ? 'border-rose-600 bg-rose-50 dark:bg-rose-900/20' : 'border-transparent bg-white dark:bg-slate-900'
                  }`}
                >
-                 <div className={`font-bold text-lg ${formData.goal === g.id ? 'text-blue-600' : 'text-slate-800 dark:text-slate-100'}`}>{g.label}</div>
+                 <div className={`font-bold text-lg ${formData.goal === g.id ? 'text-rose-600' : 'text-slate-800 dark:text-slate-100'}`}>{g.label}</div>
                  <div className="text-sm text-slate-500 dark:text-slate-400">{g.sub}</div>
                </button>
              ))}
           </div>
         </div>
-        <button onClick={handleNext} className="bg-blue-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-blue-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
+        <button onClick={handleNext} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
           Vše nastaveno! ✨
         </button>
       </div>

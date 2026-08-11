@@ -26,7 +26,7 @@ export default function UpdatePrompt() {
         <p className="text-sm text-slate-600 dark:text-slate-300">Je k dispozici nová verze appky.</p>
         <button
           onClick={() => updateServiceWorker(true)}
-          className="shrink-0 rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white transition-all active:scale-[0.98]"
+          className="shrink-0 rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white transition-all active:scale-[0.98]"
         >
           Aktualizovat
         </button>

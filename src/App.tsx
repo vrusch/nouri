@@ -7,6 +7,7 @@ import Stats from "./features/Stats";
 import Recipes from "./features/Recipes";
 import Profile from "./features/Profile";
 import Onboarding from "./features/Onboarding";
+import { type MealItem } from "./db/db";
 import { useAuth } from "./context/useAuth";
 import { seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs } from "./lib/cloudSync";
 import { formatDaysCs } from "./lib/format";
@@ -17,6 +18,7 @@ export default function App() {
   const { user, profile, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>("home");
   const [addMealOpen, setAddMealOpen] = useState(false);
+  const [editingMeal, setEditingMeal] = useState<MealItem | null>(null);
   const [weighInOverdue, setWeighInOverdue] = useState(false);
   const [daysSinceWeighIn, setDaysSinceWeighIn] = useState<number | null>(null);
   const [showReminder, setShowReminder] = useState(false);
@@ -54,7 +56,7 @@ export default function App() {
   if (loading) {
     return (
       <div className="h-dvh flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-rose-600"></div>
       </div>
     );
   }
@@ -66,7 +68,7 @@ export default function App() {
   const renderContent = () => {
     switch (activeTab) {
       case "home":
-        return <Home />;
+        return <Home onEditMeal={setEditingMeal} />;
       case "stats":
         return <Stats />;
       case "recipes":
@@ -74,7 +76,7 @@ export default function App() {
       case "profile":
         return <Profile />;
       default:
-        return <Home />;
+        return <Home onEditMeal={setEditingMeal} />;
     }
   };
 
@@ -96,7 +98,7 @@ export default function App() {
           <div className="relative">
             <button
               onClick={() => setShowReminder((v) => !v)}
-              className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors focus:outline-none"
+              className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
             >
               <Bell className="w-6 h-6 stroke-2" />
               {weighInOverdue && (
@@ -114,7 +116,7 @@ export default function App() {
                 </p>
                 <button
                   onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
-                  className="w-full bg-blue-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
+                  className="w-full bg-rose-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
                 >
                   Zapsat váhu
                 </button>
@@ -134,7 +136,15 @@ export default function App() {
         <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} onOpenAddMeal={() => setAddMealOpen(true)} />
       </div>
 
-      {addMealOpen && <AddMealModal onClose={() => setAddMealOpen(false)} />}
+      {(addMealOpen || editingMeal) && (
+        <AddMealModal
+          editMeal={editingMeal ?? undefined}
+          onClose={() => {
+            setAddMealOpen(false);
+            setEditingMeal(null);
+          }}
+        />
+      )}
     </div>
   );
 }

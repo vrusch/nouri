@@ -180,7 +180,7 @@ export default function Recipes() {
 
   return (
     <div className="space-y-6 pt-6 transition-colors">
-      <h1 className="text-2xl font-bold tracking-tight dark:text-slate-100">AI Recepty</h1>
+      <h1 className="font-display italic text-2xl font-medium tracking-tight dark:text-slate-100">AI Recepty</h1>
 
       <div className="flex bg-slate-50 dark:bg-slate-800 p-1 rounded-2xl gap-1 border border-slate-100 dark:border-slate-700 transition-colors">
         {VIEW_OPTIONS.map((opt) => (
@@ -189,13 +189,13 @@ export default function Recipes() {
             onClick={() => setView(opt.id)}
             className={`relative flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${
               view === opt.id
-                ? "bg-white dark:bg-slate-600 shadow-sm text-blue-600 dark:text-white"
+                ? "bg-white dark:bg-slate-600 shadow-sm text-rose-600 dark:text-white"
                 : "text-slate-400 dark:text-slate-500"
             }`}
           >
             {opt.label}
             {opt.id === "list" && unboughtCount > 0 && (
-              <span className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+              <span className="absolute -top-1.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center">
                 {unboughtCount}
               </span>
             )}
@@ -236,7 +236,7 @@ export default function Recipes() {
       {view === "generate" && availability === "ready" && status === "idle" && (
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 space-y-5 transition-colors">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-500 dark:text-blue-400 shrink-0">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center text-rose-500 dark:text-rose-400 shrink-0">
               <ChefHat className="w-6 h-6" />
             </div>
             <div>
@@ -266,7 +266,7 @@ export default function Recipes() {
               value={preferences}
               onChange={(e) => setPreferences(e.target.value)}
               placeholder="Např. vegetariánské, bez lepku, rychlovka do 15 minut"
-              className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 text-sm font-semibold outline-blue-500 dark:text-white transition-all"
+              className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
             />
           </div>
 
@@ -280,7 +280,7 @@ export default function Recipes() {
           <div className="space-y-2.5">
             <button
               onClick={handleGenerateText}
-              className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
               <Sparkles className="w-4 h-4" />
               Navrhni mi recept
@@ -317,7 +317,7 @@ export default function Recipes() {
           <img src={photoDataUrl} alt="Fotka lednice" className="w-full aspect-square object-cover rounded-2xl" />
           <button
             onClick={handleGenerateFromPhoto}
-            className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
           >
             <Sparkles className="w-4 h-4" />
             Najít recept z fotky
@@ -327,7 +327,7 @@ export default function Recipes() {
 
       {view === "generate" && status === "loading" && (
         <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center gap-4 py-16 transition-colors">
-          <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+          <Loader2 className="w-8 h-8 text-rose-500 animate-spin" />
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {photoDataUrl ? "Mya kouká na lednici a hledá recept..." : "Mya vymýšlí recept..."}
           </p>
@@ -368,7 +368,7 @@ export default function Recipes() {
               className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
                 savedToLibrary
                   ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
-                  : "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+                  : "bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400"
               }`}
             >
               {savedToLibrary ? <CheckCircle2 className="w-4 h-4" /> : <BookMarked className="w-4 h-4" />}
@@ -384,7 +384,7 @@ export default function Recipes() {
               className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
                 addedToList
                   ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
-                  : "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+                  : "bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400"
               }`}
             >
               {addedToList ? <CheckCircle2 className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
@@ -433,7 +433,7 @@ function RecipeCard({ recipe }: { recipe: RecipeResult }) {
           <ul className="space-y-1.5">
             {recipe.ingredients.map((item, i) => (
               <li key={i} className="text-sm text-slate-700 dark:text-slate-300 flex gap-2">
-                <span className="text-blue-400">•</span>
+                <span className="text-rose-400">•</span>
                 {item}
               </li>
             ))}
@@ -447,7 +447,7 @@ function RecipeCard({ recipe }: { recipe: RecipeResult }) {
           <ol className="space-y-2">
             {recipe.instructions.map((step, i) => (
               <li key={i} className="text-sm text-slate-700 dark:text-slate-300 flex gap-3">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400 text-xs font-bold flex items-center justify-center">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-rose-50 dark:bg-rose-900/30 text-rose-500 dark:text-rose-400 text-xs font-bold flex items-center justify-center">
                   {i + 1}
                 </span>
                 {step}
@@ -513,7 +513,7 @@ function ShoppingListView({
                   type="checkbox"
                   checked={item.bought}
                   onChange={() => onToggle(item)}
-                  className="w-5 h-5 rounded accent-blue-600 shrink-0"
+                  className="w-5 h-5 rounded accent-rose-600 shrink-0"
                 />
                 <span
                   className={`flex-1 text-sm ${
@@ -592,7 +592,7 @@ function SavedRecipesView({
                 <div className="flex gap-2.5">
                   <button
                     onClick={() => onAddToShoppingList(entry)}
-                    className="flex-1 flex items-center justify-center gap-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 py-3 rounded-2xl font-bold active:scale-[0.98] transition-all"
+                    className="flex-1 flex items-center justify-center gap-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 py-3 rounded-2xl font-bold active:scale-[0.98] transition-all"
                   >
                     <ShoppingCart className="w-4 h-4" />
                     Do seznamu
@@ -617,7 +617,7 @@ function SavedRecipesView({
 function EmptyState({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {
   return (
     <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col items-center text-center gap-4 transition-colors">
-      <div className="w-14 h-14 rounded-2xl bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-blue-500 dark:text-blue-400">
+      <div className="w-14 h-14 rounded-2xl bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center text-rose-500 dark:text-rose-400">
         {icon}
       </div>
       <div>
