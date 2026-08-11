@@ -12,7 +12,7 @@ export default defineConfig({
     VitePWA({
       registerType: "prompt",
       injectRegister: false,
-      includeAssets: ["apple-touch-icon.png"],
+      includeAssets: ["apple-touch-icon.png", "favicon.png"],
       manifest: {
         name: "Nouri",
         short_name: "Nouri",
@@ -31,6 +31,12 @@ export default defineConfig({
             src: "/pwa-512.png",
             sizes: "512x512",
             type: "image/png",
+          },
+          {
+            src: "/pwa-maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
           },
         ],
         shortcuts: [

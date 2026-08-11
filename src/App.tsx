@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LogoHorizontal } from "./components/Logo";
+import { LogoHorizontal, LogoIcon } from "./components/Logo";
 import BottomNav, { type NavTab } from "./components/BottomNav";
 import AddMealModal from "./components/AddMealModal";
 import QuickLookupModal from "./components/QuickLookupModal";
@@ -78,7 +78,7 @@ export default function App() {
   if (loading) {
     return (
       <div className="h-dvh flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-rose-600"></div>
+        <LogoIcon className="w-16 h-16" animated />
       </div>
     );
   }

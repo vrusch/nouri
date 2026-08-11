@@ -1,5 +1,12 @@
 
-export const LogoIcon = ({ className = "w-8 h-8" }) => (
+interface LogoIconProps {
+  className?: string;
+  /** Křivka se "kreslí" (stroke-dashoffset smyčka) a jiskřička pulzuje — pro loading obrazovku
+   *  v App.tsx, ne pro běžné statické použití v hlavičce/onboardingu. */
+  animated?: boolean;
+}
+
+export const LogoIcon = ({ className = "w-8 h-8", animated = false }: LogoIconProps) => (
   <svg
     viewBox="0 0 100 100"
     xmlns="http://www.w3.org/2000/svg"
@@ -22,10 +29,12 @@ export const LogoIcon = ({ className = "w-8 h-8" }) => (
       strokeWidth="14"
       strokeLinecap="round"
       strokeLinejoin="round"
+      {...(animated ? { pathLength: 1, className: "animate-logo-draw" } : {})}
     />
     <path
       d="M 88 5 Q 88 15 98 15 Q 88 15 88 25 Q 88 15 78 15 Q 88 15 88 5 Z"
       fill="url(#starGrad)"
+      className={animated ? "animate-pulse" : undefined}
     />
   </svg>
 );

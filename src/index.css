@@ -18,6 +18,29 @@
   .font-display {
     font-family: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
   }
+  /* Loading obrazovka (App.tsx) — logo se "kreslí" v nekonečné smyčce, dokud appka čeká na
+   * Firebase auth. pathLength="1" na <path> normalizuje délku křivky, takže dasharray/offset
+   * fungují bez ohledu na skutečnou geometrii cesty. */
+  .animate-logo-draw {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: nouri-logo-draw 1.1s ease-in-out infinite;
+  }
+}
+
+@keyframes nouri-logo-draw {
+  0% {
+    stroke-dashoffset: 1;
+  }
+  55% {
+    stroke-dashoffset: 0;
+  }
+  85% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: 1;
+  }
 }
 
 :root {
