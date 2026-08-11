@@ -7,6 +7,7 @@ import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
 import { summarizeWeek } from "../lib/weekSummary";
 import { buildDailyProteinRecords, detectLowProteinPattern, MACRO_PATTERN_COOLDOWN_DAYS } from "../lib/macroPattern";
 import { daysSince } from "../lib/weighIn";
+import { isQuietHours } from "../lib/quietHours";
 import { MyaAI } from "../lib/ai";
 import { subscribeWeightLogs, type WeightLogEntry } from "../lib/cloudSync";
 
@@ -86,7 +87,12 @@ export default function Stats() {
   const macroPatternDismissedRecently = profile?.lastMacroPatternDismissedAt
     ? daysSince(profile.lastMacroPatternDismissedAt) < MACRO_PATTERN_COOLDOWN_DAYS
     : false;
-  const showMacroPatternCard = !!lowProteinPattern?.detected && !macroPatternDismissedRecently;
+  // Během tichých hodin appka neotvírá nový proaktivní nudge (a nevolá kvůli němu AI) —
+  // stejné pravidlo a stejné uživatelsky nastavitelné okno jako červená tečka na zvonu
+  // v App.tsx (viz FEATURE_IDEAS.md sekce 12).
+  const quietHoursActive =
+    (profile?.quietHoursEnabled ?? true) && isQuietHours(new Date().getHours(), profile?.quietHoursStart, profile?.quietHoursEnd);
+  const showMacroPatternCard = !!lowProteinPattern?.detected && !macroPatternDismissedRecently && !quietHoursActive;
 
   const [macroSuggestion, setMacroSuggestion] = useState<string | null>(null);
   useEffect(() => {

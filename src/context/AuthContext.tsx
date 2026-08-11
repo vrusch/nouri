@@ -20,6 +20,9 @@ export interface UserProfile {
   lastProfileCheckAt?: string; // ISO datum poslední potvrzené kontroly profilu (viz profileCheck.ts)
   customReminders?: string[]; // Vlastní afirmace/texty, které Mya občas použije místo generické hlášky (viz customReminders.ts)
   lastMacroPatternDismissedAt?: string; // ISO datum posledního potvrzení návrhu na doladění maker (viz macroPattern.ts)
+  quietHoursEnabled?: boolean; // vypnutí/zapnutí tichého režimu (viz quietHours.ts), výchozí (undefined) = zapnuto
+  quietHoursStart?: number; // hodina 0-23, výchozí 22 (QUIET_HOURS_START v quietHours.ts)
+  quietHoursEnd?: number; // hodina 0-23, výchozí 7 (QUIET_HOURS_END v quietHours.ts)
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

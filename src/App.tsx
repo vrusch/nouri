@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LogoHorizontal } from "./components/Logo";
 import BottomNav, { type NavTab } from "./components/BottomNav";
 import AddMealModal from "./components/AddMealModal";
@@ -14,6 +14,7 @@ import { seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs } from "./lib
 import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
 import { computeProfileCheckStatus } from "./lib/profileCheck";
+import { isQuietHours } from "./lib/quietHours";
 import { Bell, Search } from "lucide-react";
 
 export default function App() {
@@ -32,6 +33,18 @@ export default function App() {
   const [showReminder, setShowReminder] = useState(false);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const reminderDays = profile?.weighInReminderDays ?? 3;
+  const notificationRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showReminder) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notificationRef.current && !notificationRef.current.contains(e.target as Node)) {
+        setShowReminder(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showReminder]);
 
   useEffect(() => {
     if (!user || !profile?.setupComplete) return;
@@ -75,6 +88,11 @@ export default function App() {
   }
 
   const profileCheck = computeProfileCheckStatus(profile.lastProfileCheckAt);
+  // Appka během tichých hodin nesmí sama upoutávat pozornost na připomínky — červená tečka
+  // je jediný pasivní "nudge" prvek, zvon samotný jde otevřít ručně kdykoliv. Okno je uživatelem
+  // nastavitelné v Profilu (výchozí 22-7, viz quietHours.ts), vypínatelné přes quietHoursEnabled.
+  const quietHoursActive =
+    (profile.quietHoursEnabled ?? true) && isQuietHours(new Date().getHours(), profile.quietHoursStart, profile.quietHoursEnd);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -114,13 +132,13 @@ export default function App() {
             >
               <Search className="w-5 h-5 stroke-2" />
             </button>
-            <div className="relative">
+            <div className="relative" ref={notificationRef}>
               <button
                 onClick={() => setShowReminder((v) => !v)}
                 className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
               >
                 <Bell className="w-6 h-6 stroke-2" />
-                {(weighInOverdue || profileCheck.checkOverdue) && (
+                {(weighInOverdue || profileCheck.checkOverdue) && !quietHoursActive && (
                   <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
                 )}
               </button>

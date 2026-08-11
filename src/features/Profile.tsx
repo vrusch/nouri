@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -10,6 +10,7 @@ import { logWeight, clearMealsBackup, bulkBackupMeals, fetchWeightLogs } from ".
 import { formatDaysCs, formatMealsCs, formatRowsCs } from "../lib/format";
 import { parseMealsCsv } from "../lib/csvImport";
 import { computeProfileCheckStatus } from "../lib/profileCheck";
+import { QUIET_HOURS_START, QUIET_HOURS_END } from "../lib/quietHours";
 import { db, type MealItem } from "../db/db";
 import pkg from "../../package.json";
 
@@ -52,6 +53,15 @@ export default function Profile() {
   ];
 
   const reminderOptions = [1, 2, 3, 5, 7];
+
+  const quietHoursEnabled = profile?.quietHoursEnabled ?? true;
+  const quietHoursStart = profile?.quietHoursStart ?? QUIET_HOURS_START;
+  const quietHoursEnd = profile?.quietHoursEnd ?? QUIET_HOURS_END;
+  const formatHour = (h: number) => `${String(h).padStart(2, "0")}:00`;
+  const handleAdjustQuietHour = (field: "quietHoursStart" | "quietHoursEnd", delta: number) => {
+    const current = field === "quietHoursStart" ? quietHoursStart : quietHoursEnd;
+    updateProfile({ [field]: (current + delta + 24) % 24 });
+  };
 
   const activityOptions: { id: UserProfile['activityLevel']; label: string; desc: string }[] = [
     { id: 1.2, label: "Nízká", desc: "Sedavé zaměstnání" },
@@ -440,6 +450,77 @@ export default function Profile() {
                   <span className="text-[9px] text-slate-500 dark:text-slate-400">dní</span>
                 </button>
               ))}
+            </div>
+          )}
+
+          <div
+            className={`px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${editing === 'quietHours' ? accentBg : 'active:bg-slate-50 dark:active:bg-slate-800'}`}
+            onClick={() => setEditing(editing === 'quietHours' ? null : 'quietHours')}
+          >
+            <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+              <BellOff className="w-4 h-4 text-indigo-500" />
+              Tichý režim
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-bold text-slate-800 dark:text-white">
+                {quietHoursEnabled ? `${formatHour(quietHoursStart)}–${formatHour(quietHoursEnd)}` : 'Vypnuto'}
+              </span>
+              <ChevronDown className={`w-4 h-4 ${editing === 'quietHours' ? accentText : 'text-slate-400'}`} />
+            </div>
+          </div>
+
+          {editing === 'quietHours' && (
+            <div className={`px-4 pb-4 space-y-4 ${accentBg}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">Potlačovat upozornění v tomhle okně</span>
+                <button
+                  onClick={() => updateProfile({ quietHoursEnabled: !quietHoursEnabled })}
+                  className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${quietHoursEnabled ? 'bg-rose-600' : 'bg-slate-200 dark:bg-slate-700'}`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${quietHoursEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
+              </div>
+
+              <div className={`flex items-center justify-between gap-3 transition-opacity ${!quietHoursEnabled ? 'opacity-40 pointer-events-none' : ''}`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Od</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleAdjustQuietHour('quietHoursStart', -1)}
+                      className="w-7 h-7 rounded-full bg-white dark:bg-slate-800 shadow-sm text-slate-500 dark:text-slate-300 font-bold active:scale-90 transition-all"
+                    >
+                      −
+                    </button>
+                    <span className="w-11 text-center text-sm font-bold text-slate-800 dark:text-white tabular-nums">{formatHour(quietHoursStart)}</span>
+                    <button
+                      onClick={() => handleAdjustQuietHour('quietHoursStart', 1)}
+                      className="w-7 h-7 rounded-full bg-white dark:bg-slate-800 shadow-sm text-slate-500 dark:text-slate-300 font-bold active:scale-90 transition-all"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Do</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleAdjustQuietHour('quietHoursEnd', -1)}
+                      className="w-7 h-7 rounded-full bg-white dark:bg-slate-800 shadow-sm text-slate-500 dark:text-slate-300 font-bold active:scale-90 transition-all"
+                    >
+                      −
+                    </button>
+                    <span className="w-11 text-center text-sm font-bold text-slate-800 dark:text-white tabular-nums">{formatHour(quietHoursEnd)}</span>
+                    <button
+                      onClick={() => handleAdjustQuietHour('quietHoursEnd', 1)}
+                      className="w-7 h-7 rounded-full bg-white dark:bg-slate-800 shadow-sm text-slate-500 dark:text-slate-300 font-bold active:scale-90 transition-all"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
