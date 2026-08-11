@@ -2,6 +2,31 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.14.0] - 2026-08-11
+### Přidáno
+- **PWA zástupci appky**: dlouhé podržení ikony appky na ploše nabídne "Zapsat jídlo" rovnou, appka se otevře přímo v modálu pro zápis.
+- **Periodická kontrola profilu**: appka po ~3 týdnech bez potvrzení nabídne "pořád ti sedí výška/aktivita/cíl?" — karta v Profilu i druhý nudge ve zvonečku.
+- **Import historie z CSV**: opak exportu — appka přijme přesně formát, který sama vyexportuje, chybné řádky se přeskočí a nahlásí místo shození celého importu.
+- **Porovnání týdnů**: karta "Průměr za posledních 7 dní" ve Statistikách teď ukazuje i minulý týden vedle sebe (kcal/den + kolik dní bylo zapsáno), bez barevného hodnocení.
+- **"Semafor" dne**: barevný odznak (zelená/žlutá/červená) v kartě kalorií na Home podle postupu vůči dennímu cíli.
+- **Plný JSON export**: vedle CSV appka nabízí kompletní zálohu — profil, jídla (se `syncId`), historie váhy.
+- **"Co mám doma" návrh jídla**: generátor receptů umí navrhnout recept jen ze zadaných surovin.
+- **Vlastní připomínkové texty**: appka čas od času nahradí AI pozdrav na Home vlastní připomínkou uživatelky místo generické AI hlášky.
+- **Proaktivní doladění maker**: appka detekuje dlouhodobě nízký příjem bílkovin a nabídne ve Statistikách kartu s konkrétním AI návrhem řešení místo tichého reportování v grafu.
+- **Poslední jídla**: jedno tapnutí na nedávné jídlo v zápisu jídla ho znovu zapíše bez přepisování názvu a kalorií.
+- **Voda**: počítadlo sklenic na Home vedle kalorického kruhu, výchozí cíl 8 sklenic denně.
+- **Režim "Jím venku"**: rychlý toggle při popisu jídla — appka akceptuje hrubší odhad bez nutnosti přesných maker, tyhle dny se vyloučí z detekce vzorců dlouhodobě nízkého příjmu bílkovin.
+- **Denní šablony**: uložení dnešních jídel jako pojmenovanou šablonu a její aplikace jedním tapnutím jindy.
+- **Doplňující otázka u foto-rozpoznání**: appka po nejistém odhadu z fotky nabídne pole na upřesnění kontextu a znovu zavolá AI se stejnou fotkou.
+- **Rychlé nutriční hledání**: samostatné pole nezávislé na zápisu jídla (lupa v hlavičce appky) — hodnoty se jen zobrazí, nikam se neukládají.
+- **Tichý režim / hodiny klidu**: appka během nastavitelného časového okna (výchozí 22:00–7:00, upravitelné v Profilu) potlačí pasivní upozornění — červenou tečku na zvonu i proaktivní kartu o bílkovinách.
+- **Nová ikona appky**: PWA ikony (192/512/maskable/apple-touch/favicon) přegenerovány podle aktuálního gradientového loga appky — dřív byly z doby před vizuálním redesignem.
+- **Animovaná loading obrazovka**: appka místo obecného spinneru ukazuje animované logo appky, které se při startu appky postupně "kreslí".
+
+### Opraveno
+- **Zavírání notifikačního okna**: klik mimo otevřenou notifikaci (zvoneček v hlavičce) ji dřív nezavíral.
+- **Rozbitý favicon**: appka odkazovala na neexistující `vite.svg` (zbytek výchozího Vite scaffoldu), teď používá skutečnou appkovou ikonu.
+
 ## [0.13.0] - 2026-08-11
 ### Přidáno
 - **Editace a smazání jednotlivého jídla**: klepnutí na kartičku jídla na Home otevře editační formulář (stejný jako při zápisu, předvyplněný) s možností upravit hodnoty nebo smazat jen tu jednu položku (dvojklikové potvrzení) — dřív šlo jen smazat celou historii najednou. Editace i mazání jdou přes `cloudSync` (nová funkce `deleteMeal`), ne jen lokální Dexie.
