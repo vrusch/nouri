@@ -2,6 +2,12 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.13.0] - 2026-08-11
+### Přidáno
+- **Editace a smazání jednotlivého jídla**: klepnutí na kartičku jídla na Home otevře editační formulář (stejný jako při zápisu, předvyplněný) s možností upravit hodnoty nebo smazat jen tu jednu položku (dvojklikové potvrzení) — dřív šlo jen smazat celou historii najednou. Editace i mazání jdou přes `cloudSync` (nová funkce `deleteMeal`), ne jen lokální Dexie.
+- **Vizuální redesign appky**: nová barevná paleta (růžová/"bloom" jako univerzální brand barva napříč logem, navigací, tlačítky a kruhem postupu místo modré), bílkoviny/sacharidy/tuky dostaly vlastní barvy a jsou vidět přímo na Home jako progress bary pod hlavním kalorickým kruhem, serifová kurzíva pro Myin hlas a nadpisy, plovoucí spodní navigace se sklem místo pevné lišty přes celou šířku. Vrstva podle pohlaví profilu (růžové/modré pozadí, rámeček avataru) zůstává beze změny.
+- **Streak odznak na Home**: appka počítá, kolik dní po sobě je zapsané aspoň jedno jídlo, a zobrazí ho u pozdravu od druhého dne v řadě.
+
 ## [0.12.0] - 2026-08-10
 ### Přidáno
 - **Plná obousměrná synchronizace jídel a váhy mezi zařízeními**: živé Firestore listenery (`subscribeMeals`, `subscribeWeightLogs`) nahrazují jednorázové čtení/zálohu — víc otevřených zařízení/tabů vidí zápisy z ostatních bez restartu appky. Firestore offline perzistence: zápisy bez připojení se frontují a odešlou automaticky po obnovení sítě.
