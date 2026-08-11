@@ -1,7 +1,7 @@
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase";
 import { type UserProfile } from "../context/AuthContext";
-import { calculateNutrition, type NutritionResults } from "./nutrition";
+import { calculateNutrition, type NutritionResults, type Goal } from "./nutrition";
 
 export interface AIResponse {
   text: string;
@@ -33,6 +33,15 @@ export interface MealFeedbackInput {
 }
 
 const getMealFeedbackFn = httpsCallable<MealFeedbackInput, { text: string }>(functions, "getMealFeedback");
+
+export interface MacroPatternInput {
+  avgProtein: number;
+  targetProtein: number;
+  daysConsidered: number;
+  goal: Goal;
+}
+
+const suggestMacroFixFn = httpsCallable<MacroPatternInput, { text: string }>(functions, "suggestMacroFix");
 
 export const MyaAI = {
   /**
@@ -86,6 +95,20 @@ export const MyaAI = {
     } catch (error) {
       console.error("Mya AI Error:", error);
       return "Zapsáno! 👍";
+    }
+  },
+
+  /**
+   * Vygeneruje krátký proaktivní návrh, když appka delší dobu vidí nedostatek bílkovin
+   * (viz detectLowProteinPattern v macroPattern.ts) — místo tichého reportování v grafu.
+   */
+  async suggestMacroFix(input: MacroPatternInput): Promise<string> {
+    try {
+      const response = await suggestMacroFixFn(input);
+      return response.data.text;
+    } catch (error) {
+      console.error("Mya AI Error:", error);
+      return `Posledních pár dní ti chybí bílkoviny k cíli (${input.targetProtein}g/den) — zkus přidat větší porci masa, tvarohu nebo luštěnin k jednomu z jídel.`;
     }
   }
 };

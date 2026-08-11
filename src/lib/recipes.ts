@@ -21,6 +21,7 @@ export interface GenerateRecipeInput {
   remainingCarbs: number;
   goal: Goal;
   preferences?: string;
+  availableIngredients?: string;
 }
 
 export interface GenerateRecipeFromFridgeInput extends GenerateRecipeInput {

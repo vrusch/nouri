@@ -50,6 +50,7 @@ export default function Recipes() {
   const [recipe, setRecipe] = useState<RecipeResult | null>(null);
   const [recipeSource, setRecipeSource] = useState<"text" | "photo">("text");
   const [preferences, setPreferences] = useState("");
+  const [availableIngredients, setAvailableIngredients] = useState("");
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [view, setView] = useState<View>("generate");
@@ -88,6 +89,7 @@ export default function Recipes() {
       remainingCarbs: remaining.carbs,
       goal: profile.goal,
       preferences: preferences.trim() || undefined,
+      availableIngredients: availableIngredients.trim() || undefined,
     });
     if (result) {
       setRecipe(result);
@@ -258,6 +260,20 @@ export default function Recipes() {
               <span>Některé dnešní jídlo má zapsané jen kalorie bez maker, takže zbývající bílkoviny/tuky/sacharidy nemusí sedět úplně přesně.</span>
             </div>
           )}
+
+          <div>
+            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Co máš doma? (nepovinné)</label>
+            <input
+              type="text"
+              value={availableIngredients}
+              onChange={(e) => setAvailableIngredients(e.target.value)}
+              placeholder="Např. kuřecí prsa, rýže, brokolice"
+              className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+            />
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 px-1">
+              Uveď je a Mya navrhne recept jen z toho, co máš — jinak vybere z běžně dostupných surovin.
+            </p>
+          </div>
 
           <div>
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nějaké přání? (nepovinné)</label>

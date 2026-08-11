@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -30,6 +30,10 @@ export default function Profile() {
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Vlastní připomínky stavy
+  const [newReminderText, setNewReminderText] = useState("");
+  const [isSavingReminder, setIsSavingReminder] = useState(false);
 
   // AI report stavy
   const [isGenerating, setIsGenerating] = useState(false);
@@ -180,6 +184,24 @@ export default function Profile() {
 
   const handleConfirmProfileCheck = () => {
     updateProfile({ lastProfileCheckAt: new Date().toISOString().split('T')[0] });
+  };
+
+  const handleAddReminder = async () => {
+    const text = newReminderText.trim();
+    if (!text) return;
+    setIsSavingReminder(true);
+    try {
+      const current = profile?.customReminders ?? [];
+      await updateProfile({ customReminders: [...current, text] });
+      setNewReminderText("");
+    } finally {
+      setIsSavingReminder(false);
+    }
+  };
+
+  const handleDeleteReminder = (index: number) => {
+    const current = profile?.customReminders ?? [];
+    updateProfile({ customReminders: current.filter((_, i) => i !== index) });
   };
 
   const handleDeleteHistory = async () => {
@@ -497,6 +519,48 @@ export default function Profile() {
             )}
           </div>
         )}
+      </div>
+
+      {/* 3.5 VLASTNÍ PŘIPOMÍNKY */}
+      <div className="px-4 space-y-1.5">
+        <h2 className="px-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider transition-colors">Vlastní připomínky</h2>
+        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-800 p-4 space-y-3 transition-colors">
+          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+            Napiš si vlastní afirmaci nebo připomínku — Mya ji čas od času použije místo generické hlášky.
+          </p>
+
+          {(profile?.customReminders ?? []).map((text, i) => (
+            <div key={i} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl px-3 py-2.5">
+              <MessageCircleHeart className={`w-4 h-4 shrink-0 ${accentText}`} />
+              <span className="flex-1 text-sm text-slate-700 dark:text-slate-200">{text}</span>
+              <button
+                onClick={() => handleDeleteReminder(i)}
+                className="text-slate-400 hover:text-red-500 transition-colors shrink-0"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newReminderText}
+              onChange={(e) => setNewReminderText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddReminder()}
+              placeholder="Např. Jsi silnější, než si myslíš"
+              maxLength={120}
+              className="flex-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm outline-rose-500 dark:text-white transition-all"
+            />
+            <button
+              onClick={handleAddReminder}
+              disabled={isSavingReminder || !newReminderText.trim()}
+              className={`shrink-0 w-10 h-10 flex items-center justify-center ${profile?.gender === 'female' ? 'bg-rose-600' : 'bg-sky-600'} text-white rounded-xl disabled:opacity-40 active:scale-[0.95] transition-all`}
+            >
+              {isSavingReminder ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* 4. VZHLED */}

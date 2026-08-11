@@ -406,6 +406,7 @@ interface RecipeInput {
   remainingCarbs: number;
   goal: Goal;
   preferences?: string;
+  availableIngredients?: string;
 }
 
 interface RecipeResult {
@@ -464,6 +465,9 @@ dojíst zbytek denního nutričního cíle. Navrhni JEDEN recept reálně uvaři
 jehož nutriční hodnoty (kalorie, bílkoviny, tuky, sacharidy) se co nejvíc blíží zadaným zbývajícím hodnotám —
 klidně mírně pod nimi, ale nikdy výrazně nad.
 
+Pokud uživatel uvede seznam surovin, které má doma, recept musí jít uvařit JEN z nich — klidně navíc s běžnými
+základními surovinami (sůl, pepř, olej, voda), i když v seznamu nejsou, ale žádné jiné suroviny nenavrhuj.
+
 Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný markdown, žádný text okolo):
 {
   "name": "krátký český název receptu",
@@ -480,7 +484,9 @@ Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný ma
     const userPrompt = `Zbývá do dnešního cíle: ${Math.round(input.remainingCalories)} kcal, ${Math.round(
       input.remainingProtein
     )}g bílkovin, ${Math.round(input.remainingFat)}g tuků, ${Math.round(input.remainingCarbs)}g sacharidů.
-Cíl uživatele: ${goalLabel}.${input.preferences?.trim() ? `\nPreference/omezení: ${input.preferences.trim()}.` : ""}`;
+Cíl uživatele: ${goalLabel}.${input.preferences?.trim() ? `\nPreference/omezení: ${input.preferences.trim()}.` : ""}${
+      input.availableIngredients?.trim() ? `\nSuroviny, které má doma: ${input.availableIngredients.trim()}.` : ""
+    }`;
 
     try {
       const response = await fetch(OPENAI_API_URL, {
@@ -515,6 +521,66 @@ Cíl uživatele: ${goalLabel}.${input.preferences?.trim() ? `\nPreference/omezen
     } catch (error) {
       console.error("Mya Recipe Error:", error);
       return null;
+    }
+  }
+);
+
+interface MacroPatternInput {
+  avgProtein: number;
+  targetProtein: number;
+  daysConsidered: number;
+  goal: Goal;
+}
+
+export const suggestMacroFix = onCall(
+  { secrets: [openaiApiKey], region: "us-central1" },
+  async (request) => {
+    requireAuth(request);
+    const input = request.data as MacroPatternInput | undefined;
+    if (!input || !Number.isFinite(input.avgProtein) || !Number.isFinite(input.targetProtein)) {
+      throw new HttpsError("invalid-argument", "Chybí platná data o příjmu bílkovin.");
+    }
+
+    const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
+    const fallback = `Posledních pár dní ti chybí bílkoviny k cíli (${input.targetProtein}g/den) — zkus přidat větší porci masa, tvarohu nebo luštěnin k jednomu z jídel.`;
+
+    const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Appka si všimla, že uživatel dlouhodobě
+nedosahuje svého cíle na bílkoviny. Napiš krátkou (2-3 věty), vřelou a konkrétní zprávu, která to pojmenuje a
+navrhne 1-2 praktické kroky ke zlepšení (např. konkrétní potraviny, posun rozložení jídel) — tón podpůrný, ne
+kárající. Piš česky, neformálně. Vrať jen čistý text zprávy, žádný markdown ani uvozovky okolo.`;
+
+    const userPrompt = `Za posledních ${input.daysConsidered} spolehlivě zapsaných dní měl uživatel v průměru ${input.avgProtein}g
+bílkovin denně, cíl je ${input.targetProtein}g. Cíl uživatele: ${goalLabel}.`;
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 120,
+        }),
+      });
+
+      if (response.status === 429) return { text: fallback };
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      const content = json.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
+        return { text: fallback };
+      }
+      return { text: content };
+    } catch (error) {
+      console.error("Mya Macro Pattern Error:", error);
+      return { text: fallback };
     }
   }
 );

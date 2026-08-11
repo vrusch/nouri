@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Gauge } from "lucide-react";
+import { Gauge, Sparkles, Loader2 } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
 import { summarizeWeek } from "../lib/weekSummary";
+import { buildDailyProteinRecords, detectLowProteinPattern, MACRO_PATTERN_COOLDOWN_DAYS } from "../lib/macroPattern";
+import { daysSince } from "../lib/weighIn";
+import { MyaAI } from "../lib/ai";
 import { subscribeWeightLogs, type WeightLogEntry } from "../lib/cloudSync";
 
 const DAY_LABELS = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
@@ -73,6 +76,44 @@ export default function Stats() {
     profile && nutrition
       ? calibrateTarget(manualWeighIns, dailyCalories, profile.goal, nutrition.bmr, nutrition.tdee)
       : null;
+
+  // Dlouhodobý vzorec nízkých bílkovin — jen z posledních 14 dní, ne z celé historie.
+  const macroPatternWindowStart = lastNDates(14)[0];
+  const proteinRecords = buildDailyProteinRecords(allMeals).filter((r) => r.date >= macroPatternWindowStart);
+  const lowProteinPattern = nutrition
+    ? detectLowProteinPattern(proteinRecords, nutrition.macros.protein)
+    : null;
+  const macroPatternDismissedRecently = profile?.lastMacroPatternDismissedAt
+    ? daysSince(profile.lastMacroPatternDismissedAt) < MACRO_PATTERN_COOLDOWN_DAYS
+    : false;
+  const showMacroPatternCard = !!lowProteinPattern?.detected && !macroPatternDismissedRecently;
+
+  const [macroSuggestion, setMacroSuggestion] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showMacroPatternCard || !nutrition || !lowProteinPattern || !profile) return;
+
+    const goal = profile.goal;
+    const avgProtein = lowProteinPattern.avgProtein;
+    const targetProtein = nutrition.macros.protein;
+    const daysConsidered = lowProteinPattern.reliableDaysConsidered;
+
+    let cancelled = false;
+    MyaAI.suggestMacroFix({ avgProtein, targetProtein, daysConsidered, goal }).then((text) => {
+      if (!cancelled) setMacroSuggestion(text);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // nutrition/lowProteinPattern/profile jsou tu záměrně jen jako primitivní hodnoty (ne celé
+    // objekty) — ty se přepočítávají nanovo při každém renderu, takže by v deps poli způsobily
+    // nekonečný cyklus volání API při každém překreslení.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showMacroPatternCard, lowProteinPattern?.avgProtein, lowProteinPattern?.reliableDaysConsidered, nutrition?.macros.protein, profile?.goal]);
+
+  const handleDismissMacroPattern = () => {
+    updateProfile({ lastMacroPatternDismissedAt: new Date().toISOString().split("T")[0] });
+    setMacroSuggestion(null);
+  };
 
   return (
     <div className="space-y-6 pt-6 transition-colors">
@@ -223,6 +264,29 @@ export default function Stats() {
             className="w-full bg-rose-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all"
           >
             Upravit cíl na {calibration.suggestedTargetCalories} kcal
+          </button>
+        </div>
+      )}
+
+      {/* Dlouhodobě nízké bílkoviny — proaktivní návrh */}
+      {showMacroPatternCard && (
+        <div className="bg-linear-to-br from-violet-50 to-indigo-50/60 dark:from-violet-950/20 dark:to-indigo-950/10 rounded-3xl p-6 border border-violet-100/60 dark:border-violet-900/30 transition-colors">
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles className="w-4 h-4 text-violet-500 dark:text-violet-400" />
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Bílkoviny dlouhodobě pod cílem</h3>
+          </div>
+          {macroSuggestion ? (
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">{macroSuggestion}</p>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500 mb-4">
+              <Loader2 className="w-4 h-4 animate-spin" /> Mya přemýšlí...
+            </div>
+          )}
+          <button
+            onClick={handleDismissMacroPattern}
+            className="w-full bg-violet-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all"
+          >
+            Beru na vědomí
           </button>
         </div>
       )}

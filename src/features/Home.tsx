@@ -6,6 +6,7 @@ import { Volume2, Square, Flame } from "lucide-react";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight } from "../lib/nutrition";
 import { computeLoggingStreak } from "../lib/streak";
+import { pickDailyCustomReminder } from "../lib/customReminders";
 
 const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -58,6 +59,13 @@ export default function Home({ onEditMeal }: HomeProps) {
 
       if (cached) {
         setGreeting(cached);
+        return;
+      }
+
+      const customReminder = pickDailyCustomReminder(profile.customReminders ?? [], today);
+      if (customReminder) {
+        setGreeting(customReminder);
+        sessionStorage.setItem(cacheKey, customReminder);
         return;
       }
 

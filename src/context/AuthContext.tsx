@@ -18,6 +18,8 @@ export interface UserProfile {
   weighInReminderDays?: number; // Jak často připomínat vážení (1-7 dní)
   calibratedTDEE?: number; // Skutečný výdej odhadnutý z dat (viz Stats.tsx), přepíše formulkový odhad z activityLevel
   lastProfileCheckAt?: string; // ISO datum poslední potvrzené kontroly profilu (viz profileCheck.ts)
+  customReminders?: string[]; // Vlastní afirmace/texty, které Mya občas použije místo generické hlášky (viz customReminders.ts)
+  lastMacroPatternDismissedAt?: string; // ISO datum posledního potvrzení návrhu na doladění maker (viz macroPattern.ts)
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
