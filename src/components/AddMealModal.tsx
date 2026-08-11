@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2 } from "lucide-react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2, ClipboardList } from "lucide-react";
 import { db, type MealItem } from "../db/db";
-import { MyaVision, type VisionResult, type MealType } from "../lib/vision";
+import { MyaVision, type VisionResult, type MealType, type Confidence } from "../lib/vision";
 import { MyaVoice } from "../lib/voice";
 import { MyaAI } from "../lib/ai";
-import { backupMeal, deleteMeal } from "../lib/cloudSync";
+import { backupMeal, deleteMeal, subscribeMealTemplates, deleteMealTemplate, type MealTemplateEntry } from "../lib/cloudSync";
 import { calculateNutrition } from "../lib/nutrition";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { useAuth } from "../context/useAuth";
+import { getRecentUniqueMeals, type RecentMealSummary } from "../lib/recentMeals";
+import { formatMealsCs } from "../lib/format";
 
 interface AddMealModalProps {
   onClose: () => void;
@@ -16,9 +19,18 @@ interface AddMealModalProps {
   editMeal?: MealItem;
 }
 
-type Step = "choose" | "photo-preview" | "describe" | "recording" | "analyzing" | "form" | "feedback";
+type Step = "choose" | "photo-preview" | "describe" | "recording" | "analyzing" | "form" | "feedback" | "templates";
 
 const RECORDING_MIME_TYPES = ["audio/webm", "audio/mp4", "audio/ogg"];
+
+// Typické časy jídla podle typu — šablona ukládá jen typ (ne konkrétní čas), takže při
+// aplikaci na dnešek appka přiřadí rozumný výchozí čas místo aktuálního okamžiku pro všechny položky.
+const TEMPLATE_TIME_BY_TYPE: Record<MealType, string> = {
+  breakfast: "08:00",
+  lunch: "12:00",
+  dinner: "18:00",
+  snack: "15:00",
+};
 
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -62,6 +74,12 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
   const [analyzingMessage, setAnalyzingMessage] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [eatingOut, setEatingOut] = useState(false);
+  const [hintText, setHintText] = useState("");
+  const [lastConfidence, setLastConfidence] = useState<Confidence | null>(null);
+  const [templates, setTemplates] = useState<MealTemplateEntry[]>([]);
+  const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -83,6 +101,14 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!user) return;
+    return subscribeMealTemplates(user.uid, setTemplates);
+  }, [user]);
+
+  const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
+  const recentMeals = getRecentUniqueMeals(allMeals);
+
   const resetFormFromVision = (result: VisionResult | null, failureNotice: string) => {
     if (result) {
       setName(result.name);
@@ -91,7 +117,16 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
       setFat(result.fat ? String(result.fat) : "");
       setCarbs(result.carbs ? String(result.carbs) : "");
       setType(result.type);
-      setNotice(result.confidence === "low" ? "Mya si nebyla úplně jistá odhadem — zkontroluj prosím hodnoty." : null);
+      setLastConfidence(result.confidence);
+      // V režimu "Jím venku" nahrazuje pasivní varování o nejistotě uklidňujícím textem —
+      // nepřesnost je tady očekávaná, ne důvod k obavám (viz roughEstimate v handleSave).
+      setNotice(
+        eatingOut
+          ? "Hrubý odhad pro jídlo venku — makra můžou být nepřesná, to je v pořádku."
+          : result.confidence === "low"
+            ? "Mya si nebyla úplně jistá odhadem — zkontroluj prosím hodnoty."
+            : null
+      );
     } else {
       setName("");
       setCalories("");
@@ -99,6 +134,7 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
       setFat("");
       setCarbs("");
       setType(guessMealType());
+      setLastConfidence(null);
       setNotice(failureNotice);
     }
     setTime(currentTime());
@@ -112,6 +148,8 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
       const dataUrl = await fileToCompressedDataUrl(file);
       setPhotoDataUrl(dataUrl);
       setSource("photo");
+      setEatingOut(false);
+      setHintText("");
       setStep("photo-preview");
     } catch (error) {
       console.error(error);
@@ -128,11 +166,22 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
     setStep("form");
   };
 
+  const handleRefineWithHint = async () => {
+    if (!photoDataUrl || !hintText.trim()) return;
+    setAnalyzingMessage("Mya upřesňuje odhad...");
+    setStep("analyzing");
+    const result = await MyaVision.analyzeFood(photoDataUrl, hintText.trim());
+    resetFormFromVision(result, "Mya se nepodařilo rozpoznat jídlo z fotky. Zapiš prosím hodnoty ručně.");
+    setHintText("");
+    setStep("form");
+  };
+
   const handleDescribeStart = () => {
     setSource("manual");
     setPhotoDataUrl(null);
     setDescription("");
     setNotice(null);
+    setEatingOut(false);
     setStep("describe");
   };
 
@@ -164,6 +213,7 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
       setSource("manual");
       setDescription(text);
       setNotice(null);
+      setEatingOut(false);
       setStep("describe");
     } else {
       setNotice("Mye se nepodařilo rozpoznat řeč. Zkus to znovu nebo popiš jídlo textem.");
@@ -209,7 +259,66 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
     setType(guessMealType());
     setTime(currentTime());
     setNotice(null);
+    setEatingOut(false);
+    setLastConfidence(null);
+    setHintText("");
     setStep("form");
+  };
+
+  const handleQuickRelog = (meal: RecentMealSummary) => {
+    setSource("manual");
+    setPhotoDataUrl(null);
+    setName(meal.name);
+    setCalories(String(meal.value));
+    setProtein(meal.protein !== undefined ? String(meal.protein) : "");
+    setFat(meal.fat !== undefined ? String(meal.fat) : "");
+    setCarbs(meal.carbs !== undefined ? String(meal.carbs) : "");
+    setType(meal.type);
+    setTime(currentTime());
+    setNotice(null);
+    setEatingOut(false);
+    setLastConfidence(null);
+    setStep("form");
+  };
+
+  const handleApplyTemplate = async (template: MealTemplateEntry) => {
+    setApplyingTemplateId(template.id);
+    try {
+      const today = new Date().toISOString().split("T")[0];
+      const newMeals: MealItem[] = template.items.map((item) => {
+        const newMeal: MealItem = {
+          name: item.name,
+          value: item.value,
+          time: TEMPLATE_TIME_BY_TYPE[item.type],
+          date: today,
+          type: item.type,
+          source: "manual",
+          syncId: crypto.randomUUID(),
+        };
+        if (item.protein !== undefined) newMeal.protein = item.protein;
+        if (item.fat !== undefined) newMeal.fat = item.fat;
+        if (item.carbs !== undefined) newMeal.carbs = item.carbs;
+        return newMeal;
+      });
+
+      await db.meals.bulkAdd(newMeals);
+      if (user) newMeals.forEach((m) => backupMeal(user.uid, m));
+
+      setFeedbackText(`Šablona ${template.name} přidána! 👍`);
+      setStep("feedback");
+    } finally {
+      setApplyingTemplateId(null);
+    }
+  };
+
+  const handleDeleteTemplate = async (id: string) => {
+    if (!user) return;
+    setDeletingTemplateId(id);
+    try {
+      await deleteMealTemplate(user.uid, id);
+    } finally {
+      setDeletingTemplateId(null);
+    }
   };
 
   const handleBack = () => {
@@ -222,6 +331,9 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
     setPhotoDataUrl(null);
     setDescription("");
     setNotice(null);
+    setEatingOut(false);
+    setLastConfidence(null);
+    setHintText("");
   };
 
   const handleClose = () => {
@@ -264,6 +376,7 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
       if (protein) meal.protein = Math.round(Number(protein));
       if (fat) meal.fat = Math.round(Number(fat));
       if (carbs) meal.carbs = Math.round(Number(carbs));
+      if (eatingOut) meal.roughEstimate = true;
 
       await db.meals.add(meal);
       setStep("feedback");
@@ -317,7 +430,7 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
         {/* HLAVIČKA */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-2">
-            {!isEditing && (step === "photo-preview" || step === "describe" || step === "recording" || step === "form") && (
+            {!isEditing && (step === "photo-preview" || step === "describe" || step === "recording" || step === "form" || step === "templates") && (
               <button
                 onClick={handleBack}
                 className="p-1 -ml-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
@@ -333,6 +446,7 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
               {step === "analyzing" && "Mya analyzuje..."}
               {step === "form" && (isEditing ? "Upravit jídlo" : source === "photo" ? "Potvrď jídlo" : "Zapsat jídlo")}
               {step === "feedback" && "Uloženo"}
+              {step === "templates" && "Šablony"}
             </h2>
           </div>
           <button onClick={handleClose} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
@@ -391,12 +505,83 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
                 </div>
               </button>
 
+              <button
+                onClick={() => setStep("templates")}
+                className="w-full flex items-center gap-4 p-5 bg-slate-50 dark:bg-slate-800/50 rounded-3xl active:scale-[0.98] transition-all"
+              >
+                <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 shadow-sm flex items-center justify-center text-slate-500 dark:text-slate-400 shrink-0">
+                  <ClipboardList className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <div className="font-bold text-slate-800 dark:text-white">Použít šablonu</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Jedním tapnutím zapiš typický den</div>
+                </div>
+              </button>
+
+              {recentMeals.length > 0 && (
+                <div className="pt-1">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 px-1">Poslední jídla</h3>
+                  <div className="flex gap-2 overflow-x-auto -mx-1 px-1 pb-1">
+                    {recentMeals.map((m) => (
+                      <button
+                        key={m.name}
+                        onClick={() => handleQuickRelog(m)}
+                        className="shrink-0 flex flex-col items-start gap-0.5 px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 rounded-2xl active:scale-[0.97] transition-all max-w-40"
+                      >
+                        <span className="text-sm font-bold text-slate-800 dark:text-white truncate max-w-full">{m.name}</span>
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold">{m.value} kcal</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {notice && (
                 <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{notice}</span>
                 </div>
               )}
+            </div>
+          )}
+
+          {step === "templates" && (
+            <div className="space-y-3 py-2">
+              {templates.length === 0 && (
+                <div className="text-center py-8 text-slate-400 dark:text-slate-600 text-sm italic px-4">
+                  Zatím nemáš žádné šablony. Ulož dnešní jídla jako šablonu na Home.
+                </div>
+              )}
+              {templates.map((t) => {
+                const totalKcal = t.items.reduce((sum, i) => sum + i.value, 0);
+                return (
+                  <div
+                    key={t.id}
+                    className="w-full flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl"
+                  >
+                    <button
+                      onClick={() => handleApplyTemplate(t)}
+                      disabled={applyingTemplateId !== null}
+                      className="flex-1 text-left disabled:opacity-50 flex items-center gap-3"
+                    >
+                      {applyingTemplateId === t.id && <Loader2 className="w-4 h-4 text-rose-500 animate-spin shrink-0" />}
+                      <span>
+                        <span className="block font-bold text-slate-800 dark:text-white">{t.name}</span>
+                        <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          {formatMealsCs(t.items.length)} · {totalKcal} kcal
+                        </span>
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteTemplate(t.id)}
+                      disabled={deletingTemplateId !== null}
+                      className="p-2 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-50 shrink-0"
+                    >
+                      {deletingTemplateId === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -431,6 +616,31 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
                   className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-rose-500 dark:text-white transition-all resize-none"
                 />
               </div>
+
+              <button
+                type="button"
+                onClick={() => setEatingOut((v) => !v)}
+                className={`w-full flex items-center gap-3 p-3.5 rounded-2xl border-2 transition-all text-left ${
+                  eatingOut
+                    ? "border-rose-600 bg-rose-50 dark:bg-rose-900/20"
+                    : "border-transparent bg-slate-50 dark:bg-slate-800"
+                }`}
+              >
+                <span
+                  className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+                    eatingOut ? "border-rose-600 bg-rose-600" : "border-slate-300 dark:border-slate-600"
+                  }`}
+                >
+                  {eatingOut && <span className="w-2 h-2 rounded-full bg-white" />}
+                </span>
+                <span>
+                  <span className="block text-sm font-bold text-slate-800 dark:text-white">Jím venku</span>
+                  <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Hrubý odhad stačí, přesná makra nejsou potřeba
+                  </span>
+                </span>
+              </button>
+
               <button
                 onClick={handleAnalyzeText}
                 disabled={!description.trim()}
@@ -469,9 +679,29 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
           {step === "form" && (
             <div className="space-y-4">
               {notice && (
-                <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{notice}</span>
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{notice}</span>
+                  </div>
+                  {source === "photo" && photoDataUrl && lastConfidence === "low" && (
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="text"
+                        value={hintText}
+                        onChange={(e) => setHintText(e.target.value)}
+                        placeholder="Např. malá porce, bez oleje…"
+                        className="flex-1 bg-white dark:bg-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 dark:text-white outline-rose-500 transition-all"
+                      />
+                      <button
+                        onClick={handleRefineWithHint}
+                        disabled={!hintText.trim()}
+                        className="shrink-0 bg-amber-600 text-white text-xs font-bold px-3 py-2 rounded-xl disabled:opacity-40 active:scale-95 transition-all"
+                      >
+                        Upřesnit
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 

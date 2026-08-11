@@ -13,16 +13,20 @@ export interface DailyProteinRecord {
 }
 
 /**
- * Sečte bílkoviny po dnech. Den je `reliable: false`, pokud aspoň jedno to jídlo nemá zapsané
+ * Sečte bílkoviny po dnech. Den je `reliable: false`, pokud aspoň jedno jídlo nemá zapsané
  * protein — jinak by appka chybějící data počítala jako 0g snězeno a nahlásila "nízký příjem"
- * i uživateli, který jen nezapsal makra, ne že by nejedl bílkoviny.
+ * i uživateli, který jen nezapsal makra, ne že by nejedl bílkoviny. Ze stejného důvodu je
+ * nespolehlivý i den s jídlem zapsaným v režimu "Jím venku" (`roughEstimate`, viz AddMealModal) —
+ * i když má protein vyplněný, jde o hrubý odhad podle kategorie, ne měřená data.
  */
-export function buildDailyProteinRecords(meals: { date: string; protein?: number }[]): DailyProteinRecord[] {
+export function buildDailyProteinRecords(
+  meals: { date: string; protein?: number; roughEstimate?: boolean }[]
+): DailyProteinRecord[] {
   const byDate = new Map<string, { total: number; reliable: boolean }>();
   meals.forEach((m) => {
     const entry = byDate.get(m.date) ?? { total: 0, reliable: true };
     entry.total += m.protein ?? 0;
-    if (m.protein === undefined) entry.reliable = false;
+    if (m.protein === undefined || m.roughEstimate) entry.reliable = false;
     byDate.set(m.date, entry);
   });
   return Array.from(byDate, ([date, { total, reliable }]) => ({ date, totalProtein: total, reliable }));

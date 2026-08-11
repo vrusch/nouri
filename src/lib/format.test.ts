@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatDaysCs, formatMealsCs, formatRowsCs } from "./format";
+import { formatDaysCs, formatMealsCs, formatRowsCs, formatGlassesCs } from "./format";
 
 describe("formatDaysCs", () => {
   it("skloňuje 1 den", () => {
@@ -41,5 +41,15 @@ describe("formatRowsCs", () => {
     expect(formatRowsCs(4)).toBe("4 řádky");
     expect(formatRowsCs(0)).toBe("0 řádků");
     expect(formatRowsCs(5)).toBe("5 řádků");
+  });
+});
+
+describe("formatGlassesCs", () => {
+  it("skloňuje 1 sklenici, 2-4 sklenice, 0 a 5+ jako sklenic", () => {
+    expect(formatGlassesCs(1)).toBe("1 sklenice");
+    expect(formatGlassesCs(2)).toBe("2 sklenice");
+    expect(formatGlassesCs(4)).toBe("4 sklenice");
+    expect(formatGlassesCs(0)).toBe("0 sklenic");
+    expect(formatGlassesCs(5)).toBe("5 sklenic");
   });
 });

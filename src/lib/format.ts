@@ -15,3 +15,9 @@ export function formatRowsCs(n: number): string {
   if (n >= 2 && n <= 4) return `${n} řádky`;
   return `${n} řádků`;
 }
+
+export function formatGlassesCs(n: number): string {
+  if (n === 1) return "1 sklenice";
+  if (n >= 2 && n <= 4) return `${n} sklenice`;
+  return `${n} sklenic`;
+}

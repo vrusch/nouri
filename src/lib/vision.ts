@@ -14,17 +14,19 @@ export interface VisionResult {
   confidence: Confidence;
 }
 
-const analyzeFoodFn = httpsCallable<{ imageDataUrl: string }, VisionResult | null>(functions, "analyzeFood");
+const analyzeFoodFn = httpsCallable<{ imageDataUrl: string; hint?: string }, VisionResult | null>(functions, "analyzeFood");
 const analyzeFoodTextFn = httpsCallable<{ description: string }, VisionResult | null>(functions, "analyzeFoodText");
 
 export const MyaVision = {
   /**
    * Rozpozná jídlo z fotky přes server-side Cloud Function (OpenAI klíč zůstává na serveru).
+   * Volitelný `hint` je doplňující upřesnění od uživatele k nejisté fotce (viz interaktivní
+   * doptání v AddMealModal), appka jím vyžádá re-analýzu se stejnou fotkou.
    * Vrací null při chybě — volající strana musí v tom případě nabídnout manuální zápis.
    */
-  async analyzeFood(imageDataUrl: string): Promise<VisionResult | null> {
+  async analyzeFood(imageDataUrl: string, hint?: string): Promise<VisionResult | null> {
     try {
-      const response = await analyzeFoodFn({ imageDataUrl });
+      const response = await analyzeFoodFn({ imageDataUrl, hint });
       return response.data;
     } catch (error) {
       console.error("Mya Vision Error:", error);

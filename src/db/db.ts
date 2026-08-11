@@ -11,6 +11,7 @@ export interface MealItem {
   fat?: number; // g
   carbs?: number; // g
   source?: "photo" | "manual";
+  roughEstimate?: boolean; // zapsáno v režimu "Jím venku" — hodnoty jsou záměrně hrubý odhad, ne měřená data
   syncId?: string; // stabilní UUID pro cloud zálohu (na rozdíl od ++id přežije reset lokální DB)
 }
 

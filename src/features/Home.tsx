@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type MealItem } from "../db/db";
 import { useAuth } from "../context/useAuth";
-import { Volume2, Square, Flame } from "lucide-react";
+import { Volume2, Square, Flame, Droplets, Loader2 } from "lucide-react";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight } from "../lib/nutrition";
 import { computeLoggingStreak } from "../lib/streak";
 import { pickDailyCustomReminder } from "../lib/customReminders";
+import { WATER_TARGET_GLASSES, getWaterProgressPercent } from "../lib/water";
+import { formatGlassesCs } from "../lib/format";
+import { subscribeWaterLog, logWater, saveMealTemplate, type MealTemplateItem } from "../lib/cloudSync";
 
 const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -21,15 +24,53 @@ interface HomeProps {
 }
 
 export default function Home({ onEditMeal }: HomeProps) {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   const [greeting, setGreeting] = useState<string>("Přemýšlím o tvém dni...");
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [waterGlasses, setWaterGlasses] = useState(0);
+  const [showTemplateSave, setShowTemplateSave] = useState(false);
+  const [templateNameInput, setTemplateNameInput] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
   const nutrition = profile ? calculateNutrition(profile) : null;
   const GOAL_CALORIES = nutrition ? nutrition.targetCalories : 1800;
 
   const today = new Date().toISOString().split('T')[0];
   const meals = useLiveQuery(() => db.meals.where('date').equals(today).toArray()) || [];
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
+
+  useEffect(() => {
+    if (!user) return;
+    return subscribeWaterLog(user.uid, today, setWaterGlasses);
+  }, [user, today]);
+
+  const handleAddWater = () => {
+    if (!user) return;
+    logWater(user.uid, today, waterGlasses + 1);
+  };
+
+  const handleRemoveWater = () => {
+    if (!user || waterGlasses <= 0) return;
+    logWater(user.uid, today, waterGlasses - 1);
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!user || !templateNameInput.trim() || meals.length === 0) return;
+    setSavingTemplate(true);
+    try {
+      const items: MealTemplateItem[] = meals.map((m) => {
+        const item: MealTemplateItem = { name: m.name, value: m.value, type: m.type };
+        if (m.protein !== undefined) item.protein = m.protein;
+        if (m.fat !== undefined) item.fat = m.fat;
+        if (m.carbs !== undefined) item.carbs = m.carbs;
+        return item;
+      });
+      await saveMealTemplate(user.uid, templateNameInput.trim(), items);
+      setTemplateNameInput("");
+      setShowTemplateSave(false);
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
 
   const consumedCalories = meals.reduce((sum, meal) => sum + meal.value, 0);
   const remainingCalories = Math.max(0, GOAL_CALORIES - consumedCalories);
@@ -202,6 +243,44 @@ export default function Home({ onEditMeal }: HomeProps) {
         )}
       </div>
 
+      {/* Voda */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center gap-4 transition-colors">
+        <div className="w-11 h-11 rounded-2xl bg-sky-50 dark:bg-sky-900/20 flex items-center justify-center text-sky-500 shrink-0">
+          <Droplets className="w-5 h-5" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2 mb-1.5">
+            <h3 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Voda</h3>
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 tabular-nums">
+              {formatGlassesCs(waterGlasses)} / {WATER_TARGET_GLASSES}
+            </span>
+          </div>
+          <div className="h-1.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-sky-500 transition-all"
+              style={{ width: `${getWaterProgressPercent(waterGlasses)}%` }}
+            />
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={handleRemoveWater}
+            disabled={waterGlasses <= 0}
+            aria-label="Odebrat sklenici"
+            className="w-8 h-8 rounded-full bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-300 font-bold disabled:opacity-30 active:scale-90 transition-all"
+          >
+            −
+          </button>
+          <button
+            onClick={handleAddWater}
+            aria-label="Přidat sklenici"
+            className="w-8 h-8 rounded-full bg-sky-500 text-white font-bold active:scale-90 transition-all"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
       {/* AI Doporučení */}
       <div className="bg-linear-to-br from-rose-50 to-amber-50/60 dark:from-rose-950/20 dark:to-amber-950/10 rounded-3xl p-5 border border-rose-100/60 dark:border-rose-900/30 relative overflow-hidden transition-colors">
         <div className="flex gap-4 relative z-10">
@@ -233,10 +312,41 @@ export default function Home({ onEditMeal }: HomeProps) {
       <div className="pb-4">
         <div className="flex justify-between items-end mb-4 px-1">
           <h3 className="font-bold text-lg text-slate-800 dark:text-slate-100">Dnešní jídla</h3>
-          <button className="text-sm font-semibold text-rose-500 dark:text-rose-400 hover:text-rose-600 transition-colors">
-            Zobrazit vše
-          </button>
+          <div className="flex items-center gap-3">
+            {meals.length > 0 && (
+              <button
+                onClick={() => setShowTemplateSave((v) => !v)}
+                className="text-xs font-semibold text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+              >
+                Uložit jako šablonu
+              </button>
+            )}
+            <button className="text-sm font-semibold text-rose-500 dark:text-rose-400 hover:text-rose-600 transition-colors">
+              Zobrazit vše
+            </button>
+          </div>
         </div>
+
+        {showTemplateSave && (
+          <div className="flex items-center gap-2 mb-4 px-1">
+            <input
+              type="text"
+              autoFocus
+              value={templateNameInput}
+              onChange={(e) => setTemplateNameInput(e.target.value)}
+              placeholder="Např. Pracovní den"
+              className="flex-1 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl px-3 py-2 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+            />
+            <button
+              onClick={handleSaveTemplate}
+              disabled={!templateNameInput.trim() || savingTemplate}
+              className="shrink-0 bg-rose-600 text-white text-sm font-bold px-3 py-2 rounded-xl disabled:opacity-50 active:scale-95 transition-all flex items-center gap-1.5"
+            >
+              {savingTemplate && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Uložit
+            </button>
+          </div>
+        )}
 
         <div className="space-y-3">
           {meals.map((meal) => {

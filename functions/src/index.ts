@@ -193,6 +193,7 @@ export const analyzeFood = onCall(
   async (request) => {
     requireAuth(request);
     const imageDataUrl = request.data?.imageDataUrl as string | undefined;
+    const hint = request.data?.hint as string | undefined;
     if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
       throw new HttpsError("invalid-argument", "Chybí platný obrázek.");
     }
@@ -227,7 +228,12 @@ Pokud na fotce není rozpoznatelné jídlo, vrať confidence "low", name "Nezná
             {
               role: "user",
               content: [
-                { type: "text", text: "Analyzuj toto jídlo." },
+                {
+                  type: "text",
+                  text: hint
+                    ? `Analyzuj toto jídlo. Doplňující upřesnění od uživatele: ${hint}`
+                    : "Analyzuj toto jídlo.",
+                },
                 { type: "image_url", image_url: { url: imageDataUrl } },
               ],
             },

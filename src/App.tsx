@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LogoHorizontal } from "./components/Logo";
 import BottomNav, { type NavTab } from "./components/BottomNav";
 import AddMealModal from "./components/AddMealModal";
+import QuickLookupModal from "./components/QuickLookupModal";
 import Home from "./features/Home";
 import Stats from "./features/Stats";
 import Recipes from "./features/Recipes";
@@ -13,7 +14,7 @@ import { seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs } from "./lib
 import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
 import { computeProfileCheckStatus } from "./lib/profileCheck";
-import { Bell } from "lucide-react";
+import { Bell, Search } from "lucide-react";
 
 export default function App() {
   const { user, profile, loading } = useAuth();
@@ -29,6 +30,7 @@ export default function App() {
   const [weighInOverdue, setWeighInOverdue] = useState(false);
   const [daysSinceWeighIn, setDaysSinceWeighIn] = useState<number | null>(null);
   const [showReminder, setShowReminder] = useState(false);
+  const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const reminderDays = profile?.weighInReminderDays ?? 3;
 
   useEffect(() => {
@@ -104,47 +106,56 @@ export default function App() {
         <header className={`px-6 pt-12 pb-4 ${genderBg}/80 dark:bg-slate-900/80 backdrop-blur-md sticky top-0 z-20 flex justify-between items-center border-b border-slate-100/50 dark:border-slate-800 shrink-0 transition-colors`}>
           <LogoHorizontal />
 
-          <div className="relative">
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => setShowReminder((v) => !v)}
-              className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
+              onClick={() => setQuickLookupOpen(true)}
+              aria-label="Rychlé hledání"
+              className="p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
             >
-              <Bell className="w-6 h-6 stroke-2" />
-              {(weighInOverdue || profileCheck.checkOverdue) && (
-                <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
-              )}
+              <Search className="w-5 h-5 stroke-2" />
             </button>
-            {showReminder && (
-              <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-100 dark:border-slate-700 p-4 z-30 text-left">
-                <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
-                  {daysSinceWeighIn === null
-                    ? "Ještě jsi nezapsala váhu — zapiš první hodnotu a appka ti pak sama pohlídá další vážení."
-                    : weighInOverdue
-                      ? "Nezapomeň se dnes zvážit — pomůže ti to sledovat trend."
-                      : `Naposledy zváženo před ${formatDaysCs(daysSinceWeighIn)} · další připomínka za ${formatDaysCs(reminderDays - daysSinceWeighIn)}.`}
-                </p>
-                <button
-                  onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
-                  className="w-full bg-rose-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
-                >
-                  Zapsat váhu
-                </button>
-                {profileCheck.checkOverdue && (
-                  <>
-                    <div className="h-px bg-slate-100 dark:bg-slate-700 my-3" />
-                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
-                      Pořád ti sedí výška, aktivita a cíl v profilu? Appka si čas od času ráda ověří, že se čísla neliší od reality.
-                    </p>
-                    <button
-                      onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
-                      className="w-full bg-slate-700 dark:bg-slate-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
-                    >
-                      Zkontrolovat profil
-                    </button>
-                  </>
+            <div className="relative">
+              <button
+                onClick={() => setShowReminder((v) => !v)}
+                className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
+              >
+                <Bell className="w-6 h-6 stroke-2" />
+                {(weighInOverdue || profileCheck.checkOverdue) && (
+                  <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
                 )}
-              </div>
-            )}
+              </button>
+              {showReminder && (
+                <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-100 dark:border-slate-700 p-4 z-30 text-left">
+                  <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+                    {daysSinceWeighIn === null
+                      ? "Ještě jsi nezapsala váhu — zapiš první hodnotu a appka ti pak sama pohlídá další vážení."
+                      : weighInOverdue
+                        ? "Nezapomeň se dnes zvážit — pomůže ti to sledovat trend."
+                        : `Naposledy zváženo před ${formatDaysCs(daysSinceWeighIn)} · další připomínka za ${formatDaysCs(reminderDays - daysSinceWeighIn)}.`}
+                  </p>
+                  <button
+                    onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
+                    className="w-full bg-rose-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
+                  >
+                    Zapsat váhu
+                  </button>
+                  {profileCheck.checkOverdue && (
+                    <>
+                      <div className="h-px bg-slate-100 dark:bg-slate-700 my-3" />
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+                        Pořád ti sedí výška, aktivita a cíl v profilu? Appka si čas od času ráda ověří, že se čísla neliší od reality.
+                      </p>
+                      <button
+                        onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
+                        className="w-full bg-slate-700 dark:bg-slate-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
+                      >
+                        Zkontrolovat profil
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -168,6 +179,8 @@ export default function App() {
           }}
         />
       )}
+
+      {quickLookupOpen && <QuickLookupModal onClose={() => setQuickLookupOpen(false)} />}
     </div>
   );
 }

@@ -31,6 +31,14 @@ function savedRecipesCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "savedRecipes");
 }
 
+function waterLogsCollection(uid: string) {
+  return collection(firestoreDb, "users", uid, "waterLogs");
+}
+
+function mealTemplatesCollection(uid: string) {
+  return collection(firestoreDb, "users", uid, "mealTemplates");
+}
+
 // Odloží cloud zálohu, aby nikdy neblokovala lokální (Dexie) zápis — chyba se jen zaloguje.
 export async function backupMeal(uid: string, meal: MealItem): Promise<void> {
   if (!meal.syncId) return;
@@ -185,6 +193,34 @@ export async function seedWeightLogIfEmpty(uid: string, currentWeight: number): 
   }
 }
 
+// Doc id = datum (YYYY-MM-DD), stejný vzor jako logWeight — přepsání ve stejný den
+// nahradí předchozí počet, místo aby appka musela počítat inkrementy na serveru.
+export async function logWater(uid: string, dateISO: string, glasses: number): Promise<void> {
+  try {
+    await setDoc(doc(waterLogsCollection(uid), dateISO), { date: dateISO, glasses });
+  } catch (error) {
+    console.error("Zápis vody do cloudu selhal:", error);
+  }
+}
+
+// Živě streamuje počet sklenic pro jeden konkrétní den (Home ukazuje jen dnešek) — na rozdíl
+// od subscribeWeightLogs appka nepotřebuje celou historii, jen aktuální hodnotu napříč zařízeními.
+export function subscribeWaterLog(
+  uid: string,
+  dateISO: string,
+  callback: (glasses: number) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  return onSnapshot(
+    doc(waterLogsCollection(uid), dateISO),
+    (snap) => callback((snap.data()?.glasses as number | undefined) ?? 0),
+    (error) => {
+      console.error("Synchronizace vody selhala:", error);
+      onError?.(error);
+    }
+  );
+}
+
 export interface ShoppingListEntry extends ShoppingListItemDraft {
   id: string;
   bought: boolean;
@@ -257,4 +293,47 @@ export async function saveRecipe(uid: string, recipe: RecipeResult, source: "tex
 
 export async function deleteSavedRecipe(uid: string, id: string): Promise<void> {
   await deleteDoc(doc(savedRecipesCollection(uid), id));
+}
+
+export interface MealTemplateItem {
+  name: string;
+  value: number;
+  type: MealItem["type"];
+  protein?: number;
+  fat?: number;
+  carbs?: number;
+}
+
+export interface MealTemplateEntry {
+  id: string;
+  name: string;
+  items: MealTemplateItem[];
+  createdAt: string;
+}
+
+// Živě streamuje users/{uid}/mealTemplates, nejnovější první — stejný vzor jako
+// subscribeSavedRecipes ("typický den" quick-fill místo knihovny receptů).
+export function subscribeMealTemplates(
+  uid: string,
+  callback: (templates: MealTemplateEntry[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(mealTemplatesCollection(uid), orderBy("createdAt", "desc"));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MealTemplateEntry, "id">) }))),
+    (error) => {
+      console.error("Synchronizace šablon jídel selhala:", error);
+      onError?.(error);
+    }
+  );
+}
+
+export async function saveMealTemplate(uid: string, name: string, items: MealTemplateItem[]): Promise<void> {
+  const entry: Omit<MealTemplateEntry, "id"> = { name, items, createdAt: new Date().toISOString() };
+  await setDoc(doc(mealTemplatesCollection(uid)), entry);
+}
+
+export async function deleteMealTemplate(uid: string, id: string): Promise<void> {
+  await deleteDoc(doc(mealTemplatesCollection(uid), id));
 }

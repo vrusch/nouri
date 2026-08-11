@@ -21,6 +21,17 @@ describe("buildDailyProteinRecords", () => {
     ]);
     expect(records).toEqual([{ date: "2026-08-01", totalProtein: 40, reliable: false }]);
   });
+
+  // REGRESE: jídlo zapsané v režimu "Jím venku" má protein vyplněný (AI ho i tak odhadne),
+  // ale je to hrubý odhad podle kategorie, ne měřená data — den se musí počítat jako nespolehlivý
+  // stejně jako při úplně chybějícím makru, jinak by odhad z restaurace tiše kontaminoval vzorec.
+  it("REGRESE: den s jídlem označeným jako roughEstimate je 'reliable: false', i když má protein vyplněný", () => {
+    const records = buildDailyProteinRecords([
+      { date: "2026-08-01", protein: 40 },
+      { date: "2026-08-01", protein: 30, roughEstimate: true },
+    ]);
+    expect(records).toEqual([{ date: "2026-08-01", totalProtein: 70, reliable: false }]);
+  });
 });
 
 describe("detectLowProteinPattern", () => {
