@@ -12,12 +12,19 @@ import { useAuth } from "./context/useAuth";
 import { seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs } from "./lib/cloudSync";
 import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
+import { computeProfileCheckStatus } from "./lib/profileCheck";
 import { Bell } from "lucide-react";
 
 export default function App() {
   const { user, profile, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>("home");
-  const [addMealOpen, setAddMealOpen] = useState(false);
+  const [addMealOpen, setAddMealOpen] = useState(() => {
+    const openFromShortcut = new URLSearchParams(window.location.search).get("action") === "add-meal";
+    if (openFromShortcut) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    return openFromShortcut;
+  });
   const [editingMeal, setEditingMeal] = useState<MealItem | null>(null);
   const [weighInOverdue, setWeighInOverdue] = useState(false);
   const [daysSinceWeighIn, setDaysSinceWeighIn] = useState<number | null>(null);
@@ -65,6 +72,8 @@ export default function App() {
     return <Onboarding />;
   }
 
+  const profileCheck = computeProfileCheckStatus(profile.lastProfileCheckAt);
+
   const renderContent = () => {
     switch (activeTab) {
       case "home":
@@ -101,7 +110,7 @@ export default function App() {
               className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
             >
               <Bell className="w-6 h-6 stroke-2" />
-              {weighInOverdue && (
+              {(weighInOverdue || profileCheck.checkOverdue) && (
                 <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
               )}
             </button>
@@ -120,6 +129,20 @@ export default function App() {
                 >
                   Zapsat váhu
                 </button>
+                {profileCheck.checkOverdue && (
+                  <>
+                    <div className="h-px bg-slate-100 dark:bg-slate-700 my-3" />
+                    <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+                      Pořád ti sedí výška, aktivita a cíl v profilu? Appka si čas od času ráda ověří, že se čísla neliší od reality.
+                    </p>
+                    <button
+                      onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
+                      className="w-full bg-slate-700 dark:bg-slate-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
+                    >
+                      Zkontrolovat profil
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>

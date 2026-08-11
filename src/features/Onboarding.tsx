@@ -64,7 +64,11 @@ export default function Onboarding() {
     if (step < 4) {
       setStep(step + 1);
     } else {
-      await updateProfile({ ...formData, setupComplete: true });
+      await updateProfile({
+        ...formData,
+        setupComplete: true,
+        lastProfileCheckAt: new Date().toISOString().split("T")[0],
+      });
     }
   };
 

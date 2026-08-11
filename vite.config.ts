@@ -33,6 +33,21 @@ export default defineConfig({
             type: "image/png",
           },
         ],
+        shortcuts: [
+          {
+            name: "Zapsat jídlo",
+            short_name: "Zapsat jídlo",
+            description: "Otevře formulář pro rychlý zápis jídla",
+            url: "/?action=add-meal",
+            icons: [
+              {
+                src: "/pwa-192.png",
+                sizes: "192x192",
+                type: "image/png",
+              },
+            ],
+          },
+        ],
       },
       workbox: {
         runtimeCaching: [

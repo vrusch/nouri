@@ -1,14 +1,16 @@
-import { useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, type LucideIcon } from "lucide-react";
+import { useRef, useState } from "react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
 import { type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
-import { logWeight, clearMealsBackup } from "../lib/cloudSync";
-import { formatDaysCs } from "../lib/format";
-import { db } from "../db/db";
+import { logWeight, clearMealsBackup, bulkBackupMeals } from "../lib/cloudSync";
+import { formatDaysCs, formatMealsCs, formatRowsCs } from "../lib/format";
+import { parseMealsCsv } from "../lib/csvImport";
+import { computeProfileCheckStatus } from "../lib/profileCheck";
+import { db, type MealItem } from "../db/db";
 import pkg from "../../package.json";
 
 export default function Profile() {
@@ -24,6 +26,9 @@ export default function Profile() {
   const [isExporting, setIsExporting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // AI report stavy
   const [isGenerating, setIsGenerating] = useState(false);
@@ -111,6 +116,33 @@ export default function Profile() {
     }
   };
 
+  const handleImportClick = () => fileInputRef.current?.click();
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // umožní vybrat i ten samý soubor znovu napodruhé
+    if (!file) return;
+
+    setIsImporting(true);
+    setImportResult(null);
+    try {
+      const text = await file.text();
+      const { meals, errors } = parseMealsCsv(text);
+      if (meals.length > 0) {
+        const mealsWithSyncId: MealItem[] = meals.map((m) => ({ ...m, syncId: crypto.randomUUID() }));
+        await db.meals.bulkAdd(mealsWithSyncId);
+        if (user) bulkBackupMeals(user.uid, mealsWithSyncId);
+      }
+      setImportResult({ imported: meals.length, errors });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleConfirmProfileCheck = () => {
+    updateProfile({ lastProfileCheckAt: new Date().toISOString().split('T')[0] });
+  };
+
   const handleDeleteHistory = async () => {
     if (!confirmDelete) {
       setConfirmDelete(true);
@@ -126,6 +158,8 @@ export default function Profile() {
       setIsDeleting(false);
     }
   };
+
+  const profileCheckStatus = computeProfileCheckStatus(profile?.lastProfileCheckAt);
 
   // Vypočítat živé metriky pro zobrazení
   const metrics = profile ? calculateNutrition({
@@ -180,6 +214,28 @@ export default function Profile() {
           <p className="text-slate-400 text-xs font-medium">{user?.email}</p>
         </div>
       </div>
+
+      {/* 1.5 PERIODICKÁ KONTROLA PROFILU */}
+      {profileCheckStatus.checkOverdue && (
+        <div className="px-4">
+          <div className="bg-linear-to-br from-slate-50 to-slate-100/60 dark:from-slate-800/40 dark:to-slate-800/10 rounded-3xl p-6 border border-slate-200/60 dark:border-slate-700/50 transition-colors">
+            <div className="flex items-center gap-2 mb-2">
+              <RefreshCw className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Pořád ti to sedí?</h3>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
+              Zkontroluj, jestli výška, aktivita a cíl níže pořád odpovídají realitě — čísla se
+              časem umí potichu rozjet od skutečnosti, pokud se profil dlouho needituje.
+            </p>
+            <button
+              onClick={handleConfirmProfileCheck}
+              className={`w-full ${profile?.gender === 'female' ? 'bg-rose-600' : 'bg-sky-600'} text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all`}
+            >
+              Ano, pořád sedí
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 2. MOJE TĚLO A CÍLE */}
       <div className="space-y-1.5 px-4">
@@ -454,6 +510,38 @@ export default function Profile() {
                 {isExporting ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <Download className="w-4 h-4 text-slate-500" />}
                 <span className="text-sm font-bold text-slate-700 dark:text-slate-200">Exportovat do CSV</span>
               </button>
+              <div>
+                <button
+                  onClick={handleImportClick}
+                  disabled={isImporting}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50"
+                >
+                  {isImporting ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <Upload className="w-4 h-4 text-slate-500" />}
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-200">Importovat z CSV</span>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 px-1">
+                  Očekává formát souboru staženého tlačítkem „Exportovat do CSV“ výše.
+                </p>
+                {importResult && (
+                  <div
+                    className={`mt-2 text-xs rounded-xl px-3 py-2 ${
+                      importResult.errors.length > 0
+                        ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400'
+                        : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400'
+                    }`}
+                  >
+                    Naimportováno {formatMealsCs(importResult.imported)}.
+                    {importResult.errors.length > 0 && ` ${formatRowsCs(importResult.errors.length)} přeskočeno kvůli chybě.`}
+                  </div>
+                )}
+              </div>
               <button
                 onClick={handleDeleteHistory}
                 disabled={isDeleting}

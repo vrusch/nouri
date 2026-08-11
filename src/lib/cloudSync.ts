@@ -51,6 +51,25 @@ export async function deleteMeal(uid: string, syncId: string): Promise<void> {
   }
 }
 
+// Hromadná varianta backupMeal pro CSV import (viz csvImport.ts) — stejné chunkování po 400
+// jako clearMealsBackup, protože import může přenést stovky jídel najednou.
+export async function bulkBackupMeals(uid: string, meals: MealItem[]): Promise<void> {
+  const withSyncId = meals.filter((meal): meal is MealItem & { syncId: string } => !!meal.syncId);
+  if (withSyncId.length === 0) return;
+  try {
+    const chunkSize = 400;
+    for (let i = 0; i < withSyncId.length; i += chunkSize) {
+      const batch = writeBatch(firestoreDb);
+      withSyncId.slice(i, i + chunkSize).forEach((meal) => {
+        batch.set(doc(mealsCollection(uid), meal.syncId), meal);
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    console.error("Hromadné zálohování importovaných jídel selhalo:", error);
+  }
+}
+
 export async function clearMealsBackup(uid: string): Promise<void> {
   try {
     const snap = await getDocs(mealsCollection(uid));
