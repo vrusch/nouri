@@ -65,7 +65,10 @@ export default function BottomNav({ activeTab, setActiveTab, onOpenAddMeal }: Bo
         />
       )}
 
-      <div className="relative w-full flex items-center justify-between rounded-full bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border border-rose-100/70 dark:border-slate-800 shadow-[0_14px_34px_-16px_rgba(196,58,92,0.4)] dark:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.65)] px-2.5 py-2 transition-colors">
+      {/* z-20 nutné explicitně — bez něj má tenhle div z-index:auto a zavírací
+          overlay (z-10, sourozenec výš) ho i s celým obsahem (satelity, taby)
+          v malování překryje, takže kliky na satelity dopadnou na overlay. */}
+      <div className="relative z-20 w-full flex items-center justify-between rounded-full bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border border-rose-100/70 dark:border-slate-800 shadow-[0_14px_34px_-16px_rgba(196,58,92,0.4)] dark:shadow-[0_14px_34px_-16px_rgba(0,0,0,0.65)] px-2.5 py-2 transition-colors">
         {tabs.slice(0, 2).map((tab) => (
           <button key={tab.id} onClick={() => selectTab(tab.id)} className={navItemClass(tab.id)}>
             <tab.icon className={`w-5 h-5 ${activeTab === tab.id ? 'stroke-[2.5]' : 'stroke-2'}`} />
