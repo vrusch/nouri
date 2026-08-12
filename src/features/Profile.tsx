@@ -1,12 +1,14 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
 import { type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
-import { logWeight, clearMealsBackup, bulkBackupMeals, fetchWeightLogs } from "../lib/cloudSync";
+import { logWeight, clearMealsBackup, bulkBackupMeals, fetchWeightLogs, fetchBodyMeasurements } from "../lib/cloudSync";
+import { buildMonthlyReportData } from "../lib/report";
+import { downloadMonthlyReportPdf } from "../lib/pdfReport";
 import { formatDaysCs, formatMealsCs, formatRowsCs } from "../lib/format";
 import { parseMealsCsv } from "../lib/csvImport";
 import { computeProfileCheckStatus } from "../lib/profileCheck";
@@ -27,6 +29,7 @@ export default function Profile() {
   // Správa dat stavy
   const [isExporting, setIsExporting] = useState(false);
   const [isExportingJson, setIsExportingJson] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -175,6 +178,22 @@ export default function Profile() {
       URL.revokeObjectURL(url);
     } finally {
       setIsExportingJson(false);
+    }
+  };
+
+  // Formální PDF report za posledních 30 dní (FEATURE_IDEAS.md sekce 9) — vyšší úroveň
+  // formálnosti než CSV export, use case "beru si to na kontrolu" k lékaři/nutričnímu poradci.
+  const handleExportPdf = async () => {
+    if (!user || !profile || !metrics) return;
+    setIsExportingPdf(true);
+    try {
+      const meals = await db.meals.orderBy('date').toArray();
+      const weightLogs = await fetchWeightLogs(user.uid);
+      const measurements = await fetchBodyMeasurements(user.uid);
+      const reportData = buildMonthlyReportData(meals, weightLogs, measurements);
+      await downloadMonthlyReportPdf(profile, metrics, reportData);
+    } finally {
+      setIsExportingPdf(false);
     }
   };
 
@@ -749,6 +768,19 @@ export default function Profile() {
                 {isExportingJson ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <FileJson className="w-4 h-4 text-slate-500" />}
                 <span className="text-sm font-bold text-slate-700 dark:text-slate-200">Plná záloha (JSON)</span>
               </button>
+              <div>
+                <button
+                  onClick={handleExportPdf}
+                  disabled={isExportingPdf}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50"
+                >
+                  {isExportingPdf ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <FileText className="w-4 h-4 text-slate-500" />}
+                  <span className="text-sm font-bold text-slate-700 dark:text-slate-200">PDF report pro lékaře</span>
+                </button>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 px-1">
+                  Shrnutí za posledních 30 dní — kalorie, makra, trend váhy a míry těla.
+                </p>
+              </div>
               <div>
                 <button
                   onClick={handleImportClick}

@@ -270,6 +270,14 @@ export interface BodyMeasurementEntry {
   chest?: number; // hrudník, cm
 }
 
+// Jednorázové načtení pro PDF report (viz Profile.tsx handleExportPdf) — stejný vzor
+// jako fetchWeightLogs, appka tu nepotřebuje živý listener, jen snímek pro export.
+export async function fetchBodyMeasurements(uid: string): Promise<BodyMeasurementEntry[]> {
+  const q = query(bodyMeasurementsCollection(uid), orderBy("date", "asc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data() as BodyMeasurementEntry);
+}
+
 export async function logBodyMeasurement(
   uid: string,
   dateISO: string,
