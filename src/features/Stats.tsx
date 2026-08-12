@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera } from "lucide-react";
+import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2 } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
 import { summarizeWeek } from "../lib/weekSummary";
+import { computeLoggingStreak } from "../lib/streak";
+import { generateWeeklyShareCardBlob } from "../lib/shareCard";
 import { formatWorkoutsCs } from "../lib/format";
 import { buildDailyProteinRecords, detectLowProteinPattern, MACRO_PATTERN_COOLDOWN_DAYS } from "../lib/macroPattern";
 import { computeMeasurementTrend, MEASUREMENT_FIELDS, MEASUREMENT_LABELS_CS } from "../lib/bodyMeasurements";
@@ -69,6 +71,7 @@ export default function Stats() {
   const [showLogMeasurement, setShowLogMeasurement] = useState(false);
   const [measurementInputs, setMeasurementInputs] = useState<Record<string, string>>({ waist: "", hips: "", chest: "" });
   const [savingMeasurement, setSavingMeasurement] = useState(false);
+  const [isGeneratingCard, setIsGeneratingCard] = useState(false);
 
   const [progressPhotos, setProgressPhotos] = useState<ProgressPhotoEntry[]>([]);
   useEffect(() => {
@@ -88,6 +91,18 @@ export default function Stats() {
   const { avgCalories, daysLogged } = summarizeWeek(values);
   const { avgCalories: previousAvgCalories, daysLogged: previousDaysLogged } = summarizeWeek(previousWeekValues);
   const targetLinePercent = Math.min(100, (targetCalories / maxValue) * 100);
+
+  // Sdílecí karta (FEATURE_IDEAS.md sekce 5) — streak a váhový posun počítané ze stejného
+  // `days` okna jako avgCalories/daysLogged výš, ať karta nikdy netvrdí jiná čísla než ta,
+  // co appka zobrazuje hned vedle ní.
+  const streak = computeLoggingStreak(allMeals.map((m) => m.date));
+  const weekWeightLogs = weightLogs
+    .filter((w) => days.includes(w.date))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const weightChangeKg =
+    weekWeightLogs.length >= 2
+      ? Math.round((weekWeightLogs[weekWeightLogs.length - 1].weight - weekWeightLogs[0].weight) * 10) / 10
+      : null;
 
   // Fitness modul (FEATURE_IDEAS.md sekce 1) — stejná vizuální gramatika jako graf kalorií výš,
   // jen bez referenční čáry cíle (spálené kalorie nemají denní cíl jako příjem).
@@ -203,6 +218,42 @@ export default function Stats() {
     await deleteProgressPhoto(user.uid, photo);
   };
 
+  // Sdílecí karta — vygeneruje PNG a nabídne systémový sheet (uživatelka si sama zvolí
+  // kam sdílet), s pádem na přímé stažení, když Web Share API se soubory appka nemá
+  // k dispozici (desktop) nebo uživatelka sdílení v sheetu zrušila.
+  const handleShareCard = async () => {
+    if (!profile) return;
+    setIsGeneratingCard(true);
+    try {
+      const blob = await generateWeeklyShareCardBlob({
+        periodStart: days[0],
+        periodEnd: days[days.length - 1],
+        streak,
+        avgCalories,
+        daysLogged,
+        weightChangeKg,
+        gender: profile.gender,
+      });
+      const file = new File([blob], `nouri-tyden-${today}.png`, { type: "image/png" });
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: "Nouri — týdenní shrnutí" });
+          return;
+        } catch (error) {
+          if ((error as Error).name === "AbortError") return; // uživatelka sheet zavřela, nic dalšího dělat nemá appka
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `nouri-tyden-${today}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsGeneratingCard(false);
+    }
+  };
+
   return (
     <>
     <div className="space-y-6 pt-6 transition-colors">
@@ -210,7 +261,19 @@ export default function Stats() {
 
       {/* Průměr za týden */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
-        <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Průměr za posledních 7 dní</div>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Průměr za posledních 7 dní</div>
+          {daysLogged > 0 && (
+            <button
+              onClick={handleShareCard}
+              disabled={isGeneratingCard}
+              aria-label="Sdílet týdenní kartu"
+              className={`p-1.5 -m-1.5 rounded-lg active:scale-95 transition-all disabled:opacity-50 ${profile?.gender === 'female' ? 'text-rose-500' : 'text-sky-500'}`}
+            >
+              {isGeneratingCard ? <Loader2 className="w-4 h-4 animate-spin" /> : <Share2 className="w-4 h-4" />}
+            </button>
+          )}
+        </div>
         {daysLogged > 0 ? (
           <>
             <div className="text-3xl font-extrabold text-slate-800 dark:text-white">
