@@ -1,5 +1,15 @@
 import Dexie, { type EntityTable } from 'dexie';
 
+// Rozpad složeného jídla na ingredience (FEATURE_IDEAS.md sekce 14) — jedna položka rozpadu,
+// stejný tvar jako MealItem's kalorie/makra, jen bez data/času/typu (ty patří jídlu jako celku).
+export interface MealIngredient {
+  name: string;
+  value: number; // Kalorie
+  protein?: number; // g
+  fat?: number; // g
+  carbs?: number; // g
+}
+
 export interface MealItem {
   id?: number;
   name: string;
@@ -13,6 +23,13 @@ export interface MealItem {
   source?: "photo" | "manual";
   roughEstimate?: boolean; // zapsáno v režimu "Jím venku" — hodnoty jsou záměrně hrubý odhad, ne měřená data
   syncId?: string; // stabilní UUID pro cloud zálohu (na rozdíl od ++id přežije reset lokální DB)
+  // Když appka rozpad ingrediencí má, name/value/protein/fat/carbs nahoře zůstávají dopočítaným
+  // součtem (viz computeIngredientsTotals v lib/mealComponents.ts) — jediný zdroj pravdy pro
+  // cokoliv, co jídla sčítá napříč appkou (Stats, Home, report, CSV export...), zůstává nedotčené,
+  // protože o existenci ingredients vůbec neví. Bez Dexie schema bumpu — appka indexuje jen pole
+  // v db.version(N).stores() níž, ostatní pole (stejně jako protein/fat/carbs/roughEstimate už dnes)
+  // fungují bez deklarace v žádné verzi schématu.
+  ingredients?: MealIngredient[];
 }
 
 export interface WorkoutItem {

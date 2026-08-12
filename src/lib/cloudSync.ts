@@ -60,7 +60,11 @@ function chatMessagesCollection(uid: string) {
 export async function backupMeal(uid: string, meal: MealItem): Promise<void> {
   if (!meal.syncId) return;
   try {
-    await setDoc(doc(mealsCollection(uid), meal.syncId), meal);
+    // Editace může teď makro nebo celý rozpad na ingredience explicitně smazat (nastaví pole
+    // na undefined, aby to zmizelo i z Dexie) — Firestore ale pole s hodnotou undefined
+    // odmítá (stejná oprava jako u addShoppingListItems), proto se tu před zápisem odfiltrují.
+    const clean = Object.fromEntries(Object.entries(meal).filter(([, v]) => v !== undefined)) as MealItem;
+    await setDoc(doc(mealsCollection(uid), meal.syncId), clean);
   } catch (error) {
     console.error("Cloud záloha jídla selhala:", error);
   }
@@ -135,7 +139,9 @@ export function subscribeMeals(uid: string, onError?: (error: unknown) => void):
           .first()
           .then((existing) => {
             if (existing?.id !== undefined) {
-              dexieDb.meals.update(existing.id, meal);
+              // .put (ne .update) — meal je od Firestore vždy celý dokument, ne dílčí patch,
+              // a Dexie's UpdateSpec odmítá typovat objekt s polem (ingredients) jako partial update.
+              dexieDb.meals.put({ ...meal, id: existing.id });
             } else {
               dexieDb.meals.add(meal);
             }

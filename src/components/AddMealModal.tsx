@@ -1,13 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2, ClipboardList } from "lucide-react";
+import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2, ClipboardList, ListPlus } from "lucide-react";
 import { type AddMealAction } from "./BottomNav";
-import { db, type MealItem } from "../db/db";
+import { db, type MealItem, type MealIngredient } from "../db/db";
 import { MyaVision, type VisionResult, type MealType, type Confidence } from "../lib/vision";
 import { MyaVoice } from "../lib/voice";
 import { MyaAI } from "../lib/ai";
 import { backupMeal, deleteMeal, subscribeMealTemplates, deleteMealTemplate, type MealTemplateEntry } from "../lib/cloudSync";
 import { calculateNutrition } from "../lib/nutrition";
+import { computeIngredientsTotals } from "../lib/mealComponents";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { useAuth } from "../context/useAuth";
 import { getRecentUniqueMeals, type RecentMealSummary } from "../lib/recentMeals";
@@ -97,6 +98,21 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
   const [type, setType] = useState<MealType>(editMeal?.type ?? guessMealType());
   const [time, setTime] = useState(editMeal?.time ?? currentTime());
 
+  // Rozpad na ingredience (FEATURE_IDEAS.md sekce 14) — když ingredients.length > 0, jsou
+  // jediným zdrojem pravdy pro kalorie/makra jídla, pole nahoře (calories/protein/fat/carbs)
+  // se přestanou ručně editovat a jen zobrazují dopočítaný součet (viz ingredientsTotals níž).
+  const [ingredients, setIngredients] = useState<MealIngredient[]>(editMeal?.ingredients ?? []);
+  const [ingredientFormOpen, setIngredientFormOpen] = useState(false);
+  const [editingIngredientIndex, setEditingIngredientIndex] = useState<number | null>(null);
+  const [ingredientName, setIngredientName] = useState("");
+  const [ingredientValue, setIngredientValue] = useState("");
+  const [ingredientProtein, setIngredientProtein] = useState("");
+  const [ingredientFat, setIngredientFat] = useState("");
+  const [ingredientCarbs, setIngredientCarbs] = useState("");
+
+  const hasIngredients = ingredients.length > 0;
+  const ingredientsTotals = computeIngredientsTotals(ingredients);
+
   // Jistota proti mikrofonu, který zůstane "otevřený" (indikátor v prohlížeči), když
   // se modál zavře jinak než přes handleClose/handleBack (např. odhlášení, navigace).
   useEffect(() => {
@@ -113,7 +129,14 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
   const recentMeals = getRecentUniqueMeals(allMeals);
 
+  const resetIngredients = () => {
+    setIngredients([]);
+    setIngredientFormOpen(false);
+    setEditingIngredientIndex(null);
+  };
+
   const resetFormFromVision = (result: VisionResult | null, failureNotice: string) => {
+    resetIngredients();
     if (result) {
       setName(result.name);
       setCalories(result.calories ? String(result.calories) : "");
@@ -277,6 +300,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
     setEatingOut(false);
     setLastConfidence(null);
     setHintText("");
+    resetIngredients();
     setStep("form");
   };
 
@@ -293,6 +317,9 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
     setNotice(null);
     setEatingOut(false);
     setLastConfidence(null);
+    // Rychlé znovu-zapsání kopíruje jen souhrn (viz RecentMealSummary), ne rozpad na
+    // ingredience — vědomé zúžení scope, znovu-zapsané jídlo je vždy čerstvý nerozpadlý záznam.
+    resetIngredients();
     setStep("form");
   };
 
@@ -349,6 +376,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
     setEatingOut(false);
     setLastConfidence(null);
     setHintText("");
+    resetIngredients();
   };
 
   const handleClose = () => {
@@ -356,17 +384,70 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
     onClose();
   };
 
+  const openAddIngredientForm = () => {
+    setEditingIngredientIndex(null);
+    setIngredientName("");
+    setIngredientValue("");
+    setIngredientProtein("");
+    setIngredientFat("");
+    setIngredientCarbs("");
+    setIngredientFormOpen(true);
+  };
+
+  const openEditIngredientForm = (index: number) => {
+    const item = ingredients[index];
+    setEditingIngredientIndex(index);
+    setIngredientName(item.name);
+    setIngredientValue(String(item.value));
+    setIngredientProtein(item.protein !== undefined ? String(item.protein) : "");
+    setIngredientFat(item.fat !== undefined ? String(item.fat) : "");
+    setIngredientCarbs(item.carbs !== undefined ? String(item.carbs) : "");
+    setIngredientFormOpen(true);
+  };
+
+  const saveIngredientDraft = () => {
+    const valueNum = Number(ingredientValue);
+    if (!ingredientName.trim() || !valueNum || valueNum <= 0) return;
+
+    const draft: MealIngredient = { name: ingredientName.trim(), value: Math.round(valueNum) };
+    if (ingredientProtein) draft.protein = Math.round(Number(ingredientProtein));
+    if (ingredientFat) draft.fat = Math.round(Number(ingredientFat));
+    if (ingredientCarbs) draft.carbs = Math.round(Number(ingredientCarbs));
+
+    setIngredients((prev) => {
+      if (editingIngredientIndex !== null) {
+        const next = [...prev];
+        next[editingIngredientIndex] = draft;
+        return next;
+      }
+      return [...prev, draft];
+    });
+    setIngredientFormOpen(false);
+  };
+
+  const removeIngredient = (index: number) => {
+    setIngredients((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleSave = async () => {
-    const caloriesNum = Number(calories);
+    const caloriesNum = hasIngredients ? ingredientsTotals.value : Number(calories);
     if (!name.trim() || !caloriesNum || caloriesNum <= 0) return;
 
     setSaving(true);
     try {
       if (isEditing && editMeal) {
-        const updatedFields: Partial<MealItem> = { name: name.trim(), value: Math.round(caloriesNum), time, type };
-        if (protein) updatedFields.protein = Math.round(Number(protein));
-        if (fat) updatedFields.fat = Math.round(Number(fat));
-        if (carbs) updatedFields.carbs = Math.round(Number(carbs));
+        // Pole se nastavují vždy explicitně (i na undefined) — Partial, který pole jen
+        // vynechá, by starou hodnotu v Dexie nesmazal, kdyby uživatel makro/ingredience odebral.
+        const updatedFields: Partial<MealItem> = {
+          name: name.trim(),
+          value: Math.round(caloriesNum),
+          time,
+          type,
+          ingredients: hasIngredients ? ingredients : undefined,
+          protein: hasIngredients ? ingredientsTotals.protein : protein ? Math.round(Number(protein)) : undefined,
+          fat: hasIngredients ? ingredientsTotals.fat : fat ? Math.round(Number(fat)) : undefined,
+          carbs: hasIngredients ? ingredientsTotals.carbs : carbs ? Math.round(Number(carbs)) : undefined,
+        };
 
         if (editMeal.id !== undefined) await db.meals.update(editMeal.id, updatedFields);
 
@@ -388,9 +469,16 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
         source,
         syncId: crypto.randomUUID(),
       };
-      if (protein) meal.protein = Math.round(Number(protein));
-      if (fat) meal.fat = Math.round(Number(fat));
-      if (carbs) meal.carbs = Math.round(Number(carbs));
+      if (hasIngredients) {
+        meal.ingredients = ingredients;
+        if (ingredientsTotals.protein !== undefined) meal.protein = ingredientsTotals.protein;
+        if (ingredientsTotals.fat !== undefined) meal.fat = ingredientsTotals.fat;
+        if (ingredientsTotals.carbs !== undefined) meal.carbs = ingredientsTotals.carbs;
+      } else {
+        if (protein) meal.protein = Math.round(Number(protein));
+        if (fat) meal.fat = Math.round(Number(fat));
+        if (carbs) meal.carbs = Math.round(Number(carbs));
+      }
       if (eatingOut) meal.roughEstimate = true;
 
       await db.meals.add(meal);
@@ -435,7 +523,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
     }
   };
 
-  const canSave = name.trim().length > 0 && Number(calories) > 0;
+  const canSave = name.trim().length > 0 && (hasIngredients ? ingredientsTotals.value > 0 : Number(calories) > 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
@@ -736,40 +824,144 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Kalorie (kcal)</label>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={calories}
-                  onChange={(e) => setCalories(e.target.value)}
-                  placeholder="0"
-                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-rose-500 dark:text-white transition-all"
-                />
-              </div>
+              {hasIngredients ? (
+                <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl p-4">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Součet z ingrediencí</p>
+                  <p className="text-2xl font-extrabold text-slate-800 dark:text-white">
+                    {ingredientsTotals.value} <span className="text-sm font-medium text-slate-400">kcal</span>
+                  </p>
+                  <div className="grid grid-cols-3 gap-3 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Bílkoviny: {ingredientsTotals.protein ?? "—"} g</span>
+                    <span>Tuky: {ingredientsTotals.fat ?? "—"} g</span>
+                    <span>Sacharidy: {ingredientsTotals.carbs ?? "—"} g</span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Kalorie (kcal)</label>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={calories}
+                      onChange={(e) => setCalories(e.target.value)}
+                      placeholder="0"
+                      className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-rose-500 dark:text-white transition-all"
+                    />
+                  </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Bílkoviny</label>
-                  <input
-                    type="number" inputMode="numeric" value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="g"
-                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tuky</label>
-                  <input
-                    type="number" inputMode="numeric" value={fat} onChange={(e) => setFat(e.target.value)} placeholder="g"
-                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sacharidy</label>
-                  <input
-                    type="number" inputMode="numeric" value={carbs} onChange={(e) => setCarbs(e.target.value)} placeholder="g"
-                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
-                  />
-                </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Bílkoviny</label>
+                      <input
+                        type="number" inputMode="numeric" value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="g"
+                        className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tuky</label>
+                      <input
+                        type="number" inputMode="numeric" value={fat} onChange={(e) => setFat(e.target.value)} placeholder="g"
+                        className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Sacharidy</label>
+                      <input
+                        type="number" inputMode="numeric" value={carbs} onChange={(e) => setCarbs(e.target.value)} placeholder="g"
+                        className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ingredience</label>
+                {ingredients.length > 0 && (
+                  <div className="mt-1.5 space-y-2">
+                    {ingredients.map((item, index) => (
+                      <div key={index} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl px-3 py-2.5">
+                        <button
+                          type="button"
+                          onClick={() => openEditIngredientForm(index)}
+                          className="flex-1 text-left min-w-0"
+                        >
+                          <span className="block text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{item.name}</span>
+                          <span className="block text-xs text-slate-400">{item.value} kcal</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeIngredient(index)}
+                          className="p-1 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 transition-colors shrink-0"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {ingredientFormOpen ? (
+                  <div className="mt-2 space-y-2.5 bg-white dark:bg-slate-900 border border-rose-100 dark:border-slate-800 rounded-2xl p-3.5">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={ingredientName}
+                      onChange={(e) => setIngredientName(e.target.value)}
+                      placeholder="Např. kuřecí prsa"
+                      className="w-full bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                    />
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={ingredientValue}
+                      onChange={(e) => setIngredientValue(e.target.value)}
+                      placeholder="Kalorie (kcal)"
+                      className="w-full bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <input
+                        type="number" inputMode="numeric" value={ingredientProtein} onChange={(e) => setIngredientProtein(e.target.value)} placeholder="B (g)"
+                        className="w-full bg-slate-50 dark:bg-slate-800 rounded-xl px-2 py-2 text-xs font-semibold outline-rose-500 dark:text-white transition-all"
+                      />
+                      <input
+                        type="number" inputMode="numeric" value={ingredientFat} onChange={(e) => setIngredientFat(e.target.value)} placeholder="T (g)"
+                        className="w-full bg-slate-50 dark:bg-slate-800 rounded-xl px-2 py-2 text-xs font-semibold outline-rose-500 dark:text-white transition-all"
+                      />
+                      <input
+                        type="number" inputMode="numeric" value={ingredientCarbs} onChange={(e) => setIngredientCarbs(e.target.value)} placeholder="S (g)"
+                        className="w-full bg-slate-50 dark:bg-slate-800 rounded-xl px-2 py-2 text-xs font-semibold outline-rose-500 dark:text-white transition-all"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIngredientFormOpen(false)}
+                        className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800 transition-all"
+                      >
+                        Zrušit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={saveIngredientDraft}
+                        disabled={!ingredientName.trim() || !Number(ingredientValue)}
+                        className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white bg-rose-600 disabled:opacity-50 active:scale-[0.98] transition-all"
+                      >
+                        {editingIngredientIndex !== null ? "Uložit úpravu" : "Přidat ingredienci"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={openAddIngredientForm}
+                    className="mt-1.5 w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 border border-dashed border-rose-200 dark:border-rose-900/50 active:scale-[0.98] transition-all"
+                  >
+                    <ListPlus className="w-3.5 h-3.5" />
+                    {ingredients.length === 0 ? "Rozdělit na ingredience" : "Přidat další ingredienci"}
+                  </button>
+                )}
               </div>
 
               <div>

@@ -166,6 +166,9 @@ export default function Profile() {
           carbs: m.carbs,
           source: m.source,
           syncId: m.syncId,
+          // Rozpad na ingredience (FEATURE_IDEAS.md sekce 14) — JSON záloha ho na rozdíl od
+          // CSV zachová beze ztráty, JSON.stringify pole s hodnotou undefined stejně zahodí.
+          ingredients: m.ingredients,
         })),
         weightLogs,
       };
