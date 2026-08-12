@@ -2,8 +2,12 @@ import type { RecipeResult } from "./recipes";
 
 export interface ShoppingListItemDraft {
   text: string;
-  recipeName: string;
+  // Chybí u ručně přidaných položek (viz ShoppingListModal) — položky z receptu i ruční
+  // sdílí jeden seznam/kolekci, ShoppingListView seskupuje položky bez recipeName zvlášť.
+  recipeName?: string;
 }
+
+export const CUSTOM_ITEMS_LABEL = "Vlastní položky";
 
 /**
  * Suroviny z receptu jako samostatné položky nákupního seznamu, každá se svým

@@ -5,6 +5,7 @@ import BottomNav, { type NavTab, type AddMealAction } from "./components/BottomN
 import AddMealModal from "./components/AddMealModal";
 import QuickLookupModal from "./components/QuickLookupModal";
 import MyaChatModal from "./components/MyaChatModal";
+import ShoppingListModal from "./components/ShoppingListModal";
 import Home from "./features/Home";
 import Stats from "./features/Stats";
 import Recipes from "./features/Recipes";
@@ -18,7 +19,7 @@ import { computeWeighInStatus } from "./lib/weighIn";
 import { computeProfileCheckStatus } from "./lib/profileCheck";
 import { computeWorkoutPlanStatus } from "./lib/workoutPlan";
 import { isQuietHours } from "./lib/quietHours";
-import { Bell, Search, Dumbbell, MessageCircle } from "lucide-react";
+import { Bell, Search, Dumbbell, MessageCircle, ClipboardList } from "lucide-react";
 
 export default function App() {
   const { user, profile, loading } = useAuth();
@@ -37,6 +38,7 @@ export default function App() {
   const [showReminder, setShowReminder] = useState(false);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [myaChatOpen, setMyaChatOpen] = useState(false);
+  const [shoppingListOpen, setShoppingListOpen] = useState(false);
   const reminderDays = profile?.weighInReminderDays ?? 3;
   const notificationRef = useRef<HTMLDivElement>(null);
   const today = new Date().toISOString().split("T")[0];
@@ -152,6 +154,13 @@ export default function App() {
             >
               <MessageCircle className="w-5 h-5 stroke-2" />
             </button>
+            <button
+              onClick={() => setShoppingListOpen(true)}
+              aria-label="Nákupní seznam"
+              className="p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
+            >
+              <ClipboardList className="w-5 h-5 stroke-2" />
+            </button>
             <div className="relative" ref={notificationRef}>
               <button
                 onClick={() => setShowReminder((v) => !v)}
@@ -244,6 +253,7 @@ export default function App() {
 
       {quickLookupOpen && <QuickLookupModal onClose={() => setQuickLookupOpen(false)} />}
       {myaChatOpen && <MyaChatModal onClose={() => setMyaChatOpen(false)} />}
+      {shoppingListOpen && <ShoppingListModal onClose={() => setShoppingListOpen(false)} />}
     </div>
   );
 }

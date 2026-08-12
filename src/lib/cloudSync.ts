@@ -365,7 +365,11 @@ export async function addShoppingListItems(uid: string, items: ShoppingListItemD
   if (items.length === 0) return;
   const batch = writeBatch(firestoreDb);
   items.forEach((item) => {
-    batch.set(doc(shoppingListCollection(uid)), { text: item.text, recipeName: item.recipeName, bought: false });
+    // recipeName se zapisuje jen když existuje — Firestore odmítá pole s hodnotou undefined
+    // (ruční položky z ShoppingListModal žádný recept nemají).
+    const data: { text: string; bought: boolean; recipeName?: string } = { text: item.text, bought: false };
+    if (item.recipeName) data.recipeName = item.recipeName;
+    batch.set(doc(shoppingListCollection(uid)), data);
   });
   await batch.commit();
 }

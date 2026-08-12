@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import {
   ChefHat,
@@ -15,7 +15,6 @@ import {
   BookMarked,
   CheckCircle2,
   Trash2,
-  X,
 } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
@@ -34,6 +33,8 @@ import {
   type ShoppingListEntry,
 } from "../lib/cloudSync";
 import { buildShoppingListItems, countUnbought } from "../lib/shoppingList";
+import EmptyState from "../components/EmptyState";
+import ShoppingListView from "../components/ShoppingListView";
 
 type Status = "idle" | "photo-preview" | "loading" | "result" | "error";
 type View = "generate" | "saved" | "list";
@@ -488,71 +489,6 @@ function MacroTile({ label, value, unit }: { label: string; value: number; unit?
   );
 }
 
-function ShoppingListView({
-  items,
-  onToggle,
-  onRemove,
-}: {
-  items: ShoppingListEntry[];
-  onToggle: (item: ShoppingListEntry) => void;
-  onRemove: (item: ShoppingListEntry) => void;
-}) {
-  if (items.length === 0) {
-    return (
-      <EmptyState
-        icon={<ShoppingCart className="w-7 h-7" />}
-        title="Seznam je prázdný"
-        text="Vygeneruj recept a přidej jeho suroviny do nákupního seznamu."
-      />
-    );
-  }
-
-  const groups = new Map<string, ShoppingListEntry[]>();
-  items.forEach((item) => {
-    const group = groups.get(item.recipeName) ?? [];
-    group.push(item);
-    groups.set(item.recipeName, group);
-  });
-
-  return (
-    <div className="space-y-4">
-      {[...groups.entries()].map(([recipeName, groupItems]) => (
-        <div
-          key={recipeName}
-          className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors"
-        >
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">{recipeName}</h3>
-          <ul className="space-y-2.5">
-            {groupItems.map((item) => (
-              <li key={item.id} className="flex items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={item.bought}
-                  onChange={() => onToggle(item)}
-                  className="w-5 h-5 rounded accent-rose-600 shrink-0"
-                />
-                <span
-                  className={`flex-1 text-sm ${
-                    item.bought ? "line-through text-slate-400 dark:text-slate-600" : "text-slate-700 dark:text-slate-300"
-                  }`}
-                >
-                  {item.text}
-                </span>
-                <button
-                  onClick={() => onRemove(item)}
-                  className="p-1 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function SavedRecipesView({
   recipes,
   expandedId,
@@ -630,16 +566,3 @@ function SavedRecipesView({
   );
 }
 
-function EmptyState({ icon, title, text }: { icon: ReactNode; title: string; text: string }) {
-  return (
-    <div className="bg-white dark:bg-slate-900 rounded-3xl p-8 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col items-center text-center gap-4 transition-colors">
-      <div className="w-14 h-14 rounded-2xl bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center text-rose-500 dark:text-rose-400">
-        {icon}
-      </div>
-      <div>
-        <h2 className="font-bold text-slate-800 dark:text-white mb-1">{title}</h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed">{text}</p>
-      </div>
-    </div>
-  );
-}
