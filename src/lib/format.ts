@@ -21,3 +21,9 @@ export function formatGlassesCs(n: number): string {
   if (n >= 2 && n <= 4) return `${n} sklenice`;
   return `${n} sklenic`;
 }
+
+export function formatWorkoutsCs(n: number): string {
+  if (n === 1) return "1 trénink";
+  if (n >= 2 && n <= 4) return `${n} tréninky`;
+  return `${n} tréninků`;
+}

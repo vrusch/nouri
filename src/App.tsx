@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 import { LogoHorizontal, LogoIcon } from "./components/Logo";
-import BottomNav, { type NavTab } from "./components/BottomNav";
+import BottomNav, { type NavTab, type AddMealAction } from "./components/BottomNav";
 import AddMealModal from "./components/AddMealModal";
 import QuickLookupModal from "./components/QuickLookupModal";
 import Home from "./features/Home";
@@ -8,14 +9,15 @@ import Stats from "./features/Stats";
 import Recipes from "./features/Recipes";
 import Profile from "./features/Profile";
 import Onboarding from "./features/Onboarding";
-import { type MealItem } from "./db/db";
+import { db, type MealItem } from "./db/db";
 import { useAuth } from "./context/useAuth";
-import { seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs } from "./lib/cloudSync";
+import { seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs, subscribeWorkouts } from "./lib/cloudSync";
 import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
 import { computeProfileCheckStatus } from "./lib/profileCheck";
+import { computeWorkoutPlanStatus } from "./lib/workoutPlan";
 import { isQuietHours } from "./lib/quietHours";
-import { Bell, Search } from "lucide-react";
+import { Bell, Search, Dumbbell } from "lucide-react";
 
 export default function App() {
   const { user, profile, loading } = useAuth();
@@ -28,12 +30,17 @@ export default function App() {
     return openFromShortcut;
   });
   const [editingMeal, setEditingMeal] = useState<MealItem | null>(null);
+  const [addMealAction, setAddMealAction] = useState<AddMealAction | null>(null);
   const [weighInOverdue, setWeighInOverdue] = useState(false);
   const [daysSinceWeighIn, setDaysSinceWeighIn] = useState<number | null>(null);
   const [showReminder, setShowReminder] = useState(false);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const reminderDays = profile?.weighInReminderDays ?? 3;
   const notificationRef = useRef<HTMLDivElement>(null);
+  const today = new Date().toISOString().split("T")[0];
+  // Hook musí běžet nepodmíněně na každém renderu, i před přesměrováním na Onboarding níže —
+  // proto tady, ne až za `if (!user...)`.
+  const todaysWorkoutCount = useLiveQuery(() => db.workouts.where("date").equals(today).count()) ?? 0;
 
   useEffect(() => {
     if (!showReminder) return;
@@ -50,6 +57,7 @@ export default function App() {
     if (!user || !profile?.setupComplete) return;
     const uid = user.uid;
     let unsubscribeMeals: (() => void) | undefined;
+    let unsubscribeWorkouts: (() => void) | undefined;
     let unsubscribeWeights: (() => void) | undefined;
     let cancelled = false;
 
@@ -60,6 +68,7 @@ export default function App() {
       // Živé listenery místo jednorázového čtení — appka se drží v syncu i s dalšími
       // zařízeními/taby, dokud běží (Fáze 5 synchronizace, viz REFERENCE/IMPLEMENTATION_PLAN.md).
       unsubscribeMeals = subscribeMeals(uid);
+      unsubscribeWorkouts = subscribeWorkouts(uid);
       unsubscribeWeights = subscribeWeightLogs(uid, (entries) => {
         const latest = entries.length > 0 ? entries[entries.length - 1] : null;
         const status = computeWeighInStatus(latest, reminderDays);
@@ -71,6 +80,7 @@ export default function App() {
     return () => {
       cancelled = true;
       unsubscribeMeals?.();
+      unsubscribeWorkouts?.();
       unsubscribeWeights?.();
     };
   }, [user, profile?.setupComplete, profile?.weight, reminderDays]);
@@ -88,6 +98,7 @@ export default function App() {
   }
 
   const profileCheck = computeProfileCheckStatus(profile.lastProfileCheckAt);
+  const workoutPlan = computeWorkoutPlanStatus(profile.plannedWorkoutDays, todaysWorkoutCount > 0);
   // Appka během tichých hodin nesmí sama upoutávat pozornost na připomínky — červená tečka
   // je jediný pasivní "nudge" prvek, zvon samotný jde otevřít ručně kdykoliv. Okno je uživatelem
   // nastavitelné v Profilu (výchozí 22-7, viz quietHours.ts), vypínatelné přes quietHoursEnabled.
@@ -138,7 +149,7 @@ export default function App() {
                 className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
               >
                 <Bell className="w-6 h-6 stroke-2" />
-                {(weighInOverdue || profileCheck.checkOverdue) && !quietHoursActive && (
+                {(weighInOverdue || profileCheck.checkOverdue || workoutPlan.reminderDue) && !quietHoursActive && (
                   <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
                 )}
               </button>
@@ -171,6 +182,21 @@ export default function App() {
                       </button>
                     </>
                   )}
+                  {workoutPlan.reminderDue && (
+                    <>
+                      <div className="h-px bg-slate-100 dark:bg-slate-700 my-3" />
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mb-3 flex items-center gap-1.5">
+                        <Dumbbell className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                        Dnes máš v plánu trénink — zatím ho nemáš zapsaný.
+                      </p>
+                      <button
+                        onClick={() => { setActiveTab("home"); setShowReminder(false); }}
+                        className="w-full bg-orange-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
+                      >
+                        Přejít na Home
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -185,15 +211,24 @@ export default function App() {
         </main>
 
         {/* --- SPODNÍ NAVIGACE --- */}
-        <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} onOpenAddMeal={() => setAddMealOpen(true)} />
+        <BottomNav
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onOpenAddMeal={(action) => {
+            setAddMealAction(action);
+            setAddMealOpen(true);
+          }}
+        />
       </div>
 
       {(addMealOpen || editingMeal) && (
         <AddMealModal
           editMeal={editingMeal ?? undefined}
+          initialAction={addMealAction ?? undefined}
           onClose={() => {
             setAddMealOpen(false);
             setEditingMeal(null);
+            setAddMealAction(null);
           }}
         />
       )}

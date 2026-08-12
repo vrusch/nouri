@@ -26,6 +26,29 @@
     stroke-dashoffset: 1;
     animation: nouri-logo-draw 1.1s ease-in-out infinite;
   }
+  /* Satelitní tlačítka + jejich popisky u rozbalovacího + v BottomNav — --dx/--dy dávají
+   * pozici vůči hlavnímu tlačítku, translate(-50%,0) navíc centruje vůči jeho středu.
+   * Tailwindí translate-x/y utility by se s vlastní hodnotou přepsaly, proto vlastní třída. */
+  .fab-satellite {
+    transform: translate(-50%, 0) translate(var(--dx), var(--dy)) scale(0.25);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.32s cubic-bezier(0.32, 1.35, 0.6, 1), opacity 0.2s ease;
+  }
+  .fab-satellite-open {
+    transform: translate(-50%, 0) translate(var(--dx), var(--dy)) scale(1);
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .fab-satellite-label {
+    transform: translate(-50%, 0) translate(var(--dx), var(--dy)) scale(0.6);
+    opacity: 0;
+    transition: transform 0.3s cubic-bezier(0.32, 1.35, 0.6, 1) 0.06s, opacity 0.2s ease 0.06s;
+  }
+  .fab-satellite-label-open {
+    transform: translate(-50%, 0) translate(var(--dx), var(--dy)) scale(1);
+    opacity: 1;
+  }
 }
 
 @keyframes nouri-logo-draw {

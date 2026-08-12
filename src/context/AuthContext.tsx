@@ -23,6 +23,7 @@ export interface UserProfile {
   quietHoursEnabled?: boolean; // vypnutí/zapnutí tichého režimu (viz quietHours.ts), výchozí (undefined) = zapnuto
   quietHoursStart?: number; // hodina 0-23, výchozí 22 (QUIET_HOURS_START v quietHours.ts)
   quietHoursEnd?: number; // hodina 0-23, výchozí 7 (QUIET_HOURS_END v quietHours.ts)
+  plannedWorkoutDays?: number[]; // dny v týdnu, kdy appka připomíná trénink (0=neděle..6=sobota, Date.getDay()), viz workoutPlan.ts
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

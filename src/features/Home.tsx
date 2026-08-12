@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type MealItem } from "../db/db";
+import { db, type MealItem, type WorkoutItem } from "../db/db";
 import { useAuth } from "../context/useAuth";
-import { Volume2, Square, Flame, Droplets, Loader2 } from "lucide-react";
+import { Volume2, Square, Flame, Droplets, Dumbbell, X, Loader2 } from "lucide-react";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight } from "../lib/nutrition";
 import { computeLoggingStreak } from "../lib/streak";
 import { pickDailyCustomReminder } from "../lib/customReminders";
 import { WATER_TARGET_GLASSES, getWaterProgressPercent } from "../lib/water";
-import { formatGlassesCs } from "../lib/format";
-import { subscribeWaterLog, logWater, saveMealTemplate, type MealTemplateItem } from "../lib/cloudSync";
+import { formatGlassesCs, formatWorkoutsCs } from "../lib/format";
+import { subscribeWaterLog, logWater, saveMealTemplate, deleteWorkout, type MealTemplateItem } from "../lib/cloudSync";
+import LogWorkoutModal from "../components/LogWorkoutModal";
 
 const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
 
@@ -31,12 +32,14 @@ export default function Home({ onEditMeal }: HomeProps) {
   const [showTemplateSave, setShowTemplateSave] = useState(false);
   const [templateNameInput, setTemplateNameInput] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [showLogWorkout, setShowLogWorkout] = useState(false);
   const nutrition = profile ? calculateNutrition(profile) : null;
   const GOAL_CALORIES = nutrition ? nutrition.targetCalories : 1800;
 
   const today = new Date().toISOString().split('T')[0];
   const meals = useLiveQuery(() => db.meals.where('date').equals(today).toArray()) || [];
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
+  const todaysWorkouts = useLiveQuery(() => db.workouts.where('date').equals(today).toArray()) || [];
 
   useEffect(() => {
     if (!user) return;
@@ -51,6 +54,12 @@ export default function Home({ onEditMeal }: HomeProps) {
   const handleRemoveWater = () => {
     if (!user || waterGlasses <= 0) return;
     logWater(user.uid, today, waterGlasses - 1);
+  };
+
+  const handleDeleteWorkout = async (workout: WorkoutItem) => {
+    if (workout.id === undefined) return;
+    await db.workouts.delete(workout.id);
+    if (user && workout.syncId) deleteWorkout(user.uid, workout.syncId);
   };
 
   const handleSaveTemplate = async () => {
@@ -73,10 +82,15 @@ export default function Home({ onEditMeal }: HomeProps) {
   };
 
   const consumedCalories = meals.reduce((sum, meal) => sum + meal.value, 0);
-  const remainingCalories = Math.max(0, GOAL_CALORIES - consumedCalories);
-  const progressPercent = Math.min(100, (consumedCalories / GOAL_CALORIES) * 100);
+  const todaysWorkoutCalories = todaysWorkouts.reduce((sum, w) => sum + w.caloriesBurned, 0);
+  // Dynamický cíl (FEATURE_IDEAS.md sekce 1): zaznamenaný trénink přidá jednorázový bonus jen
+  // pro dnešek, ne trvalou změnu activityLevel v profilu — GOAL_CALORIES (nutrition.targetCalories)
+  // zůstává beze změny, sečteno se počítá až tady na Home.
+  const adjustedGoalCalories = GOAL_CALORIES + todaysWorkoutCalories;
+  const remainingCalories = Math.max(0, adjustedGoalCalories - consumedCalories);
+  const progressPercent = Math.min(100, (consumedCalories / adjustedGoalCalories) * 100);
 
-  const trafficLight = getDayTrafficLight(consumedCalories, GOAL_CALORIES);
+  const trafficLight = getDayTrafficLight(consumedCalories, adjustedGoalCalories);
 
   const remainingMacros = nutrition ? computeRemainingMacros(nutrition, meals) : null;
   const consumedProtein = nutrition && remainingMacros ? nutrition.macros.protein - remainingMacros.protein : 0;
@@ -214,6 +228,11 @@ export default function Home({ onEditMeal }: HomeProps) {
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-snug">
               {getProgressCaption(consumedCalories, progressPercent)}
             </p>
+            {todaysWorkoutCalories > 0 && (
+              <p className="text-[11px] font-semibold text-orange-500 dark:text-orange-400 mt-1.5 flex items-center gap-1">
+                <Dumbbell className="w-3 h-3" /> +{todaysWorkoutCalories} kcal z tréninku
+              </p>
+            )}
           </div>
         </div>
 
@@ -280,6 +299,50 @@ export default function Home({ onEditMeal }: HomeProps) {
           </button>
         </div>
       </div>
+
+      {/* Trénink */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+        <div className="flex items-center gap-4">
+          <div className="w-11 h-11 rounded-2xl bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center text-orange-500 shrink-0">
+            <Dumbbell className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Trénink</h3>
+            {todaysWorkouts.length > 0 ? (
+              <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                {formatWorkoutsCs(todaysWorkouts.length)} · {todaysWorkoutCalories} kcal spáleno
+              </p>
+            ) : (
+              <p className="text-sm text-slate-400 dark:text-slate-500">Zatím žádný trénink dnes</p>
+            )}
+          </div>
+          <button
+            onClick={() => setShowLogWorkout(true)}
+            aria-label="Přidat trénink"
+            className="w-8 h-8 rounded-full bg-orange-500 text-white font-bold active:scale-90 transition-all shrink-0 flex items-center justify-center"
+          >
+            +
+          </button>
+        </div>
+
+        {todaysWorkouts.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-slate-50 dark:border-slate-800 flex flex-wrap gap-2">
+            {todaysWorkouts.map((w) => (
+              <button
+                key={w.id}
+                onClick={() => handleDeleteWorkout(w)}
+                aria-label={`Smazat trénink ${w.name}`}
+                className="flex items-center gap-1.5 bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 text-xs font-semibold px-3 py-1.5 rounded-full active:scale-95 transition-all"
+              >
+                {w.name} · {w.caloriesBurned} kcal
+                <X className="w-3 h-3" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showLogWorkout && <LogWorkoutModal onClose={() => setShowLogWorkout(false)} />}
 
       {/* AI Doporučení */}
       <div className="bg-linear-to-br from-rose-50 to-amber-50/60 dark:from-rose-950/20 dark:to-amber-950/10 rounded-3xl p-5 border border-rose-100/60 dark:border-rose-900/30 relative overflow-hidden transition-colors">

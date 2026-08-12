@@ -11,7 +11,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { db as firestoreDb } from "./firebase";
-import { db as dexieDb, type MealItem } from "../db/db";
+import { db as dexieDb, type MealItem, type WorkoutItem } from "../db/db";
 import type { ShoppingListItemDraft } from "./shoppingList";
 import type { RecipeResult } from "./recipes";
 
@@ -37,6 +37,10 @@ function waterLogsCollection(uid: string) {
 
 function mealTemplatesCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "mealTemplates");
+}
+
+function workoutsCollection(uid: string) {
+  return collection(firestoreDb, "users", uid, "workouts");
 }
 
 // Odloží cloud zálohu, aby nikdy neblokovala lokální (Dexie) zápis — chyba se jen zaloguje.
@@ -127,6 +131,59 @@ export function subscribeMeals(uid: string, onError?: (error: unknown) => void):
     },
     (error) => {
       console.error("Synchronizace jídel selhala:", error);
+      onError?.(error);
+    }
+  );
+}
+
+// Trénink (Fitness modul) — přesně stejný vzor jako backupMeal/deleteMeal/subscribeMeals výš,
+// jen jiná kolekce a typ. Samostatná tabulka místo rozšíření MealItem, protože kalorie u
+// tréninku appka odečítá od cíle, ne přičítá ke spotřebě — sémanticky jiný typ záznamu.
+export async function backupWorkout(uid: string, workout: WorkoutItem): Promise<void> {
+  if (!workout.syncId) return;
+  try {
+    await setDoc(doc(workoutsCollection(uid), workout.syncId), workout);
+  } catch (error) {
+    console.error("Cloud záloha tréninku selhala:", error);
+  }
+}
+
+export async function deleteWorkout(uid: string, syncId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(workoutsCollection(uid), syncId));
+  } catch (error) {
+    console.error("Smazání tréninku z cloudu selhalo:", error);
+  }
+}
+
+export function subscribeWorkouts(uid: string, onError?: (error: unknown) => void): Unsubscribe {
+  return onSnapshot(
+    workoutsCollection(uid),
+    (snap) => {
+      snap.docChanges().forEach((change) => {
+        const workout = change.doc.data() as WorkoutItem;
+        if (!workout.syncId) return;
+
+        if (change.type === "removed") {
+          dexieDb.workouts.where("syncId").equals(workout.syncId).delete();
+          return;
+        }
+
+        dexieDb.workouts
+          .where("syncId")
+          .equals(workout.syncId)
+          .first()
+          .then((existing) => {
+            if (existing?.id !== undefined) {
+              dexieDb.workouts.update(existing.id, workout);
+            } else {
+              dexieDb.workouts.add(workout);
+            }
+          });
+      });
+    },
+    (error) => {
+      console.error("Synchronizace tréninků selhala:", error);
       onError?.(error);
     }
   );

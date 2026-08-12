@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -11,6 +11,7 @@ import { formatDaysCs, formatMealsCs, formatRowsCs } from "../lib/format";
 import { parseMealsCsv } from "../lib/csvImport";
 import { computeProfileCheckStatus } from "../lib/profileCheck";
 import { QUIET_HOURS_START, QUIET_HOURS_END } from "../lib/quietHours";
+import { DAY_NAMES_CS } from "../lib/workoutPlan";
 import { db, type MealItem } from "../db/db";
 import pkg from "../../package.json";
 
@@ -61,6 +62,14 @@ export default function Profile() {
   const handleAdjustQuietHour = (field: "quietHoursStart" | "quietHoursEnd", delta: number) => {
     const current = field === "quietHoursStart" ? quietHoursStart : quietHoursEnd;
     updateProfile({ [field]: (current + delta + 24) % 24 });
+  };
+
+  const plannedWorkoutDays = profile?.plannedWorkoutDays ?? [];
+  const toggleWorkoutPlanDay = (day: number) => {
+    const next = plannedWorkoutDays.includes(day)
+      ? plannedWorkoutDays.filter((d) => d !== day)
+      : [...plannedWorkoutDays, day].sort();
+    updateProfile({ plannedWorkoutDays: next });
   };
 
   const activityOptions: { id: UserProfile['activityLevel']; label: string; desc: string }[] = [
@@ -520,6 +529,44 @@ export default function Profile() {
                     </button>
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          <div
+            className={`px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${editing === 'workoutPlan' ? accentBg : 'active:bg-slate-50 dark:active:bg-slate-800'}`}
+            onClick={() => setEditing(editing === 'workoutPlan' ? null : 'workoutPlan')}
+          >
+            <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+              <Dumbbell className="w-4 h-4 text-orange-500" />
+              Plán tréninků
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-bold text-slate-800 dark:text-white">
+                {plannedWorkoutDays.length === 0 ? 'Nenastaveno' : plannedWorkoutDays.map((d) => DAY_NAMES_CS[d]).join(', ')}
+              </span>
+              <ChevronDown className={`w-4 h-4 ${editing === 'workoutPlan' ? accentText : 'text-slate-400'}`} />
+            </div>
+          </div>
+
+          {editing === 'workoutPlan' && (
+            <div className={`px-4 pb-4 ${accentBg}`}>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                V naplánované dny appka připomene trénink, pokud do té doby žádný nezapíšeš.
+              </p>
+              <div className="grid grid-cols-7 gap-1">
+                {DAY_NAMES_CS.map((label, day) => {
+                  const active = plannedWorkoutDays.includes(day);
+                  return (
+                    <button
+                      key={day}
+                      onClick={() => toggleWorkoutPlanDay(day)}
+                      className={`flex flex-col items-center py-2.5 rounded-xl transition-all ${active ? 'bg-white dark:bg-slate-800 shadow-sm' : 'hover:bg-white/50 dark:hover:bg-slate-800/50'}`}
+                    >
+                      <span className={`text-xs font-bold ${active ? accentText : 'text-slate-500 dark:text-slate-400'}`}>{label}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

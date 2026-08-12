@@ -340,6 +340,74 @@ Pokud z popisu nejde rozeznat žádné jídlo, vrať confidence "low", name "Nez
   }
 );
 
+type WorkoutConfidence = "low" | "medium" | "high";
+
+export const analyzeWorkout = onCall(
+  { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 30 },
+  async (request) => {
+    requireAuth(request);
+    const description = request.data?.description as string | undefined;
+    if (!description || !description.trim()) {
+      throw new HttpsError("invalid-argument", "Chybí popis tréninku.");
+    }
+
+    const systemPrompt = `Jsi Mya, AI fitness asistentka aplikace Nouri. Uživatel ti slovně popíše trénink, který právě dokončil
+(např. "30 min běh", "hodina jógy", "posilovna nohy"). Tvým úkolem je odhadnout, kolik kalorií trénink spálil, pro
+průměrně fit dospělou osobu. Pokud popis neuvádí délku, odhadni typickou délku pro danou aktivitu.
+
+Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný markdown, žádný text okolo):
+{
+  "name": "krátký český název aktivity",
+  "caloriesBurned": číslo (odhad spálených kalorií za celý trénink),
+  "durationMinutes": číslo (odhad délky tréninku v minutách),
+  "confidence": "low" | "medium" | "high" (nízká, pokud je popis vágní nebo aktivita neurčitá)
+}
+
+Pokud z popisu nejde rozeznat žádná fyzická aktivita, vrať confidence "low", name "Neznámá aktivita" a nulové hodnoty.`;
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: description.trim() },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.3,
+        }),
+      });
+
+      if (response.status === 429) throw new Error("Rate limit exceeded");
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      const content = json.choices?.[0]?.message?.content;
+      if (!content) {
+        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
+        throw new Error("Invalid AI response");
+      }
+
+      const parsed = JSON.parse(content);
+      const confidence: WorkoutConfidence = CONFIDENCE_LEVELS.includes(parsed.confidence) ? parsed.confidence : "low";
+
+      return {
+        name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Neznámá aktivita",
+        caloriesBurned: Math.max(0, Math.round(Number(parsed.caloriesBurned) || 0)),
+        durationMinutes: Math.max(0, Math.round(Number(parsed.durationMinutes) || 0)),
+        confidence,
+      };
+    } catch (error) {
+      console.error("Mya Workout Analysis Error:", error);
+      return null;
+    }
+  }
+);
+
 interface MealFeedbackInput {
   mealName: string;
   calories: number;

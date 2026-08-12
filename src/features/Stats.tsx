@@ -5,6 +5,7 @@ import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
 import { summarizeWeek } from "../lib/weekSummary";
+import { formatWorkoutsCs } from "../lib/format";
 import { buildDailyProteinRecords, detectLowProteinPattern, MACRO_PATTERN_COOLDOWN_DAYS } from "../lib/macroPattern";
 import { daysSince } from "../lib/weighIn";
 import { isQuietHours } from "../lib/quietHours";
@@ -34,10 +35,12 @@ export default function Stats() {
   const previousWeekDays = lastNDates(7, 7);
   const today = days[days.length - 1];
   const [selectedDay, setSelectedDay] = useState<string>(today);
+  const [selectedWorkoutDay, setSelectedWorkoutDay] = useState<string>(today);
 
   // Všechna jídla, ne jen posledních 7 dní — kalibrace cíle a porovnání s minulým týdnem
   // (obojí níže) potřebují delší historii.
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
+  const allWorkouts = useLiveQuery(() => db.workouts.toArray()) || [];
 
   const [weightLogs, setWeightLogs] = useState<WeightLogEntry[]>([]);
   useEffect(() => {
@@ -54,6 +57,15 @@ export default function Stats() {
   const { avgCalories, daysLogged } = summarizeWeek(values);
   const { avgCalories: previousAvgCalories, daysLogged: previousDaysLogged } = summarizeWeek(previousWeekValues);
   const targetLinePercent = Math.min(100, (targetCalories / maxValue) * 100);
+
+  // Fitness modul (FEATURE_IDEAS.md sekce 1) — stejná vizuální gramatika jako graf kalorií výš,
+  // jen bez referenční čáry cíle (spálené kalorie nemají denní cíl jako příjem).
+  const workoutTotalsByDay = new Map<string, number>();
+  allWorkouts.forEach((w) => workoutTotalsByDay.set(w.date, (workoutTotalsByDay.get(w.date) || 0) + w.caloriesBurned));
+  const workoutValues = days.map((d) => workoutTotalsByDay.get(d) || 0);
+  const workoutMaxValue = Math.max(...workoutValues, 1);
+  const { avgCalories: workoutAvgCalories, daysLogged: workoutDaysLogged } = summarizeWeek(workoutValues);
+  const workoutCountThisWeek = allWorkouts.filter((w) => days.includes(w.date)).length;
 
   const chartWeights = weightLogs.slice(-30);
   const hasWeightTrend = chartWeights.length >= 2;
@@ -209,6 +221,64 @@ export default function Stats() {
           <div className="w-4 border-t-2 border-dashed border-slate-300 dark:border-slate-600" />
           <span className="text-[11px] text-slate-400 dark:text-slate-500">Cíl: {targetCalories} kcal/den</span>
         </div>
+      </div>
+
+      {/* Tréninky za posledních 7 dní */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+        <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm mb-6">Tréninky za posledních 7 dní</h3>
+
+        {workoutDaysLogged > 0 ? (
+          <>
+            <div className="relative h-36">
+              <div className="relative h-full flex items-end justify-between gap-2">
+                {days.map((d) => {
+                  const value = workoutTotalsByDay.get(d) || 0;
+                  const heightPercent = value === 0 ? 0 : Math.max(4, (value / workoutMaxValue) * 100);
+                  const dayIndex = new Date(`${d}T00:00:00`).getDay();
+                  const isToday = d === today;
+                  const isSelected = selectedWorkoutDay === d;
+
+                  return (
+                    <button
+                      key={d}
+                      onClick={() => setSelectedWorkoutDay(d)}
+                      className="flex-1 h-full flex flex-col items-center justify-end gap-2"
+                      aria-label={`${DAY_LABELS[dayIndex]}: ${value} kcal spáleno`}
+                    >
+                      <div className="relative w-full flex items-end justify-center h-full">
+                        {isSelected && value > 0 && (
+                          <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-orange-600 dark:bg-orange-500 text-white text-[11px] font-bold px-2 py-1 rounded-lg whitespace-nowrap">
+                            {value} kcal
+                          </div>
+                        )}
+                        <div
+                          className={`w-full max-w-7 rounded-t-md transition-all ${
+                            value === 0
+                              ? "h-1 bg-slate-100 dark:bg-slate-800"
+                              : "bg-linear-to-t from-orange-600 to-orange-400"
+                          } ${isSelected && value > 0 ? "ring-2 ring-orange-200 dark:ring-orange-900" : ""}`}
+                          style={value > 0 ? { height: `${heightPercent}%` } : undefined}
+                        />
+                      </div>
+                      <span className={`text-[10px] font-bold ${isToday ? "text-amber-600 dark:text-amber-400" : "text-slate-400 dark:text-slate-500"}`}>
+                        {DAY_LABELS[dayIndex]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mt-5 pt-4 border-t border-slate-50 dark:border-slate-800">
+              <span className="text-[11px] text-slate-400 dark:text-slate-500">{formatWorkoutsCs(workoutCountThisWeek)} tento týden</span>
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 tabular-nums">
+                Ø {workoutAvgCalories} kcal / zapsaný den
+              </span>
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-slate-400 dark:text-slate-500">Zatím žádný zapsaný trénink za posledních 7 dní.</p>
+        )}
       </div>
 
       {/* Trend váhy */}

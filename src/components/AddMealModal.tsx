@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2, ClipboardList } from "lucide-react";
+import { type AddMealAction } from "./BottomNav";
 import { db, type MealItem } from "../db/db";
 import { MyaVision, type VisionResult, type MealType, type Confidence } from "../lib/vision";
 import { MyaVoice } from "../lib/voice";
@@ -17,6 +18,9 @@ interface AddMealModalProps {
   /** Když je vyplněné, modál se otevře rovnou na formuláři předvyplněném touhle položkou
    *  a "Uložit" upraví existující jídlo místo založení nového (viz handleSave). */
   editMeal?: MealItem;
+  /** Zkratka ze satelitů rozbalovacího + tlačítka (BottomNav) — místo výběrové obrazovky
+   *  rovnou spustí danou akci (foto/hlas/text). Krok "choose" zůstává dostupný přes zpět. */
+  initialAction?: AddMealAction;
 }
 
 type Step = "choose" | "photo-preview" | "describe" | "recording" | "analyzing" | "form" | "feedback" | "templates";
@@ -61,7 +65,7 @@ function currentTime(): string {
   return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 }
 
-export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
+export default function AddMealModal({ onClose, editMeal, initialAction }: AddMealModalProps) {
   const { profile, user } = useAuth();
   const isEditing = editMeal !== undefined;
   const [step, setStep] = useState<Step>(editMeal ? "form" : "choose");
@@ -243,6 +247,17 @@ export default function AddMealModal({ onClose, editMeal }: AddMealModalProps) {
       setNotice("Nepodařilo se získat přístup k mikrofonu. Zkontroluj oprávnění nebo popiš jídlo textem.");
     }
   };
+
+  // Zkratka ze satelitů + tlačítka — spustí danou akci hned po namontování, dřív než se stihne
+  // vykreslit výběrová obrazovka. useLayoutEffect (ne useEffect) proto, aby klik na fotoaparát/mikrofon
+  // proběhl ve stejném "user gesture" okně jako tap na satelit (jinak jej prohlížeč může odmítnout).
+  useLayoutEffect(() => {
+    if (isEditing || !initialAction) return;
+    if (initialAction === "photo") fileInputRef.current?.click();
+    else if (initialAction === "voice") handleVoiceStart();
+    else if (initialAction === "text") handleDescribeStart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleStopRecording = () => {
     mediaRecorderRef.current?.stop();
