@@ -1,16 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Gauge, Sparkles, Loader2 } from "lucide-react";
+import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
 import { summarizeWeek } from "../lib/weekSummary";
 import { formatWorkoutsCs } from "../lib/format";
 import { buildDailyProteinRecords, detectLowProteinPattern, MACRO_PATTERN_COOLDOWN_DAYS } from "../lib/macroPattern";
+import { computeMeasurementTrend, MEASUREMENT_FIELDS, MEASUREMENT_LABELS_CS } from "../lib/bodyMeasurements";
+import { fileToCompressedDataUrl } from "../lib/image";
 import { daysSince } from "../lib/weighIn";
 import { isQuietHours } from "../lib/quietHours";
 import { MyaAI } from "../lib/ai";
-import { subscribeWeightLogs, type WeightLogEntry } from "../lib/cloudSync";
+import {
+  subscribeWeightLogs,
+  subscribeBodyMeasurements,
+  logBodyMeasurement,
+  subscribeProgressPhotos,
+  uploadProgressPhoto,
+  deleteProgressPhoto,
+  type WeightLogEntry,
+  type BodyMeasurementEntry,
+  type ProgressPhotoEntry,
+} from "../lib/cloudSync";
+import ProgressPhotoLightbox from "../components/ProgressPhotoLightbox";
 
 const DAY_LABELS = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
 
@@ -47,6 +60,24 @@ export default function Stats() {
     if (!user) return;
     return subscribeWeightLogs(user.uid, setWeightLogs);
   }, [user]);
+
+  const [bodyMeasurements, setBodyMeasurements] = useState<BodyMeasurementEntry[]>([]);
+  useEffect(() => {
+    if (!user) return;
+    return subscribeBodyMeasurements(user.uid, setBodyMeasurements);
+  }, [user]);
+  const [showLogMeasurement, setShowLogMeasurement] = useState(false);
+  const [measurementInputs, setMeasurementInputs] = useState<Record<string, string>>({ waist: "", hips: "", chest: "" });
+  const [savingMeasurement, setSavingMeasurement] = useState(false);
+
+  const [progressPhotos, setProgressPhotos] = useState<ProgressPhotoEntry[]>([]);
+  useEffect(() => {
+    if (!user) return;
+    return subscribeProgressPhotos(user.uid, setProgressPhotos);
+  }, [user]);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [lightboxPhoto, setLightboxPhoto] = useState<ProgressPhotoEntry | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   const totalsByDay = new Map<string, number>();
   allMeals.forEach((m) => totalsByDay.set(m.date, (totalsByDay.get(m.date) || 0) + m.value));
@@ -133,7 +164,47 @@ export default function Stats() {
     setMacroSuggestion(null);
   };
 
+  const handleLogMeasurement = async () => {
+    if (!user) return;
+    const measurement: { waist?: number; hips?: number; chest?: number } = {};
+    MEASUREMENT_FIELDS.forEach((field) => {
+      const raw = measurementInputs[field];
+      if (raw.trim()) measurement[field] = Number(raw);
+    });
+    if (Object.keys(measurement).length === 0) return;
+
+    setSavingMeasurement(true);
+    try {
+      await logBodyMeasurement(user.uid, today, measurement);
+      setMeasurementInputs({ waist: "", hips: "", chest: "" });
+      setShowLogMeasurement(false);
+    } finally {
+      setSavingMeasurement(false);
+    }
+  };
+
+  const handlePhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !user) return;
+    setUploadingPhoto(true);
+    try {
+      const dataUrl = await fileToCompressedDataUrl(file);
+      await uploadProgressPhoto(user.uid, dataUrl, today);
+    } catch (error) {
+      console.error("Nahrání progress fotky selhalo:", error);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handleDeletePhoto = async (photo: ProgressPhotoEntry) => {
+    if (!user) return;
+    await deleteProgressPhoto(user.uid, photo);
+  };
+
   return (
+    <>
     <div className="space-y-6 pt-6 transition-colors">
       <h1 className="font-display italic text-2xl font-medium tracking-tight dark:text-slate-100">Statistiky</h1>
 
@@ -317,6 +388,124 @@ export default function Stats() {
         )}
       </div>
 
+      {/* Míry těla */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Ruler className="w-4 h-4 text-teal-500 dark:text-teal-400" />
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Míry těla</h3>
+          </div>
+          <button
+            onClick={() => setShowLogMeasurement((v) => !v)}
+            aria-label="Zapsat míry"
+            className="w-7 h-7 rounded-full bg-teal-500 text-white flex items-center justify-center active:scale-90 transition-all shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+        </div>
+
+        {bodyMeasurements.length === 0 ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500 mt-3">Zatím žádné míry těla — přidej první záznam.</p>
+        ) : (
+          <div className="grid grid-cols-3 gap-3 mt-4">
+            {MEASUREMENT_FIELDS.map((field) => {
+              const trend = computeMeasurementTrend(bodyMeasurements, field);
+              return (
+                <div key={field} className="text-center">
+                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{MEASUREMENT_LABELS_CS[field]}</div>
+                  {trend ? (
+                    <>
+                      <div className="text-xl font-extrabold text-slate-800 dark:text-white">
+                        {trend.latest}
+                        <span className="text-xs font-medium text-slate-400 dark:text-slate-500"> cm</span>
+                      </div>
+                      {trend.delta !== null && (
+                        <div className={`text-[11px] font-bold ${trend.delta <= 0 ? "text-emerald-500" : "text-slate-400"}`}>
+                          {trend.delta > 0 ? "+" : ""}
+                          {trend.delta} cm
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-sm text-slate-300 dark:text-slate-600">—</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {showLogMeasurement && (
+          <div className="mt-4 pt-4 border-t border-slate-50 dark:border-slate-800 space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              {MEASUREMENT_FIELDS.map((field) => (
+                <div key={field}>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{MEASUREMENT_LABELS_CS[field]}</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={measurementInputs[field]}
+                    onChange={(e) => setMeasurementInputs((prev) => ({ ...prev, [field]: e.target.value }))}
+                    placeholder="cm"
+                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-teal-500 dark:text-white transition-all"
+                  />
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={handleLogMeasurement}
+              disabled={savingMeasurement || Object.values(measurementInputs).every((v) => !v.trim())}
+              className="w-full bg-teal-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {savingMeasurement && <Loader2 className="w-4 h-4 animate-spin" />}
+              Uložit míry
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Progress fotky */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={handlePhotoSelected}
+        />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Camera className="w-4 h-4 text-cyan-500 dark:text-cyan-400" />
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Progress fotky</h3>
+          </div>
+          <button
+            onClick={() => photoInputRef.current?.click()}
+            disabled={uploadingPhoto}
+            aria-label="Přidat progress fotku"
+            className="w-7 h-7 rounded-full bg-cyan-500 text-white flex items-center justify-center active:scale-90 transition-all shrink-0 disabled:opacity-50"
+          >
+            {uploadingPhoto ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+          </button>
+        </div>
+
+        {progressPhotos.length === 0 ? (
+          <p className="text-sm text-slate-400 dark:text-slate-500 mt-3">Zatím žádné progress fotky — přidej první snímek.</p>
+        ) : (
+          <div className="flex gap-2.5 overflow-x-auto -mx-1 px-1 pb-1 mt-4 hide-scrollbar">
+            {progressPhotos.map((photo) => (
+              <button
+                key={photo.syncId}
+                onClick={() => setLightboxPhoto(photo)}
+                className="shrink-0 w-20 h-20 rounded-2xl overflow-hidden border border-slate-100 dark:border-slate-800 active:scale-95 transition-all"
+              >
+                <img src={photo.downloadURL} alt={`Progress fotka ${photo.date}`} className="w-full h-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Kalibrace cíle podle skutečných dat */}
       {calibration && (
         <div className="bg-linear-to-br from-rose-50 to-amber-50/60 dark:from-rose-950/20 dark:to-amber-950/10 rounded-3xl p-6 border border-rose-100/60 dark:border-rose-900/30 transition-colors">
@@ -367,5 +556,11 @@ export default function Stats() {
         </div>
       )}
     </div>
+    {/* Mimo space-y-6 kontejner výš — Tailwindí space-y dává margin i "poslednímu" prvku,
+        dokud přibude další za ním, což by fixed inset-0 overlay posunulo od okraje obrazovky. */}
+    {lightboxPhoto && (
+      <ProgressPhotoLightbox photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} onDelete={handleDeletePhoto} />
+    )}
+    </>
   );
 }

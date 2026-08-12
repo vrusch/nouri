@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Stejný princip jako firestore.rules — uživatel má přístup jen ke svým vlastním
+    // souborům (users/{userId}/progressPhotos/...), nikam jinam.
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

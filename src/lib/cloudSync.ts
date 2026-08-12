@@ -10,7 +10,8 @@ import {
   writeBatch,
   type Unsubscribe,
 } from "firebase/firestore";
-import { db as firestoreDb } from "./firebase";
+import { ref, uploadString, getDownloadURL, deleteObject } from "firebase/storage";
+import { db as firestoreDb, storage } from "./firebase";
 import { db as dexieDb, type MealItem, type WorkoutItem } from "../db/db";
 import type { ShoppingListItemDraft } from "./shoppingList";
 import type { RecipeResult } from "./recipes";
@@ -37,6 +38,14 @@ function waterLogsCollection(uid: string) {
 
 function mealTemplatesCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "mealTemplates");
+}
+
+function bodyMeasurementsCollection(uid: string) {
+  return collection(firestoreDb, "users", uid, "bodyMeasurements");
+}
+
+function progressPhotosCollection(uid: string) {
+  return collection(firestoreDb, "users", uid, "progressPhotos");
 }
 
 function workoutsCollection(uid: string) {
@@ -250,6 +259,45 @@ export async function seedWeightLogIfEmpty(uid: string, currentWeight: number): 
   }
 }
 
+// Míry těla (FEATURE_IDEAS.md sekce 4) — pas/boky/hrudník, každé pole nezávisle volitelné
+// (appka nenutí vyplnit všechny najednou). Doc id = datum, stejný přepis-ve-stejný-den vzor
+// jako logWeight. Bez lokální Dexie cache, appka streamuje přímo do React stavu ve Stats.tsx —
+// stejný vzor jako subscribeWeightLogs, malá kolekce, čte se jen na jednom místě.
+export interface BodyMeasurementEntry {
+  date: string;
+  waist?: number; // pas, cm
+  hips?: number; // boky, cm
+  chest?: number; // hrudník, cm
+}
+
+export async function logBodyMeasurement(
+  uid: string,
+  dateISO: string,
+  measurement: { waist?: number; hips?: number; chest?: number }
+): Promise<void> {
+  try {
+    await setDoc(doc(bodyMeasurementsCollection(uid), dateISO), { date: dateISO, ...measurement });
+  } catch (error) {
+    console.error("Zápis míry těla do cloudu selhal:", error);
+  }
+}
+
+export function subscribeBodyMeasurements(
+  uid: string,
+  callback: (entries: BodyMeasurementEntry[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(bodyMeasurementsCollection(uid), orderBy("date", "asc"));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => d.data() as BodyMeasurementEntry)),
+    (error) => {
+      console.error("Synchronizace měr těla selhala:", error);
+      onError?.(error);
+    }
+  );
+}
+
 // Doc id = datum (YYYY-MM-DD), stejný vzor jako logWeight — přepsání ve stejný den
 // nahradí předchozí počet, místo aby appka musela počítat inkrementy na serveru.
 export async function logWater(uid: string, dateISO: string, glasses: number): Promise<void> {
@@ -393,4 +441,52 @@ export async function saveMealTemplate(uid: string, name: string, items: MealTem
 
 export async function deleteMealTemplate(uid: string, id: string): Promise<void> {
   await deleteDoc(doc(mealTemplatesCollection(uid), id));
+}
+
+// Progress fotky (FEATURE_IDEAS.md sekce 4) — první appkou používaná Firebase Storage data,
+// zbytek appky žije jen ve Firestore. Soubor v Storage (users/{uid}/progressPhotos/{syncId}.jpg)
+// + metadata dokument ve Firestore se stejným syncId, ať appka nemusí při zobrazení znovu volat
+// Storage (getDownloadURL) — URL se uloží rovnou při uploadu.
+export interface ProgressPhotoEntry {
+  syncId: string;
+  date: string;
+  downloadURL: string;
+  storagePath: string;
+}
+
+export async function uploadProgressPhoto(uid: string, photoDataUrl: string, dateISO: string): Promise<void> {
+  const syncId = crypto.randomUUID();
+  const storagePath = `users/${uid}/progressPhotos/${syncId}.jpg`;
+  const storageRef = ref(storage, storagePath);
+  await uploadString(storageRef, photoDataUrl, "data_url");
+  const downloadURL = await getDownloadURL(storageRef);
+  const entry: ProgressPhotoEntry = { syncId, date: dateISO, downloadURL, storagePath };
+  await setDoc(doc(progressPhotosCollection(uid), syncId), entry);
+}
+
+// Maže dokument i soubor v Storage — pokud by soubor v Storage z nějakého důvodu už neexistoval
+// (např. ruční zásah), appka to jen zaloguje a smazání Firestore záznamu (to hlavní pro UI) stejně dokončí.
+export async function deleteProgressPhoto(uid: string, entry: ProgressPhotoEntry): Promise<void> {
+  await deleteDoc(doc(progressPhotosCollection(uid), entry.syncId));
+  try {
+    await deleteObject(ref(storage, entry.storagePath));
+  } catch (error) {
+    console.error("Smazání souboru progress fotky ze Storage selhalo:", error);
+  }
+}
+
+export function subscribeProgressPhotos(
+  uid: string,
+  callback: (entries: ProgressPhotoEntry[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(progressPhotosCollection(uid), orderBy("date", "asc"));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => d.data() as ProgressPhotoEntry)),
+    (error) => {
+      console.error("Synchronizace progress fotek selhala:", error);
+      onError?.(error);
+    }
+  );
 }

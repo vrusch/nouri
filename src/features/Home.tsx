@@ -163,6 +163,7 @@ export default function Home({ onEditMeal }: HomeProps) {
   };
 
   return (
+    <>
     <div className="space-y-6 pt-6 transition-colors">
       {/* Uvítání */}
       <div className="flex items-start justify-between gap-3">
@@ -342,8 +343,6 @@ export default function Home({ onEditMeal }: HomeProps) {
         )}
       </div>
 
-      {showLogWorkout && <LogWorkoutModal onClose={() => setShowLogWorkout(false)} />}
-
       {/* AI Doporučení */}
       <div className="bg-linear-to-br from-rose-50 to-amber-50/60 dark:from-rose-950/20 dark:to-amber-950/10 rounded-3xl p-5 border border-rose-100/60 dark:border-rose-900/30 relative overflow-hidden transition-colors">
         <div className="flex gap-4 relative z-10">
@@ -453,5 +452,9 @@ export default function Home({ onEditMeal }: HomeProps) {
         </div>
       </div>
     </div>
+    {/* Mimo space-y-6 kontejner výš — Tailwindí space-y dává margin i "poslednímu" prvku,
+        dokud přibude další za ním, což by fixed inset-0 overlay posunulo od okraje obrazovky. */}
+    {showLogWorkout && <LogWorkoutModal onClose={() => setShowLogWorkout(false)} />}
+    </>
   );
 }
