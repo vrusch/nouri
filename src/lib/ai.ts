@@ -43,6 +43,16 @@ export interface MacroPatternInput {
 
 const suggestMacroFixFn = httpsCallable<MacroPatternInput, { text: string }>(functions, "suggestMacroFix");
 
+export interface ChatMessageInput {
+  role: "user" | "assistant";
+  content: string;
+}
+
+const chatWithMyaFn = httpsCallable<{ profile: UserProfile; messages: ChatMessageInput[] }, { text: string }>(
+  functions,
+  "chatWithMya"
+);
+
 export const MyaAI = {
   /**
    * Vygeneruje úvodní report (vstupní diagnózu) přes server-side Cloud Function.
@@ -109,6 +119,21 @@ export const MyaAI = {
     } catch (error) {
       console.error("Mya AI Error:", error);
       return `Posledních pár dní ti chybí bílkoviny k cíli (${input.targetProtein}g/den) — zkus přidat větší porci masa, tvarohu nebo luštěnin k jednomu z jídel.`;
+    }
+  },
+
+  /**
+   * Volný chat s Myou — na rozdíl od ostatních funkcí přijímá historii konverzace,
+   * ořezanou appkou na posledních pár zpráv (viz MyaChatModal), aby volání OpenAI
+   * nerostlo do nekonečna s délkou konverzace.
+   */
+  async chatWithMya(profile: UserProfile, messages: ChatMessageInput[]): Promise<string> {
+    try {
+      const response = await chatWithMyaFn({ profile, messages });
+      return response.data.text;
+    } catch (error) {
+      console.error("Mya AI Error:", error);
+      return "Mya právě neodpovídá — zkus to prosím znovu za chvíli.";
     }
   }
 };

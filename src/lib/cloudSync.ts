@@ -52,6 +52,10 @@ function workoutsCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "workouts");
 }
 
+function chatMessagesCollection(uid: string) {
+  return collection(firestoreDb, "users", uid, "chatMessages");
+}
+
 // Odloží cloud zálohu, aby nikdy neblokovala lokální (Dexie) zápis — chyba se jen zaloguje.
 export async function backupMeal(uid: string, meal: MealItem): Promise<void> {
   if (!meal.syncId) return;
@@ -497,4 +501,48 @@ export function subscribeProgressPhotos(
       onError?.(error);
     }
   );
+}
+
+// Volný chat s Myou (FEATURE_IDEAS.md sekce 6) — historie zpráv, stejný vzor jako
+// subscribeSavedRecipes/subscribeMealTemplates (auto-id dokument, řazeno podle vzniku,
+// žádná lokální Dexie cache). chatWithMya Cloud Function je záměrně bezstavová jako
+// všechny ostatní funkce v tomhle souboru — appka jí posílá jen ořezanou historii z téhle
+// kolekce, funkce sama do Firestore nesahá.
+export interface ChatMessageEntry {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
+export function subscribeChatMessages(
+  uid: string,
+  callback: (messages: ChatMessageEntry[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(chatMessagesCollection(uid), orderBy("createdAt", "asc"));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessageEntry, "id">) }))),
+    (error) => {
+      console.error("Synchronizace chatu s Myou selhala:", error);
+      onError?.(error);
+    }
+  );
+}
+
+export async function saveChatMessage(uid: string, role: "user" | "assistant", content: string): Promise<void> {
+  const entry: Omit<ChatMessageEntry, "id"> = { role, content, createdAt: new Date().toISOString() };
+  await setDoc(doc(chatMessagesCollection(uid)), entry);
+}
+
+// Smazání celé historie chatu (vlastní tlačítko v MyaChatModal, ne v Profilu — na rozdíl
+// od Smazat historii v Profilu, která se týká jen jídel) — stejné dávkové mazání jako
+// clearMealsBackup, i když v praxi jedna dávka stačí (chat historie je řádově menší).
+export async function clearChatHistory(uid: string): Promise<void> {
+  const snap = await getDocs(chatMessagesCollection(uid));
+  if (snap.empty) return;
+  const batch = writeBatch(firestoreDb);
+  snap.docs.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
 }

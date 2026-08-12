@@ -659,6 +659,110 @@ bílkovin denně, cíl je ${input.targetProtein}g. Cíl uživatele: ${goalLabel}
   }
 );
 
+interface ChatMessageInput {
+  role: "user" | "assistant";
+  content: string;
+}
+
+const MAX_CHAT_HISTORY = 20;
+const MAX_CHAT_MESSAGE_LENGTH = 2000;
+const CHAT_FALLBACK_TEXT = "Mya právě neodpovídá — zkus to prosím znovu za chvíli.";
+
+// Volný chat s Myou (FEATURE_IDEAS.md sekce 6) — jediná funkce v tomhle souboru s vícekolovou
+// konverzací (ostatní jsou vždy přesně systém+user). Zůstává bezstavová jako všechny sourozenní
+// funkce: appka posílá ořezanou historii z users/{uid}/chatMessages (viz cloudSync.ts), funkce
+// sama do Firestore nesahá. Protože historie teď přichází od klienta, je to nedůvěryhodný vstup —
+// validuje se délka pole i každé zprávy zvlášť, na rozdíl od ostatních funkcí v souboru.
+export const chatWithMya = onCall(
+  { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 30 },
+  async (request) => {
+    requireAuth(request);
+    const profile = request.data?.profile as UserProfileInput | undefined;
+    if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
+
+    const rawMessages = request.data?.messages;
+    if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
+      throw new HttpsError("invalid-argument", "Chybí zprávy.");
+    }
+    if (rawMessages.length > MAX_CHAT_HISTORY) {
+      throw new HttpsError("invalid-argument", "Příliš dlouhá historie konverzace.");
+    }
+
+    const messages: ChatMessageInput[] = [];
+    for (const raw of rawMessages as unknown[]) {
+      const entry = raw as { role?: unknown; content?: unknown } | null;
+      const role = entry?.role;
+      const content = entry?.content;
+      if (role !== "user" && role !== "assistant") {
+        throw new HttpsError("invalid-argument", "Neplatná role zprávy.");
+      }
+      if (typeof content !== "string" || !content.trim() || content.length > MAX_CHAT_MESSAGE_LENGTH) {
+        throw new HttpsError("invalid-argument", "Neplatný obsah zprávy.");
+      }
+      messages.push({ role, content: content.trim() });
+    }
+
+    // Živě přepočteno z profilu, ne z profile.targetCalories (stejný důvod jako u getDailyGreeting).
+    const nutrition = calculateNutrition({
+      gender: profile.gender,
+      weight: profile.weight,
+      height: profile.height,
+      birthDate: profile.birthDate,
+      activityLevel: profile.activityLevel,
+      goal: profile.goal,
+      calibratedTDEE: profile.calibratedTDEE,
+    });
+    const goalLabel = profile.goal === "lose" ? "hubnutí" : profile.goal === "gain" ? "nabírání svalové hmoty" : "udržování váhy";
+
+    const systemPrompt = `Jsi Mya, AI nutriční a fitness asistentka aplikace Nouri. Vedeš volnou konverzaci s uživatelkou/uživatelem appky.
+
+Kontext uživatele: ${profile.name}, cíl ${goalLabel}, cílový příjem ${nutrition.targetCalories} kcal/den (bílkoviny ${nutrition.macros.protein} g).
+
+Pravidla:
+- Odpovídej výhradně na témata výživy, hubnutí/nabírání/udržování váhy, cvičení, pohybu a zdravého životního stylu, případně dotazy k používání appky Nouri. Na cokoliv mimo tato témata zdvořile odpověz, že se raději bavíš o výživě a zdraví, a nasměruj konverzaci zpět.
+- Piš česky, věcně ale přátelsky, jako zkušená kamarádka-nutriční poradkyně.
+- Odpovědi drž přiměřeně stručné (typicky 2-5 vět) — delší jen když si to téma opravdu vyžádá (např. rozpis jídelníčku).
+- Nikdy nepoužívej markdown tabulky.
+- Nejsi lékařka — u zdravotních potížích nebo léčebných dotazech doporuč konzultaci s lékařem, nediagnostikuj.`;
+
+    const apiMessages = [
+      { role: "system", content: systemPrompt },
+      ...messages.map((m) => ({ role: m.role, content: m.content })),
+    ];
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: apiMessages,
+          max_tokens: 500,
+          temperature: 0.7,
+        }),
+      });
+
+      if (response.status === 429) {
+        return { text: "Mya je momentálně přetížená, zkus to prosím za chvíli." };
+      }
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      const content = json.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
+        return { text: CHAT_FALLBACK_TEXT };
+      }
+      return { text: content };
+    } catch (error) {
+      console.error("Mya Chat Error:", error);
+      return { text: CHAT_FALLBACK_TEXT };
+    }
+  }
+);
+
 const AUDIO_EXTENSIONS: Record<string, string> = {
   "audio/webm": "webm",
   "audio/mp4": "mp4",
