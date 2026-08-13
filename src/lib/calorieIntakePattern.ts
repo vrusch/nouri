@@ -18,11 +18,18 @@ export interface DailyCalorieRecord {
  * "nespolehlivý" den je roughEstimate (režim "Jím venku") — hrubý odhad podle kategorie,
  * ne měřená data, stejná úvaha jako u bílkovin.
  */
+// excludeDates (typicky dnešek) appce dovolí vyloučit ještě neskončený den z okna, aniž by
+// appka musela filtrovat holým `r.date < today` v Stats.tsx, kde by to nešlo unit testovat
+// (B5 v AUDIT_2026-08-13.md) — appka by jinak v 10 dopoledne po jedné snídani mohla vyhodnotit
+// dnešek jako "pod 70 % cíle" a připočítat ho do vzorku nízkého příjmu.
 export function buildDailyCalorieRecords(
-  meals: { date: string; value: number; roughEstimate?: boolean }[]
+  meals: { date: string; value: number; roughEstimate?: boolean }[],
+  excludeDates?: string[]
 ): DailyCalorieRecord[] {
+  const excluded = new Set(excludeDates ?? []);
   const byDate = new Map<string, { total: number; reliable: boolean }>();
   meals.forEach((m) => {
+    if (excluded.has(m.date)) return;
     const entry = byDate.get(m.date) ?? { total: 0, reliable: true };
     entry.total += m.value;
     if (m.roughEstimate) entry.reliable = false;

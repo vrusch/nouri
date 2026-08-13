@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart, PartyPopper } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
-import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
+import { calculateNutrition, calibrateTarget, CALIBRATION_DISMISS_COOLDOWN_DAYS } from "../lib/nutrition";
 import { summarizeWeek, computeWeekdayWeekendProteinBreakdown } from "../lib/weekSummary";
 import { computeLoggingStreak } from "../lib/streak";
 import { generateWeeklyShareCardBlob } from "../lib/shareCard";
@@ -170,10 +170,15 @@ export default function Stats() {
     profile && nutrition
       ? calibrateTarget(manualWeighIns, dailyCalories, profile.goal, nutrition.bmr, nutrition.tdee)
       : null;
+  const calibrationDismissedRecently = profile?.lastCalibrationDismissedAt
+    ? daysSince(profile.lastCalibrationDismissedAt) < CALIBRATION_DISMISS_COOLDOWN_DAYS
+    : false;
 
-  // Dlouhodobý vzorec nízkých bílkovin — jen z posledních 14 dní, ne z celé historie.
+  // Dlouhodobý vzorec nízkých bílkovin — jen z posledních 14 dní, ne z celé historie. Dnešek
+  // appka vyloučí (excludeDates) — dokud den neskončil, nejde ho spravedlivě posoudit vůči
+  // celodennímu cíli (B5 v AUDIT_2026-08-13.md).
   const macroPatternWindowStart = lastNDates(14)[0];
-  const proteinRecords = buildDailyProteinRecords(allMeals).filter((r) => r.date >= macroPatternWindowStart);
+  const proteinRecords = buildDailyProteinRecords(allMeals, [today]).filter((r) => r.date >= macroPatternWindowStart);
   const lowProteinPattern = nutrition
     ? detectLowProteinPattern(proteinRecords, nutrition.macros.protein)
     : null;
@@ -183,7 +188,7 @@ export default function Stats() {
 
   // Citlivé sledování nízkého příjmu (FEATURE_IDEAS.md sekce 3) — stejné okno a stejný "reliable
   // day" princip jako bílkoviny výš, jen na celkové kalorie.
-  const calorieRecords = buildDailyCalorieRecords(allMeals).filter((r) => r.date >= macroPatternWindowStart);
+  const calorieRecords = buildDailyCalorieRecords(allMeals, [today]).filter((r) => r.date >= macroPatternWindowStart);
   const lowCaloriePattern = nutrition ? detectLowCaloriePattern(calorieRecords, targetCalories) : null;
   const lowCalorieDismissedRecently = profile?.lastLowCalorieDismissedAt
     ? daysSince(profile.lastLowCalorieDismissedAt) < LOW_CALORIE_PATTERN_COOLDOWN_DAYS
@@ -197,6 +202,10 @@ export default function Stats() {
   const quietHoursActive =
     (profile?.quietHoursEnabled ?? true) && isQuietHours(new Date().getHours(), profile?.quietHoursStart, profile?.quietHoursEnd);
   const vacationActive = isVacationDay(today, profile?.vacationDates);
+  // Kalibrace čte reálná data (zapsaná jídla + váhu), ne motivační stav appky — na rozdíl od
+  // sesterských karet výš/níž záměrně NEreaguje na vacationActive (C6 v AUDIT_2026-08-13.md),
+  // jen na tiché hodiny a vlastní cooldown po "Zatím ne".
+  const showCalibrationCard = !!calibration && !calibrationDismissedRecently && !quietHoursActive;
   const showLowCaloriePatternCard =
     !!lowCaloriePattern?.detected && !lowCalorieDismissedRecently && !quietHoursActive && !vacationActive;
   // Když appka vidí celkově nízký příjem, karta na bílkoviny konkrétně mlčí — nedává smysl radit
@@ -266,6 +275,10 @@ export default function Stats() {
   const handleDismissLowCaloriePattern = () => {
     updateProfile({ lastLowCalorieDismissedAt: new Date().toISOString().split("T")[0] });
     setCalorieCheckInMessage(null);
+  };
+
+  const handleDismissCalibration = () => {
+    updateProfile({ lastCalibrationDismissedAt: new Date().toISOString().split("T")[0] });
   };
 
   const [goalReachedMessage, setGoalReachedMessage] = useState<string | null>(null);
@@ -772,15 +785,15 @@ export default function Stats() {
       </div>
 
       {/* Kalibrace cíle podle skutečných dat */}
-      {calibration && (
+      {showCalibrationCard && calibration && (
         <div className="bg-linear-to-br from-rose-50 to-amber-50/60 dark:from-rose-950/20 dark:to-amber-950/10 rounded-3xl p-6 border border-rose-100/60 dark:border-rose-900/30 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <Gauge className="w-4 h-4 text-rose-500 dark:text-rose-400" />
             <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Kalibrace cíle podle dat</h3>
           </div>
           <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">
-            Za posledních {calibration.daysSpan} dní jsi v průměru jedla {calibration.avgLoggedCalories} kcal/den
-            a váha se změnila o {calibration.weightChangeKg > 0 ? "+" : ""}
+            Za posledních {calibration.daysSpan} dní (zapsáno {calibration.loggedDays} z nich) jsi v průměru jedla{" "}
+            {calibration.avgLoggedCalories} kcal/den a váha se změnila o {calibration.weightChangeKg > 0 ? "+" : ""}
             {calibration.weightChangeKg} kg. Podle toho tvůj skutečný denní výdej vychází spíš na{" "}
             {calibration.estimatedTDEE} kcal (teď se počítá s {nutrition?.tdee} kcal).
           </p>
@@ -794,6 +807,12 @@ export default function Stats() {
             className="w-full bg-rose-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all"
           >
             Upravit cíl na {calibration.suggestedTargetCalories} kcal
+          </button>
+          <button
+            onClick={handleDismissCalibration}
+            className="w-full text-slate-500 dark:text-slate-400 text-xs font-bold py-2 mt-1 active:scale-[0.98] transition-all"
+          >
+            Zatím ne
           </button>
         </div>
       )}

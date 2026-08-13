@@ -5,8 +5,10 @@ import { type MealItem } from "../db/db";
 // Stejný postup jako handleExportCsv v Profile.tsx — udržuje import v souladu s exportem,
 // místo aby fixture CSV bylo napsané ručně a mohlo se s exportem rozejít.
 function toExportCsv(meals: Omit<MealItem, "id" | "syncId">[]): string {
-  const header = ["Datum", "Čas", "Typ", "Název", "Kalorie", "Bílkoviny (g)", "Tuky (g)", "Sacharidy (g)", "Zdroj"];
-  const rows = meals.map((m) => [m.date, m.time, m.type, m.name, m.value, m.protein ?? "", m.fat ?? "", m.carbs ?? "", m.source ?? ""]);
+  const header = ["Datum", "Čas", "Typ", "Název", "Kalorie", "Bílkoviny (g)", "Tuky (g)", "Sacharidy (g)", "Zdroj", "Hrubý odhad"];
+  const rows = meals.map((m) => [
+    m.date, m.time, m.type, m.name, m.value, m.protein ?? "", m.fat ?? "", m.carbs ?? "", m.source ?? "", m.roughEstimate ? "ano" : "",
+  ]);
   const csv = [header, ...rows]
     .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
     .join("\n");
@@ -19,6 +21,7 @@ describe("parseMealsCsv", () => {
       { date: "2026-08-01", time: "08:15", type: "breakfast", name: "Ovesná kaše", value: 350, protein: 12, fat: 8, carbs: 55, source: "manual" },
       { date: "2026-08-01", time: "13:00", type: "lunch", name: 'Kuře, rýže "Basmati", zelenina', value: 620, protein: 45, fat: 15, carbs: 70, source: "photo" },
       { date: "2026-08-02", time: "19:30", type: "dinner", name: "Losos se salátem", value: 480 },
+      { date: "2026-08-03", time: "12:30", type: "lunch", name: "Restaurace (odhad)", value: 700, roughEstimate: true },
     ];
 
     const csv = toExportCsv(original);
@@ -26,6 +29,22 @@ describe("parseMealsCsv", () => {
 
     expect(errors).toEqual([]);
     expect(meals).toEqual(original);
+  });
+
+  // Zpětná kompatibilita (poradenská revize po B10/C5): appka vyexportovaná před přidáním
+  // sloupce "Hrubý odhad" produkovala jen 9 sloupců. Přidání 10. sloupce do EXPECTED_HEADER by
+  // takový starší soubor omylem odmítlo jako "neplatnou hlavičku" a navíc naparsovalo hlavičkový
+  // řádek jako data.
+  it("starší export s jen 9 sloupci (bez 'Hrubý odhad') se naimportuje beze chyby", () => {
+    const csv = [
+      '"Datum","Čas","Typ","Název","Kalorie","Bílkoviny (g)","Tuky (g)","Sacharidy (g)","Zdroj"',
+      '"2026-08-01","08:00","breakfast","Rohlík","300","","","",""',
+    ].join("\n");
+
+    const { meals, errors } = parseMealsCsv(csv);
+    expect(errors).toEqual([]);
+    expect(meals).toHaveLength(1);
+    expect(meals[0].roughEstimate).toBeUndefined();
   });
 
   it("odmítne prázdný soubor", () => {
@@ -36,7 +55,7 @@ describe("parseMealsCsv", () => {
 
   it("přeskočí řádek s neplatným datem, ale ostatní naimportuje", () => {
     const csv = [
-      '"Datum","Čas","Typ","Název","Kalorie","Bílkoviny (g)","Tuky (g)","Sacharidy (g)","Zdroj"',
+      '"Datum","Čas","Typ","Název","Kalorie","Bílkoviny (g)","Tuky (g)","Sacharidy (g)","Zdroj","Hrubý odhad"',
       '"not-a-date","08:00","breakfast","Test","300","","",""',
       '"2026-08-01","08:00","breakfast","Rohlík","300","","","",""',
     ].join("\n");
@@ -50,7 +69,7 @@ describe("parseMealsCsv", () => {
 
   it("přeskočí řádek s neznámým typem jídla", () => {
     const csv = [
-      '"Datum","Čas","Typ","Název","Kalorie","Bílkoviny (g)","Tuky (g)","Sacharidy (g)","Zdroj"',
+      '"Datum","Čas","Typ","Název","Kalorie","Bílkoviny (g)","Tuky (g)","Sacharidy (g)","Zdroj","Hrubý odhad"',
       '"2026-08-01","08:00","brunch","Test","300","","","",""',
     ].join("\n");
 
@@ -61,7 +80,7 @@ describe("parseMealsCsv", () => {
 
   it("přeskočí řádek s nulovými/neplatnými kaloriemi", () => {
     const csv = [
-      '"Datum","Čas","Typ","Název","Kalorie","Bílkoviny (g)","Tuky (g)","Sacharidy (g)","Zdroj"',
+      '"Datum","Čas","Typ","Název","Kalorie","Bílkoviny (g)","Tuky (g)","Sacharidy (g)","Zdroj","Hrubý odhad"',
       '"2026-08-01","08:00","breakfast","Test","0","","","",""',
     ].join("\n");
 
@@ -79,7 +98,7 @@ describe("parseMealsCsv", () => {
 
   it("ignoruje neplatnou hodnotu ve sloupci Zdroj místo aby ji zapsala jako platnou", () => {
     const csv = [
-      '"Datum","Čas","Typ","Název","Kalorie","Bílkoviny (g)","Tuky (g)","Sacharidy (g)","Zdroj"',
+      '"Datum","Čas","Typ","Název","Kalorie","Bílkoviny (g)","Tuky (g)","Sacharidy (g)","Zdroj","Hrubý odhad"',
       '"2026-08-01","08:00","breakfast","Rohlík","300","","","","jina-appka"',
     ].join("\n");
 

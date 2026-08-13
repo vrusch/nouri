@@ -11,7 +11,7 @@ import { WATER_TARGET_GLASSES, getWaterProgressPercent } from "../lib/water";
 import { formatGlassesCs, formatWorkoutsCs } from "../lib/format";
 import {
   subscribeWaterLog,
-  logWater,
+  adjustWaterGlasses,
   saveMealTemplate,
   deleteWorkout,
   subscribeWeightLogs,
@@ -98,12 +98,12 @@ export default function Home({ onEditMeal }: HomeProps) {
 
   const handleAddWater = () => {
     if (!user) return;
-    logWater(user.uid, today, waterGlasses + 1);
+    adjustWaterGlasses(user.uid, today, 1);
   };
 
   const handleRemoveWater = () => {
     if (!user || waterGlasses <= 0) return;
-    logWater(user.uid, today, waterGlasses - 1);
+    adjustWaterGlasses(user.uid, today, -1);
   };
 
   const handleDeleteWorkout = async (workout: WorkoutItem) => {
@@ -165,7 +165,14 @@ export default function Home({ onEditMeal }: HomeProps) {
       });
       sessionStorage.setItem(`mya_mood_greeting_${today}`, msg);
       sessionStorage.setItem(`mya_mood_answered_${today}`, "1");
-      setGreeting(msg);
+      // Milníková oslava (viz efekt výš) mohla appka zobrazit, zatímco čekala na tuhle odpověď —
+      // stejná třída race jako B1 v AUDIT_2026-08-13.md, jen na cestě odpovědi na náladu místo
+      // automatického pozdravu. Milník má přednost před reakcí na náladu (stejné pořadí jako ve
+      // fetchGreeting výš), takže appka bublinu nepřepíše, i když do sessionStorage reakci na
+      // náladu pro úplnost pořád zapíše.
+      if (!sessionStorage.getItem(`mya_milestone_${today}`)) {
+        setGreeting(msg);
+      }
       setMoodAnswered(true);
     } finally {
       setSubmittingMood(false);
@@ -262,18 +269,38 @@ export default function Home({ onEditMeal }: HomeProps) {
 
       try {
         const msg = await MyaAI.getDailyGreeting(profile, { consumedCalories, consumedProtein });
-        // Mezitím (appka na odpověď OpenAI čeká) mohla appka dostat reakci na náladu — ta má
-        // přednost, tenhle běžný pozdrav by ji jinak přepsal, jakmile doletí později.
-        if (sessionStorage.getItem(moodGreetingCacheKey)) return;
+        // Mezitím (appka na odpověď OpenAI čeká) mohla appka dostat reakci na náladu, nebo
+        // zobrazit milníkovou oslavu (efekt výš) — obě mají přednost, tenhle běžný pozdrav
+        // by je jinak přepsal, jakmile doletí později.
+        if (sessionStorage.getItem(milestoneCacheKey) || sessionStorage.getItem(moodGreetingCacheKey)) return;
         setGreeting(msg);
         sessionStorage.setItem(cacheKey, msg);
       } catch {
-        if (sessionStorage.getItem(moodGreetingCacheKey)) return;
+        if (sessionStorage.getItem(milestoneCacheKey) || sessionStorage.getItem(moodGreetingCacheKey)) return;
         setGreeting(`Ahoj ${profile.name}! Nezapomeň dnes pít hodně vody. ✨`);
       }
     };
 
-    fetchGreeting();
+    // Grace period, než appka sama zavolá OpenAI (B2 v AUDIT_2026-08-13.md): pokud appka na
+    // mountu ještě nemá odpověď na náladu, počká pár vteřin, aby zbytečně nezaplatila dvě
+    // souběžná volání, když uživatelka klikne na náladu dřív, než by automat stihl odpovědět
+    // (handleSubmitMood výš má vlastní volání getDailyGreeting). Kontrola sessionStorage přímo
+    // ve zpožděném callbacku (ne přes moodAnswered state v deps) je záměr — nechceme kvůli tomu
+    // přidávat moodAnswered do závislostí a efekt tak zbytečně restartovat při každé odpovědi.
+    const moodAnsweredKey = `mya_mood_answered_${today}`;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    if (sessionStorage.getItem(moodAnsweredKey)) {
+      fetchGreeting();
+    } else {
+      timeoutId = setTimeout(() => {
+        if (sessionStorage.getItem(moodAnsweredKey)) return;
+        fetchGreeting();
+      }, 2500);
+    }
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [profile, today, meals.length, consumedCalories, consumedProtein]);
 
   // Nová zpráva (nový den / nově zapsané jídlo) nesmí nechat dobíhat přečtení té staré —

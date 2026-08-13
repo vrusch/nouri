@@ -2,6 +2,11 @@ import { type MealItem } from "../db/db";
 
 // Musí zůstat v souladu s hlavičkou psanou v Profile.tsx (handleExportCsv) — import čte
 // jen appkou vyexportovaný formát, ne libovolné cizí CSV.
+// Jen původních 9 sloupců je vyžadovaných — "Hrubý odhad" (C5 v AUDIT_2026-08-13.md) appka
+// přidala jako 10., ale zpětně kompatibilně: CSV vyexportované appkou před touhle opravou má
+// jen 9 sloupců, a headerMatches na přesnou shodu i délku by ho odmítlo jako "neplatnou
+// hlavičku" (a navíc omylem naparsovalo samotný hlavičkový řádek jako data). Chybějící 10.
+// sloupec appka na řádku dat prostě přečte jako undefined → žádný roughEstimate, beze změny.
 const EXPECTED_HEADER = ["Datum", "Čas", "Typ", "Název", "Kalorie", "Bílkoviny (g)", "Tuky (g)", "Sacharidy (g)", "Zdroj"];
 const VALID_TYPES: MealItem["type"][] = ["breakfast", "lunch", "dinner", "snack"];
 const VALID_SOURCES: NonNullable<MealItem["source"]>[] = ["photo", "manual"];
@@ -66,7 +71,7 @@ export function parseMealsCsv(csvText: string): ParseMealsCsvResult {
 
   dataLines.forEach((line, idx) => {
     const rowNum = idx + (headerMatches ? 2 : 1);
-    const [date, time, type, name, calories, protein, fat, carbs, source] = parseCsvLine(line);
+    const [date, time, type, name, calories, protein, fat, carbs, source, roughEstimate] = parseCsvLine(line);
 
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       errors.push(`Řádek ${rowNum}: neplatné datum "${date ?? ""}".`);
@@ -98,6 +103,10 @@ export function parseMealsCsv(csvText: string): ParseMealsCsvResult {
     if (VALID_SOURCES.includes(source as NonNullable<MealItem["source"]>)) {
       meal.source = source as MealItem["source"];
     }
+    // C5 v AUDIT_2026-08-13.md — appka dřív tiše zahazovala příznak "Jím venku" (roughEstimate)
+    // při exportu/importu; žádná nutriční data se tím neztratila, jen appka po reimportu
+    // považovala hrubý odhad za měřená data.
+    if (roughEstimate === "ano") meal.roughEstimate = true;
 
     meals.push(meal);
   });

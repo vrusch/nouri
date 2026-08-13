@@ -22,6 +22,21 @@ function requireAuth(request: CallableRequest) {
   }
 }
 
+const DEFAULT_MAX_PROMPT_TEXT_LENGTH = 300;
+
+// Ořeže délku a odstraní řádkové zlomy z volného textu, který appka posílá do promptu (jméno,
+// hint, popis jídla/tréninku, preference, suroviny z lednice...) — appku dnes používá jen jedna
+// autentizovaná uživatelka, takže reálné riziko je nízké (nanejvýš by obešla vlastní UI a
+// poslala funkci upravený vstup přímo), ale sdílený limit je levnější než ho nechat bez hranic,
+// zvlášť tam, kde text jde do SYSTÉMOVÉ části promptu (viz profile.name v chatWithMya).
+// undefined vstup (nepovinné pole) i prázdný/jen-mezerový text appka mapuje na undefined, ať
+// volající strana může použít stejný `?.trim()` fallback jako dřív.
+function sanitizePromptText(value: unknown, maxLength: number = DEFAULT_MAX_PROMPT_TEXT_LENGTH): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const cleaned = value.replace(/[\r\n]+/g, " ").trim();
+  return cleaned ? cleaned.slice(0, maxLength) : undefined;
+}
+
 const ACTIVITY_LEVELS: Record<number, string> = {
   1: "Leží v posteli / naprostý klid",
   1.2: "Sedavé zaměstnání, minimální pohyb",
@@ -37,6 +52,7 @@ export const generateWelcomeReport = onCall(
     requireAuth(request);
     const profile = request.data?.profile as UserProfileInput | undefined;
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
+    const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
     const results = calculateNutrition({
       gender: profile.gender,
@@ -65,7 +81,7 @@ DŮLEŽITÉ FORMÁTOVÁNÍ:
    - ### 4. Přehled scénářů (Rychlý progres, Ideální balanc, Udržování) - zde použij odrážky, ne tabulku!`;
 
     const userPrompt = `Data uživatele:
-Jméno: ${profile.name}
+Jméno: ${safeName}
 Pohlaví: ${genderCzech}
 Věk: ${age} let
 Výška: ${profile.height} cm
@@ -133,6 +149,7 @@ export const getDailyGreeting = onCall(
     const mood = Number.isInteger(rawMood) && rawMood >= 1 && rawMood <= 5 ? rawMood : undefined;
     const moodNote = typeof request.data?.moodNote === "string" ? request.data.moodNote.trim().slice(0, 300) : undefined;
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
+    const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
     // Živě přepočteno z profilu, ne z uloženého profile.targetCalories — to může být
     // zastaralé (naposledy zapsané při onboardingu nebo posledním "Aktualizovat analýzu").
@@ -161,7 +178,7 @@ Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem 
         ? ` Dnešní nálada/energie: ${mood}/5 (1 = mizerně, 5 = skvěle).${moodNote ? ` Poznámka od uživatele: "${moodNote}"` : ""}`
         : "";
 
-    const userPrompt = `Uživatel: ${profile.name}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g). Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.${moodContext}`;
+    const userPrompt = `Uživatel: ${safeName}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g). Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.${moodContext}`;
 
     try {
       const response = await fetch(OPENAI_API_URL, {
@@ -191,7 +208,7 @@ Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem 
       return { text: json.choices?.[0]?.message?.content || "Krásný den! Jak se dnes daří?" };
     } catch (error) {
       console.error("Mya AI Error (greeting):", error);
-      return { text: `Ahoj ${profile.name}! Nezapomeň si dnes zapsat všechna jídla.` };
+      return { text: `Ahoj ${safeName}! Nezapomeň si dnes zapsat všechna jídla.` };
     }
   }
 );
@@ -207,7 +224,7 @@ export const analyzeFood = onCall(
   async (request) => {
     requireAuth(request);
     const imageDataUrl = request.data?.imageDataUrl as string | undefined;
-    const hint = request.data?.hint as string | undefined;
+    const hint = sanitizePromptText(request.data?.hint, 300);
     if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
       throw new HttpsError("invalid-argument", "Chybí platný obrázek.");
     }
@@ -288,8 +305,8 @@ export const analyzeFoodText = onCall(
   { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 30 },
   async (request) => {
     requireAuth(request);
-    const description = request.data?.description as string | undefined;
-    if (!description || !description.trim()) {
+    const description = sanitizePromptText(request.data?.description, 500);
+    if (!description) {
       throw new HttpsError("invalid-argument", "Chybí popis jídla.");
     }
 
@@ -320,7 +337,7 @@ Pokud z popisu nejde rozeznat žádné jídlo, vrať confidence "low", name "Nez
           model: "gpt-4o-mini",
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: description.trim() },
+            { role: "user", content: description },
           ],
           response_format: { type: "json_object" },
           temperature: 0.3,
@@ -360,8 +377,8 @@ export const analyzeWorkout = onCall(
   { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 30 },
   async (request) => {
     requireAuth(request);
-    const description = request.data?.description as string | undefined;
-    if (!description || !description.trim()) {
+    const description = sanitizePromptText(request.data?.description, 500);
+    if (!description) {
       throw new HttpsError("invalid-argument", "Chybí popis tréninku.");
     }
 
@@ -390,7 +407,7 @@ Pokud z popisu nejde rozeznat žádná fyzická aktivita, vrať confidence "low"
           model: "gpt-4o-mini",
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: description.trim() },
+            { role: "user", content: description },
           ],
           response_format: { type: "json_object" },
           temperature: 0.3,
@@ -443,7 +460,24 @@ export const getMealFeedback = onCall(
   async (request) => {
     requireAuth(request);
     const input = request.data as MealFeedbackInput | undefined;
-    if (!input?.mealName) throw new HttpsError("invalid-argument", "Chybí data o jídle.");
+    // B9 v AUDIT_2026-08-13.md — na rozdíl od suggestMacroFix a sourozenců appka dřív kontrolovala
+    // jen mealName truthiness, ne že kalorie/bílkoviny/cíle jsou skutečná čísla; klient posílající
+    // calories: "abc" by tak vyrobil "NaN kcal" v promptu.
+    const mealName = sanitizePromptText(input?.mealName, 200);
+    // protein je v appce záměrně nepovinné pole (MealItem["protein"]?: number) — appka umí
+    // zapsat jídlo jen s kaloriemi, bez rozpadu na makra (viz "některé dnešní jídlo je bez
+    // rozpadu na bílkoviny/sacharidy/tuky" v Home.tsx) — chybějící protein se proto dopočítá
+    // na 0, ne odmítne, na rozdíl od skutečně povinných číselných polí níž.
+    const protein = Number.isFinite(input?.protein) ? (input as MealFeedbackInput).protein : 0;
+    if (
+      !input ||
+      !mealName ||
+      !Number.isFinite(input.calories) ||
+      !Number.isFinite(input.consumedTodayCalories) ||
+      !Number.isFinite(input.targetCalories)
+    ) {
+      throw new HttpsError("invalid-argument", "Chybí platná data o jídle.");
+    }
 
     const remaining = input.targetCalories - input.consumedTodayCalories;
     const mealTypeLabel = MEAL_TYPE_LABELS[input.mealType] ?? "jídlo";
@@ -451,7 +485,7 @@ export const getMealFeedback = onCall(
     const systemPrompt = `Jsi Mya z aplikace Nouri. Uživatel právě zapsal jídlo. Reaguj JEDNOU krátkou větou (max ~15 slov),
 věcně a přátelsky — jak tohle jídlo zapadá do zbytku dne. Žádné obecné fráze, konkrétní reakce na dané jídlo.`;
 
-    const userPrompt = `Právě zapsáno jako ${mealTypeLabel}: "${input.mealName}" (${input.calories} kcal, ${input.protein}g bílkovin).
+    const userPrompt = `Právě zapsáno jako ${mealTypeLabel}: "${mealName}" (${input.calories} kcal, ${protein}g bílkovin).
 Dnes celkem snědeno: ${input.consumedTodayCalories} kcal z cíle ${input.targetCalories} kcal. Zbývá ${remaining} kcal.`;
 
     try {
@@ -547,6 +581,8 @@ export const generateRecipe = onCall(
     }
 
     const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
+    const preferences = sanitizePromptText(input.preferences, 300);
+    const availableIngredients = sanitizePromptText(input.availableIngredients, 300);
 
     const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel chce recept, který mu pomůže
 dojíst zbytek denního nutričního cíle. Navrhni JEDEN recept reálně uvařitelný doma z běžně dostupných surovin,
@@ -572,8 +608,8 @@ Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný ma
     const userPrompt = `Zbývá do dnešního cíle: ${Math.round(input.remainingCalories)} kcal, ${Math.round(
       input.remainingProtein
     )}g bílkovin, ${Math.round(input.remainingFat)}g tuků, ${Math.round(input.remainingCarbs)}g sacharidů.
-Cíl uživatele: ${goalLabel}.${input.preferences?.trim() ? `\nPreference/omezení: ${input.preferences.trim()}.` : ""}${
-      input.availableIngredients?.trim() ? `\nSuroviny, které má doma: ${input.availableIngredients.trim()}.` : ""
+Cíl uživatele: ${goalLabel}.${preferences ? `\nPreference/omezení: ${preferences}.` : ""}${
+      availableIngredients ? `\nSuroviny, které má doma: ${availableIngredients}.` : ""
     }`;
 
     try {
@@ -826,6 +862,10 @@ export const chatWithMya = onCall(
     requireAuth(request);
     const profile = request.data?.profile as UserProfileInput | undefined;
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
+    // profile.name jde na rozdíl od ostatních funkcí do SYSTÉMOVÉ části promptu (B8) — sanitizace
+    // řádkových zlomů je tu obzvlášť důležitá, ať appka nemá jméno, které se snaží vydávat za
+    // další systémovou instrukci.
+    const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
     const rawMessages = request.data?.messages;
     if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
@@ -863,7 +903,7 @@ export const chatWithMya = onCall(
 
     const systemPrompt = `Jsi Mya, AI nutriční a fitness asistentka aplikace Nouri. Vedeš volnou konverzaci s uživatelkou/uživatelem appky.
 
-Kontext uživatele: ${profile.name}, cíl ${goalLabel}, cílový příjem ${nutrition.targetCalories} kcal/den (bílkoviny ${nutrition.macros.protein} g).
+Kontext uživatele: ${safeName}, cíl ${goalLabel}, cílový příjem ${nutrition.targetCalories} kcal/den (bílkoviny ${nutrition.macros.protein} g).
 
 Pravidla:
 - Odpovídej výhradně na témata výživy, hubnutí/nabírání/udržování váhy, cvičení, pohybu a zdravého životního stylu, případně dotazy k používání appky Nouri. Na cokoliv mimo tato témata zdvořile odpověz, že se raději bavíš o výživě a zdraví, a nasměruj konverzaci zpět.
@@ -1053,6 +1093,7 @@ export const generateRecipeFromFridge = onCall(
     }
 
     const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
+    const preferences = sanitizePromptText(input.preferences, 300);
 
     const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti pošle fotku obsahu lednice nebo spíže.
 Podívej se, jaké potravinové suroviny jsou na fotce rozpoznatelné, a navrhni JEDEN recept, který z nich (klidně i s
@@ -1080,7 +1121,7 @@ Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný ma
     const userPrompt = `Zbývá do dnešního cíle: ${Math.round(input.remainingCalories)} kcal, ${Math.round(
       input.remainingProtein
     )}g bílkovin, ${Math.round(input.remainingFat)}g tuků, ${Math.round(input.remainingCarbs)}g sacharidů.
-Cíl uživatele: ${goalLabel}.${input.preferences?.trim() ? `\nPreference/omezení: ${input.preferences.trim()}.` : ""}`;
+Cíl uživatele: ${goalLabel}.${preferences ? `\nPreference/omezení: ${preferences}.` : ""}`;
 
     try {
       const response = await fetch(OPENAI_API_URL, {

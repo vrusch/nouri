@@ -30,6 +30,7 @@ export interface UserProfile {
   lastLowCalorieDismissedAt?: string; // ISO datum posledního potvrzení "citlivého" check-inu na nízký příjem (viz calorieIntakePattern.ts)
   lastCelebratedGoalReachedWeight?: number; // targetWeight, pro kterou appka už zobrazila gratulaci (viz goalReached.ts) — ne bool, ať nový (nižší/vyšší) cíl gratulaci umožní znovu
   vacationDates?: string[]; // ISO datumy dní "mimo režim" (volný den i dovolenkový rozsah sdílí stejné pole), viz vacationMode.ts
+  lastCalibrationDismissedAt?: string; // ISO datum posledního odmítnutí ("Zatím ne") návrhu kalibrace cíle (viz nutrition.ts calibrateTarget)
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

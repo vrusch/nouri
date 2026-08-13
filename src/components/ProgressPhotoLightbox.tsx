@@ -15,6 +15,7 @@ function formatDateCs(dateISO: string): string {
 export default function ProgressPhotoLightbox({ photo, onClose, onDelete }: ProgressPhotoLightboxProps) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteFailed, setDeleteFailed] = useState(false);
 
   const handleDelete = async () => {
     if (!confirmDelete) {
@@ -23,9 +24,13 @@ export default function ProgressPhotoLightbox({ photo, onClose, onDelete }: Prog
       return;
     }
     setDeleting(true);
+    setDeleteFailed(false);
     try {
       await onDelete(photo);
       onClose();
+    } catch (error) {
+      console.error("Smazání progress fotky selhalo:", error);
+      setDeleteFailed(true);
     } finally {
       setDeleting(false);
     }
@@ -52,6 +57,7 @@ export default function ProgressPhotoLightbox({ photo, onClose, onDelete }: Prog
           {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
           {confirmDelete ? "Opravdu smazat? Klikni znovu" : "Smazat fotku"}
         </button>
+        {deleteFailed && <p className="text-xs text-red-400">Smazání se nepovedlo, zkus to prosím znovu.</p>}
       </div>
     </div>
   );

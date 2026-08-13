@@ -3,6 +3,7 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  increment,
   onSnapshot,
   orderBy,
   query,
@@ -90,7 +91,9 @@ export async function bulkBackupMeals(uid: string, meals: MealItem[]): Promise<v
     for (let i = 0; i < withSyncId.length; i += chunkSize) {
       const batch = writeBatch(firestoreDb);
       withSyncId.slice(i, i + chunkSize).forEach((meal) => {
-        batch.set(doc(mealsCollection(uid), meal.syncId), meal);
+        // Stejný filtr jako backupMeal — Firestore odmítá pole s hodnotou undefined.
+        const clean = Object.fromEntries(Object.entries(meal).filter(([, v]) => v !== undefined)) as MealItem;
+        batch.set(doc(mealsCollection(uid), meal.syncId), clean);
       });
       await batch.commit();
     }
@@ -294,7 +297,10 @@ export async function logBodyMeasurement(
   measurement: { waist?: number; hips?: number; chest?: number }
 ): Promise<void> {
   try {
-    await setDoc(doc(bodyMeasurementsCollection(uid), dateISO), { date: dateISO, ...measurement });
+    // {merge: true} — formulář (Stats.tsx) zapisuje pas/boky/hrudník nezávisle na sobě;
+    // bez merge by zápis jednoho pole odpoledne přepsal celý dokument a smazal, co bylo
+    // zapsáno ráno (B3 v AUDIT_2026-08-13.md).
+    await setDoc(doc(bodyMeasurementsCollection(uid), dateISO), { date: dateISO, ...measurement }, { merge: true });
   } catch (error) {
     console.error("Zápis míry těla do cloudu selhal:", error);
   }
@@ -316,11 +322,14 @@ export function subscribeBodyMeasurements(
   );
 }
 
-// Doc id = datum (YYYY-MM-DD), stejný vzor jako logWeight — přepsání ve stejný den
-// nahradí předchozí počet, místo aby appka musela počítat inkrementy na serveru.
-export async function logWater(uid: string, dateISO: string, glasses: number): Promise<void> {
+// Doc id = datum (YYYY-MM-DD). Firestore increment() místo zápisu appkou dopředu spočítané
+// hodnoty (C4 v AUDIT_2026-08-13.md) — dva rychlé tapy nebo dvě otevřené záložky by jinak obě
+// vycházely ze stejného React state a jeden krok by se ztratil; increment() se aplikuje
+// atomicky na serveru bez ohledu na to, co appka lokálně zrovna zobrazuje. merge:true zajistí,
+// že první zápis dne (dokument ještě neexistuje) increment počítá od 0, ne od chyby.
+export async function adjustWaterGlasses(uid: string, dateISO: string, delta: number): Promise<void> {
   try {
-    await setDoc(doc(waterLogsCollection(uid), dateISO), { date: dateISO, glasses });
+    await setDoc(doc(waterLogsCollection(uid), dateISO), { date: dateISO, glasses: increment(delta) }, { merge: true });
   } catch (error) {
     console.error("Zápis vody do cloudu selhal:", error);
   }
@@ -347,6 +356,14 @@ export function subscribeWaterLog(
 export interface ShoppingListEntry extends ShoppingListItemDraft {
   id: string;
   bought: boolean;
+}
+
+// Jednorázové načtení pro JSON export (viz Profile.tsx handleExportJson) — stejný vzor jako
+// fetchWeightLogs/fetchBodyMeasurements výš (B6 v AUDIT_2026-08-13.md: appka dřív exportovala
+// jen jídla, profil a váhu, i když se tvářila jako "Plná záloha").
+export async function fetchShoppingList(uid: string): Promise<ShoppingListEntry[]> {
+  const snap = await getDocs(shoppingListCollection(uid));
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as ShoppingListItemDraft & { bought: boolean }) }));
 }
 
 // Živě streamuje users/{uid}/shoppingList — jeden běžící nákupní seznam napříč recepty,
@@ -394,6 +411,13 @@ export interface SavedRecipeEntry extends RecipeResult {
   source: "text" | "photo";
 }
 
+// Jednorázové načtení pro JSON export (B6) — stejný vzor jako fetchShoppingList výš.
+export async function fetchSavedRecipes(uid: string): Promise<SavedRecipeEntry[]> {
+  const q = query(savedRecipesCollection(uid), orderBy("savedAt", "desc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<SavedRecipeEntry, "id">) }));
+}
+
 // Živě streamuje users/{uid}/savedRecipes, nejnovější první — knihovna receptů, kterou
 // appka nabízela jen efemérně (ve stavu komponenty), dokud appka neuměla recept uložit.
 // Stejný vzor jako subscribeShoppingList/subscribeWeightLogs — žádná Dexie cache.
@@ -436,6 +460,13 @@ export interface MealTemplateEntry {
   name: string;
   items: MealTemplateItem[];
   createdAt: string;
+}
+
+// Jednorázové načtení pro JSON export (B6) — stejný vzor jako fetchShoppingList výš.
+export async function fetchMealTemplates(uid: string): Promise<MealTemplateEntry[]> {
+  const q = query(mealTemplatesCollection(uid), orderBy("createdAt", "desc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MealTemplateEntry, "id">) }));
 }
 
 // Živě streamuje users/{uid}/mealTemplates, nejnovější první — stejný vzor jako
@@ -486,15 +517,30 @@ export async function uploadProgressPhoto(uid: string, photoDataUrl: string, dat
   await setDoc(doc(progressPhotosCollection(uid), syncId), entry);
 }
 
-// Maže dokument i soubor v Storage — pokud by soubor v Storage z nějakého důvodu už neexistoval
-// (např. ruční zásah), appka to jen zaloguje a smazání Firestore záznamu (to hlavní pro UI) stejně dokončí.
+// Storage soubor se maže PŘED Firestore dokumentem (B7 v AUDIT_2026-08-13.md) — v opačném
+// pořadí by selhání Storage mazání (z jiného důvodu než že soubor už neexistuje) appka jen
+// zalogovala a smazala metadata, takže by ztratila jediný odkaz, kterým by osiřelý soubor
+// ještě někdy našla. "Soubor už neexistuje" appka bere jako úspěch (idempotentní mazání),
+// cokoliv jiného nechá Firestore dokument na místě a chybu propaguje volajícímu, ať appka
+// umožní opakovat pokus místo tichého no-opu.
 export async function deleteProgressPhoto(uid: string, entry: ProgressPhotoEntry): Promise<void> {
-  await deleteDoc(doc(progressPhotosCollection(uid), entry.syncId));
   try {
     await deleteObject(ref(storage, entry.storagePath));
   } catch (error) {
-    console.error("Smazání souboru progress fotky ze Storage selhalo:", error);
+    const code = (error as { code?: string } | null)?.code;
+    if (code !== "storage/object-not-found") {
+      throw error;
+    }
   }
+  await deleteDoc(doc(progressPhotosCollection(uid), entry.syncId));
+}
+
+// Jednorázové načtení pro JSON export (B6) — jen metadata (URL/cesta ve Storage), ne binární
+// data fotky samotné, stejná úvaha jako u ostatních fetch* funkcí v tomhle souboru.
+export async function fetchProgressPhotos(uid: string): Promise<ProgressPhotoEntry[]> {
+  const q = query(progressPhotosCollection(uid), orderBy("date", "asc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data() as ProgressPhotoEntry);
 }
 
 export function subscribeProgressPhotos(
@@ -523,6 +569,13 @@ export interface ChatMessageEntry {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+}
+
+// Jednorázové načtení pro JSON export (B6) — stejný vzor jako fetchShoppingList výš.
+export async function fetchChatMessages(uid: string): Promise<ChatMessageEntry[]> {
+  const q = query(chatMessagesCollection(uid), orderBy("createdAt", "asc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessageEntry, "id">) }));
 }
 
 export function subscribeChatMessages(

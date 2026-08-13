@@ -19,6 +19,25 @@ describe("buildDailyCalorieRecords", () => {
     ]);
     expect(records).toEqual([{ date: "2026-08-01", totalCalories: 700, reliable: false }]);
   });
+
+  it("beze změny chování, když excludeDates není zadané", () => {
+    const meals = [
+      { date: "2026-08-01", value: 400 },
+      { date: "2026-08-02", value: 900 },
+    ];
+    expect(buildDailyCalorieRecords(meals)).toEqual(buildDailyCalorieRecords(meals, undefined));
+  });
+
+  it("excludeDates vyloučí dnešek (ještě neskončený den) z okna (B5 v AUDIT_2026-08-13.md)", () => {
+    const records = buildDailyCalorieRecords(
+      [
+        { date: "2026-08-01", value: 900 },
+        { date: "2026-08-02", value: 200 }, // jen snídaně, den ještě neskončil
+      ],
+      ["2026-08-02"]
+    );
+    expect(records).toEqual([{ date: "2026-08-01", totalCalories: 900, reliable: true }]);
+  });
 });
 
 describe("detectLowCaloriePattern", () => {

@@ -6,17 +6,39 @@ import { useAuth } from "../context/useAuth";
 import { type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
-import { logWeight, clearMealsBackup, bulkBackupMeals, fetchWeightLogs, fetchBodyMeasurements } from "../lib/cloudSync";
+import {
+  logWeight,
+  clearMealsBackup,
+  bulkBackupMeals,
+  fetchWeightLogs,
+  fetchBodyMeasurements,
+  fetchShoppingList,
+  fetchSavedRecipes,
+  fetchMealTemplates,
+  fetchProgressPhotos,
+  fetchChatMessages,
+} from "../lib/cloudSync";
 import { buildMonthlyReportData } from "../lib/report";
 import { downloadMonthlyReportPdf } from "../lib/pdfReport";
 import { formatDaysCs, formatMealsCs, formatRowsCs } from "../lib/format";
 import { parseMealsCsv } from "../lib/csvImport";
+import { classifyReportLine, splitBoldSegments } from "../lib/aiReportMarkdown";
 import { computeProfileCheckStatus } from "../lib/profileCheck";
 import { QUIET_HOURS_START, QUIET_HOURS_END } from "../lib/quietHours";
 import { DAY_NAMES_CS } from "../lib/workoutPlan";
 import { addVacationRange, endVacationFromDate } from "../lib/vacationMode";
 import { db, type MealItem } from "../db/db";
 import pkg from "../../package.json";
+
+// Rozsekání jednoho řádku AI reportu na tučné/normální úseky (viz aiReportMarkdown.ts) do
+// React uzlů — čistě prezentační krok, proto zůstává tady, ne v pure lib souboru.
+function renderBoldSegments(text: string) {
+  return splitBoldSegments(text).map((segment, idx) => (
+    <span key={idx} className={segment.bold ? "font-bold text-slate-800 dark:text-slate-100" : undefined}>
+      {segment.text}
+    </span>
+  ));
+}
 
 export default function Profile() {
   const { theme, setTheme } = useTheme();
@@ -150,10 +172,10 @@ export default function Profile() {
     setIsExporting(true);
     try {
       const meals = await db.meals.orderBy('date').toArray();
-      const header = ['Datum', 'Čas', 'Typ', 'Název', 'Kalorie', 'Bílkoviny (g)', 'Tuky (g)', 'Sacharidy (g)', 'Zdroj'];
+      const header = ['Datum', 'Čas', 'Typ', 'Název', 'Kalorie', 'Bílkoviny (g)', 'Tuky (g)', 'Sacharidy (g)', 'Zdroj', 'Hrubý odhad'];
       const rows = meals.map(m => [
         m.date, m.time, m.type, m.name, m.value,
-        m.protein ?? '', m.fat ?? '', m.carbs ?? '', m.source ?? ''
+        m.protein ?? '', m.fat ?? '', m.carbs ?? '', m.source ?? '', m.roughEstimate ? 'ano' : ''
       ]);
       const csv = [header, ...rows]
         .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
@@ -170,15 +192,36 @@ export default function Profile() {
     }
   };
 
+  // "Plná záloha" (B6 v AUDIT_2026-08-13.md) — dřív exportovala jen jídla, profil a váhu,
+  // přestože se tak jmenovala. Tréninky appka bere z Dexie (stejně jako jídla — lokální cache
+  // je tu autoritativní pro syncId), zbytek appka nemá lokálně vůbec, jde napřímo z Firestore
+  // přes fetch* funkce (cloudSync.ts).
   const handleExportJson = async () => {
     if (!user) return;
     setIsExportingJson(true);
     try {
       const meals = await db.meals.orderBy('date').toArray();
-      const weightLogs = await fetchWeightLogs(user.uid);
+      const workouts = await db.workouts.orderBy('date').toArray();
+      const [
+        weightLogs,
+        bodyMeasurements,
+        shoppingList,
+        savedRecipes,
+        mealTemplates,
+        progressPhotos,
+        chatMessages,
+      ] = await Promise.all([
+        fetchWeightLogs(user.uid),
+        fetchBodyMeasurements(user.uid),
+        fetchShoppingList(user.uid),
+        fetchSavedRecipes(user.uid),
+        fetchMealTemplates(user.uid),
+        fetchProgressPhotos(user.uid),
+        fetchChatMessages(user.uid),
+      ]);
       const backup = {
         exportedAt: new Date().toISOString(),
-        version: 1,
+        version: 2,
         profile,
         // Bez lokálního Dexie `id` — to je jen autoincrement téhle jedné instalace appky,
         // ne stabilní identifikátor. `syncId` (stabilní napříč zařízeními) zůstává.
@@ -197,7 +240,22 @@ export default function Profile() {
           // CSV zachová beze ztráty, JSON.stringify pole s hodnotou undefined stejně zahodí.
           ingredients: m.ingredients,
         })),
+        workouts: workouts.map((w) => ({
+          name: w.name,
+          caloriesBurned: w.caloriesBurned,
+          durationMinutes: w.durationMinutes,
+          time: w.time,
+          date: w.date,
+          syncId: w.syncId,
+        })),
         weightLogs,
+        bodyMeasurements,
+        shoppingList,
+        savedRecipes,
+        mealTemplates,
+        // Jen metadata (URL/cesta ve Storage) — samotné soubory fotek záloha neobsahuje.
+        progressPhotos,
+        chatMessages,
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -765,14 +823,20 @@ export default function Profile() {
                 <div className="h-px bg-slate-50 dark:bg-slate-800 -mx-4 mb-4" />
                 <div className="text-[13px] leading-relaxed text-slate-600 dark:text-slate-400 space-y-4">
                   {profile.lastAiReport.split('\n').map((line, i) => {
-                    if (line.startsWith('###')) return <h4 key={i} className="text-sm font-extrabold text-slate-900 dark:text-white pt-2">{line.replace('###', '').trim()}</h4>;
-                    if (line.startsWith('*') || line.startsWith('-')) return (
-                      <div key={i} className="flex gap-2 pl-2">
-                        <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${profile.gender === 'female' ? 'bg-rose-400' : 'bg-sky-400'}`} />
-                        <span>{line.substring(1).trim()}</span>
-                      </div>
-                    );
-                    return line.trim() === '' ? <div key={i} className="h-2" /> : <p key={i}>{line}</p>;
+                    const classified = classifyReportLine(line);
+                    if (classified.kind === 'header') {
+                      return <h4 key={i} className="text-sm font-extrabold text-slate-900 dark:text-white pt-2">{classified.text}</h4>;
+                    }
+                    if (classified.kind === 'bullet') {
+                      return (
+                        <div key={i} className="flex gap-2 pl-2">
+                          <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${profile.gender === 'female' ? 'bg-rose-400' : 'bg-sky-400'}`} />
+                          <span>{renderBoldSegments(classified.text)}</span>
+                        </div>
+                      );
+                    }
+                    if (classified.kind === 'blank') return <div key={i} className="h-2" />;
+                    return <p key={i}>{renderBoldSegments(classified.text)}</p>;
                   })}
                 </div>
                 

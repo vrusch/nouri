@@ -32,6 +32,25 @@ describe("buildDailyProteinRecords", () => {
     ]);
     expect(records).toEqual([{ date: "2026-08-01", totalProtein: 70, reliable: false }]);
   });
+
+  it("beze změny chování, když excludeDates není zadané", () => {
+    const meals = [
+      { date: "2026-08-01", protein: 20 },
+      { date: "2026-08-02", protein: 50 },
+    ];
+    expect(buildDailyProteinRecords(meals)).toEqual(buildDailyProteinRecords(meals, undefined));
+  });
+
+  it("excludeDates vyloučí dnešek (ještě neskončený den) z okna (B5 v AUDIT_2026-08-13.md)", () => {
+    const records = buildDailyProteinRecords(
+      [
+        { date: "2026-08-01", protein: 40 },
+        { date: "2026-08-02", protein: 5 }, // jen snídaně, den ještě neskončil
+      ],
+      ["2026-08-02"]
+    );
+    expect(records).toEqual([{ date: "2026-08-01", totalProtein: 40, reliable: true }]);
+  });
 });
 
 describe("detectLowProteinPattern", () => {

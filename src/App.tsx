@@ -45,9 +45,14 @@ export default function App() {
   const notificationRef = useRef<HTMLDivElement>(null);
   const today = new Date().toISOString().split("T")[0];
   // Hook musí běžet nepodmíněně na každém renderu, i před přesměrováním na Onboarding níže —
-  // proto tady, ne až za `if (!user...)`.
-  const todaysWorkoutCount = useLiveQuery(() => db.workouts.where("date").equals(today).count()) ?? 0;
-  const todaysMeals = useLiveQuery(() => db.meals.where("date").equals(today).toArray()) ?? [];
+  // proto tady, ne až za `if (!user...)`. Necháváme raw (možné `undefined`, dokud Dexie
+  // neodpoví) místo rovnou kolabovat na 0/[] — na studeném cache appka jinak na pár vteřin
+  // spletla "ještě nenačteno" s "opravdu nic nezapsáno" (C2 v AUDIT_2026-08-13.md).
+  const todaysWorkoutCountRaw = useLiveQuery(() => db.workouts.where("date").equals(today).count());
+  const todaysMealsRaw = useLiveQuery(() => db.meals.where("date").equals(today).toArray());
+  const todaysDataLoaded = todaysWorkoutCountRaw !== undefined && todaysMealsRaw !== undefined;
+  const todaysWorkoutCount = todaysWorkoutCountRaw ?? 0;
+  const todaysMeals = todaysMealsRaw ?? [];
 
   useEffect(() => {
     if (!showReminder) return;
@@ -92,6 +97,25 @@ export default function App() {
     };
   }, [user, profile?.setupComplete, profile?.weight, reminderDays]);
 
+  // PWA zástupce "Přidat jídlo" nastaví addMealOpen z URL parametru už v lazy initu useState
+  // výš, dřív než appka stihne zjistit, jestli je uživatel vůbec přihlášený/má dokončený
+  // onboarding — na nepřihlášeném zařízení by se tak modal otevřel hned po dokončení
+  // Onboardingu bez varování (C1). Reset patří do render těla, ne do efektu (setState
+  // synchronně uvnitř efektu jen kvůli synchronizaci odvozeného stavu React nedoporučuje,
+  // viz react-hooks/set-state-in-effect) — appka proto porovnává s předchozí hodnotou přímo
+  // tady, stejný vzor jako "Adjusting state when a prop changes" v docs React.dev.
+  const needsOnboarding = !loading && (!user || !profile?.setupComplete);
+  const [prevNeedsOnboarding, setPrevNeedsOnboarding] = useState(needsOnboarding);
+  if (needsOnboarding !== prevNeedsOnboarding) {
+    setPrevNeedsOnboarding(needsOnboarding);
+    // Reset jen při přechodu ZE stavu "potřebuje onboarding" DO hlavní appky (typicky: appka
+    // právě dokončila Onboarding) — ne v opačném směru, kdy addMealOpen beztak nejde vidět,
+    // protože se místo hlavního stromu vykresluje jen <Onboarding />.
+    if (prevNeedsOnboarding && !needsOnboarding && addMealOpen) {
+      setAddMealOpen(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="h-dvh flex items-center justify-center bg-slate-50 dark:bg-slate-950">
@@ -105,8 +129,12 @@ export default function App() {
   }
 
   const profileCheck = computeProfileCheckStatus(profile.lastProfileCheckAt);
-  const workoutPlan = computeWorkoutPlanStatus(profile.plannedWorkoutDays, todaysWorkoutCount > 0);
-  const mealReminder = computeMealReminderStatus(todaysMeals.map((m) => m.type));
+  const workoutPlanRaw = computeWorkoutPlanStatus(profile.plannedWorkoutDays, todaysWorkoutCount > 0);
+  const mealReminderRaw = computeMealReminderStatus(todaysMeals.map((m) => m.type));
+  // Dokud Dexie nevrátí dnešní data, appka nudge nepočítá jako aktivní (C2) — jinak by na
+  // studeném cache/novém zařízení na pár vteřin ukázala falešnou připomínku.
+  const workoutPlan = { ...workoutPlanRaw, reminderDue: todaysDataLoaded && workoutPlanRaw.reminderDue };
+  const mealReminder = { ...mealReminderRaw, lunchOverdue: todaysDataLoaded && mealReminderRaw.lunchOverdue };
   // Appka během tichých hodin nesmí sama upoutávat pozornost na připomínky — červená tečka
   // je jediný pasivní "nudge" prvek, zvon samotný jde otevřít ručně kdykoliv. Okno je uživatelem
   // nastavitelné v Profilu (výchozí 22-7, viz quietHours.ts), vypínatelné přes quietHoursEnabled.
@@ -185,22 +213,8 @@ export default function App() {
               </button>
               {showReminder && (
                 <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-slate-800 rounded-2xl shadow-lg border border-slate-100 dark:border-slate-700 p-4 z-30 text-left">
-                  <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
-                    {daysSinceWeighIn === null
-                      ? "Ještě jsi nezapsala váhu — zapiš první hodnotu a appka ti pak sama pohlídá další vážení."
-                      : weighInOverdue
-                        ? "Nezapomeň se dnes zvážit — pomůže ti to sledovat trend."
-                        : `Naposledy zváženo před ${formatDaysCs(daysSinceWeighIn)} · další připomínka za ${formatDaysCs(reminderDays - daysSinceWeighIn)}.`}
-                  </p>
-                  <button
-                    onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
-                    className="w-full bg-rose-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
-                  >
-                    Zapsat váhu
-                  </button>
-                  {vacationActive && (
+                  {vacationActive ? (
                     <>
-                      <div className="h-px bg-slate-100 dark:bg-slate-700 my-3" />
                       <p className="text-sm text-slate-600 dark:text-slate-300 mb-3 flex items-center gap-1.5">
                         <TreePalm className="w-3.5 h-3.5 text-teal-500 shrink-0" />
                         Jsi v dovolenkovém režimu — připomínky vážení a jídla appka do konce dovolené ztlumí.
@@ -210,6 +224,22 @@ export default function App() {
                         className="w-full bg-teal-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
                       >
                         Spravovat v Profilu
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mb-3">
+                        {daysSinceWeighIn === null
+                          ? "Ještě jsi nezapsala váhu — zapiš první hodnotu a appka ti pak sama pohlídá další vážení."
+                          : weighInOverdue
+                            ? "Nezapomeň se dnes zvážit — pomůže ti to sledovat trend."
+                            : `Naposledy zváženo před ${formatDaysCs(daysSinceWeighIn)} · další připomínka za ${formatDaysCs(reminderDays - daysSinceWeighIn)}.`}
+                      </p>
+                      <button
+                        onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
+                        className="w-full bg-rose-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
+                      >
+                        Zapsat váhu
                       </button>
                     </>
                   )}

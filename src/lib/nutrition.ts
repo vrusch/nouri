@@ -179,9 +179,18 @@ export function getRecipeAvailability(remainingCalories: number): RecipeAvailabi
   return "ready";
 }
 
+// Stejná "cooldown" logika jako MACRO_PATTERN_COOLDOWN_DAYS/LOW_CALORIE_PATTERN_COOLDOWN_DAYS —
+// appka po odmítnutí ("Zatím ne") mlčí, než kalibraci nabídne znovu (C6 v AUDIT_2026-08-13.md).
+export const CALIBRATION_DISMISS_COOLDOWN_DAYS = 14;
+
 const MIN_CALIBRATION_SPAN_DAYS = 14;
 const MIN_CALIBRATION_LOGGED_DAYS = 7;
 const CALIBRATION_DEVIATION_THRESHOLD = 0.1; // 10 % — pod touhle odchylkou se odhad bere jako "v podstatě sedí"
+// Poměr zapsaných dní ku celému rozpětí mezi váženími — bez téhle podmínky by MIN_CALIBRATION_LOGGED_DAYS
+// samo o sobě appce dovolilo počítat průměr jen ze 7 zapsaných dní z klidně 60denního rozpětí a tiše
+// předpokládat, že reprezentují celé období (B4 v AUDIT_2026-08-13.md). Appka radši mlčí, stejná
+// filosofie jako u monthRetrospective.
+const MIN_CALIBRATION_COVERAGE_RATIO = 1 / 3;
 
 export interface CalibrationInsight {
   estimatedTDEE: number;
@@ -214,6 +223,7 @@ export function calibrateTarget(
 
   const loggedInWindow = dailyCalories.filter((d) => d.date >= first.date && d.date <= last.date);
   if (loggedInWindow.length < MIN_CALIBRATION_LOGGED_DAYS) return null;
+  if (loggedInWindow.length / daysSpan < MIN_CALIBRATION_COVERAGE_RATIO) return null;
 
   const avgLoggedCalories = Math.round(
     loggedInWindow.reduce((sum, d) => sum + d.calories, 0) / loggedInWindow.length

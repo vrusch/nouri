@@ -19,11 +19,17 @@ export interface DailyProteinRecord {
  * nespolehlivý i den s jídlem zapsaným v režimu "Jím venku" (`roughEstimate`, viz AddMealModal) —
  * i když má protein vyplněný, jde o hrubý odhad podle kategorie, ne měřená data.
  */
+// excludeDates (typicky dnešek) appce dovolí vyloučit ještě neskončený den z okna, aniž by
+// appka musela filtrovat holým `r.date < today` v Stats.tsx, kde by to nešlo unit testovat
+// (B5 v AUDIT_2026-08-13.md, stejná chybová třída jako opravená "Skvělé tempo" při 0 kcal).
 export function buildDailyProteinRecords(
-  meals: { date: string; protein?: number; roughEstimate?: boolean }[]
+  meals: { date: string; protein?: number; roughEstimate?: boolean }[],
+  excludeDates?: string[]
 ): DailyProteinRecord[] {
+  const excluded = new Set(excludeDates ?? []);
   const byDate = new Map<string, { total: number; reliable: boolean }>();
   meals.forEach((m) => {
+    if (excluded.has(m.date)) return;
     const entry = byDate.get(m.date) ?? { total: 0, reliable: true };
     entry.total += m.protein ?? 0;
     if (m.protein === undefined || m.roughEstimate) entry.reliable = false;

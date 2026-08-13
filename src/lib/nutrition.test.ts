@@ -154,6 +154,27 @@ describe("calibrateTarget", () => {
     expect(calibrateTarget(weighIns, daily, "lose", 1450, 2200)).toBeNull();
   });
 
+  // B4 v AUDIT_2026-08-13.md: MIN_CALIBRATION_LOGGED_DAYS samo o sobě appce dovolilo počítat
+  // průměr jen ze 7 zapsaných dní z klidně 60denního rozpětí a tiše předpokládat, že reprezentují
+  // celé období.
+  it("vrací null, když je pokrytí zapsaných dní vůči rozpětí příliš řídké, i přes splnění MIN_CALIBRATION_LOGGED_DAYS", () => {
+    const weighIns = [
+      { date: START, weight: 90 },
+      { date: addDays(START, 60), weight: 85 },
+    ];
+    const daily = dailyRange(START, addDays(START, 7), 1500); // 7 zapsaných dní z 60denního rozpětí (poměr ~0.12)
+    expect(calibrateTarget(weighIns, daily, "lose", 1450, 2200)).toBeNull();
+  });
+
+  it("s vysokým pokrytím zapsaných dní beze změny chování (regresní pojistka)", () => {
+    const weighIns = [
+      { date: START, weight: 90 },
+      { date: addDays(START, 21), weight: 87 },
+    ];
+    const daily = dailyRange(START, addDays(START, 21), 1700); // 21 zapsaných dní z 21denního rozpětí
+    expect(calibrateTarget(weighIns, daily, "lose", 1450, 2200)).not.toBeNull();
+  });
+
   it("odhadne nižší TDEE, když přibrala víc, než formulka čekala (goal: gain)", () => {
     const weighIns = [
       { date: START, weight: 60 },
