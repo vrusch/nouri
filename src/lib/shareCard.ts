@@ -6,6 +6,7 @@ export interface WeeklyShareCardData {
   streak: number;
   avgCalories: number;
   daysLogged: number;
+  trackableDays: number; // jmenovatel pro "X/Y dní zapsáno" — 7 minus dny ve volnu/dovolené, viz Stats.tsx
   weightChangeKg: number | null; // null = míň než 2 zápisy váhy v tomto týdnu
   gender: ShareCardGender;
 }
@@ -194,7 +195,7 @@ export async function generateWeeklyShareCardBlob(data: WeeklyShareCardData): Pr
     String(data.avgCalories),
     "kcal/den",
     "Průměrný příjem",
-    `${data.daysLogged}/7 dní zapsáno`
+    `${data.daysLogged}/${data.trackableDays} dní zapsáno`
   );
   cardY += cardH + cardGap;
 

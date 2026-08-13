@@ -7,11 +7,12 @@ import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
 import { summarizeWeek, computeWeekdayWeekendProteinBreakdown } from "../lib/weekSummary";
 import { computeLoggingStreak } from "../lib/streak";
 import { generateWeeklyShareCardBlob } from "../lib/shareCard";
-import { formatWorkoutsCs } from "../lib/format";
+import { formatWorkoutsCs, formatDaysCs } from "../lib/format";
 import { buildDailyProteinRecords, detectLowProteinPattern, MACRO_PATTERN_COOLDOWN_DAYS } from "../lib/macroPattern";
 import { buildDailyCalorieRecords, detectLowCaloriePattern, LOW_CALORIE_PATTERN_COOLDOWN_DAYS } from "../lib/calorieIntakePattern";
 import { computeMonthRetrospective } from "../lib/monthRetrospective";
 import { detectGoalReached } from "../lib/goalReached";
+import { isVacationDay } from "../lib/vacationMode";
 import { computeMeasurementTrend, MEASUREMENT_FIELDS, MEASUREMENT_LABELS_CS } from "../lib/bodyMeasurements";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { daysSince } from "../lib/weighIn";
@@ -91,22 +92,38 @@ export default function Stats() {
   allMeals.forEach((m) => totalsByDay.set(m.date, (totalsByDay.get(m.date) || 0) + m.value));
 
   const values = days.map((d) => totalsByDay.get(d) || 0);
-  const previousWeekValues = previousWeekDays.map((d) => totalsByDay.get(d) || 0);
   const maxValue = Math.max(targetCalories, ...values, 1);
-  const { avgCalories, daysLogged } = summarizeWeek(values);
-  const { avgCalories: previousAvgCalories, daysLogged: previousDaysLogged } = summarizeWeek(previousWeekValues);
   const targetLinePercent = Math.min(100, (targetCalories / maxValue) * 100);
+
+  // Volný den / dovolenkový režim (FEATURE_IDEAS.md sekce 3) — appka je z týdenního průměru
+  // vyloučí úplně, ne jen jako "0 kcal den" (ten už summarizeWeek přirozeně ignoruje samo), ať
+  // ani reálně zapsaný "oslavný" den (třeba narozeninová večeře) neposune číslo, které appka
+  // ukazuje jako "jak se ti daří". `values`/`workoutValues` výš zůstávají nedotčené, protože je
+  // ještě potřebuje graf (maxValue/workoutMaxValue) pro škálování všech 7 sloupců, i toho
+  // vynechaného.
+  const vacationDaysThisWeek = days.filter((d) => isVacationDay(d, profile?.vacationDates));
+  const trackableDaysThisWeek = days.filter((d) => !vacationDaysThisWeek.includes(d));
+  const valuesForAverage = trackableDaysThisWeek.map((d) => totalsByDay.get(d) || 0);
+  const { avgCalories, daysLogged } = summarizeWeek(valuesForAverage);
+
+  const vacationDaysPrevWeek = previousWeekDays.filter((d) => isVacationDay(d, profile?.vacationDates));
+  const trackableDaysPrevWeek = previousWeekDays.filter((d) => !vacationDaysPrevWeek.includes(d));
+  const previousWeekValues = trackableDaysPrevWeek.map((d) => totalsByDay.get(d) || 0);
+  const { avgCalories: previousAvgCalories, daysLogged: previousDaysLogged } = summarizeWeek(previousWeekValues);
 
   // Týdenní AI shrnutí (FEATURE_IDEAS.md sekce 3) — stejné `days` okno jako avgCalories výš,
   // ne 14denní okno jako macroPatternWindowStart níž (to je pro dlouhodobou detekci vzorce,
-  // tohle je vyloženě "tenhle týden").
+  // tohle je vyloženě "tenhle týden"). Záměrně NEfiltrované přes vacationDates jako avgCalories
+  // výš — jde jen do AI promptu (getWeeklySummary), ne do žádného čísla zobrazeného appkou, takže
+  // riziko z nekonzistence chybí a filtrování by stálo další deploy cyklus Cloud Function bez
+  // reálného přínosu.
   const weekProteinRecords = buildDailyProteinRecords(allMeals).filter((r) => days.includes(r.date));
   const weekdayWeekendBreakdown = computeWeekdayWeekendProteinBreakdown(weekProteinRecords);
 
   // Sdílecí karta (FEATURE_IDEAS.md sekce 5) — streak a váhový posun počítané ze stejného
   // `days` okna jako avgCalories/daysLogged výš, ať karta nikdy netvrdí jiná čísla než ta,
   // co appka zobrazuje hned vedle ní.
-  const streak = computeLoggingStreak(allMeals.map((m) => m.date));
+  const streak = computeLoggingStreak(allMeals.map((m) => m.date), undefined, profile?.vacationDates);
   const weekWeightLogs = weightLogs
     .filter((w) => days.includes(w.date))
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -121,7 +138,8 @@ export default function Stats() {
   allWorkouts.forEach((w) => workoutTotalsByDay.set(w.date, (workoutTotalsByDay.get(w.date) || 0) + w.caloriesBurned));
   const workoutValues = days.map((d) => workoutTotalsByDay.get(d) || 0);
   const workoutMaxValue = Math.max(...workoutValues, 1);
-  const { avgCalories: workoutAvgCalories, daysLogged: workoutDaysLogged } = summarizeWeek(workoutValues);
+  const workoutValuesForAverage = trackableDaysThisWeek.map((d) => workoutTotalsByDay.get(d) || 0);
+  const { avgCalories: workoutAvgCalories, daysLogged: workoutDaysLogged } = summarizeWeek(workoutValuesForAverage);
   const workoutCountThisWeek = allWorkouts.filter((w) => days.includes(w.date)).length;
 
   const chartWeights = weightLogs.slice(-30);
@@ -173,15 +191,23 @@ export default function Stats() {
 
   // Během tichých hodin appka neotvírá nový proaktivní nudge (a nevolá kvůli němu AI) —
   // stejné pravidlo a stejné uživatelsky nastavitelné okno jako červená tečka na zvonu
-  // v App.tsx (viz FEATURE_IDEAS.md sekce 12).
+  // v App.tsx (viz FEATURE_IDEAS.md sekce 12). Volný den/dovolenkový režim (sekce 3) mlčí stejně,
+  // ale jen u "nágujících" karet (nízký příjem, nízké bílkoviny) — gratulace k dosaženému cíli
+  // (showGoalReachedCard níž) zůstává schválně beze změny, dovolená netlumí oslavu, jen nudge.
   const quietHoursActive =
     (profile?.quietHoursEnabled ?? true) && isQuietHours(new Date().getHours(), profile?.quietHoursStart, profile?.quietHoursEnd);
-  const showLowCaloriePatternCard = !!lowCaloriePattern?.detected && !lowCalorieDismissedRecently && !quietHoursActive;
+  const vacationActive = isVacationDay(today, profile?.vacationDates);
+  const showLowCaloriePatternCard =
+    !!lowCaloriePattern?.detected && !lowCalorieDismissedRecently && !quietHoursActive && !vacationActive;
   // Když appka vidí celkově nízký příjem, karta na bílkoviny konkrétně mlčí — nedává smysl radit
   // "přidej bílkoviny", když člověk celkově nejí dost. Nízký příjem jako celek je důležitější
   // signál, viz "Citlivé sledování" výš.
   const showMacroPatternCard =
-    !!lowProteinPattern?.detected && !macroPatternDismissedRecently && !quietHoursActive && !lowCaloriePattern?.detected;
+    !!lowProteinPattern?.detected &&
+    !macroPatternDismissedRecently &&
+    !quietHoursActive &&
+    !vacationActive &&
+    !lowCaloriePattern?.detected;
 
   // Detekce dosaženého cíle (FEATURE_IDEAS.md sekce 3) — poslední známá váha je buď nejnovější
   // zápis, nebo (bez jediného zápisu vůbec) aktuální profile.weight.
@@ -324,6 +350,7 @@ export default function Stats() {
         streak,
         avgCalories,
         daysLogged,
+        trackableDays: trackableDaysThisWeek.length,
         weightChangeKg,
         gender: profile.gender,
       });
@@ -393,7 +420,10 @@ export default function Stats() {
             <div className="text-3xl font-extrabold text-slate-800 dark:text-white">
               {avgCalories} <span className="text-sm font-medium text-slate-400 dark:text-slate-500">kcal / den</span>
             </div>
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">{daysLogged}/7 dní zapsáno</p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
+              {daysLogged}/{trackableDaysThisWeek.length} dní zapsáno
+              {vacationDaysThisWeek.length > 0 && ` (${formatDaysCs(vacationDaysThisWeek.length)} volno)`}
+            </p>
           </>
         ) : (
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">Zatím žádná zapsaná jídla za posledních 7 dní.</p>
@@ -402,7 +432,8 @@ export default function Stats() {
         {previousDaysLogged > 0 && (
           <div className="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-slate-50 dark:border-slate-800">
             <span className="text-xs text-slate-500 dark:text-slate-400">
-              Minulý týden: {previousAvgCalories} kcal/den · {previousDaysLogged}/7 dní zapsáno
+              Minulý týden: {previousAvgCalories} kcal/den · {previousDaysLogged}/{trackableDaysPrevWeek.length} dní zapsáno
+              {vacationDaysPrevWeek.length > 0 && ` (${formatDaysCs(vacationDaysPrevWeek.length)} volno)`}
             </span>
             {daysLogged > 0 && (
               <span className="text-xs font-bold text-slate-600 dark:text-slate-300 tabular-nums shrink-0">

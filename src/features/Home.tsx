@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type MealItem, type WorkoutItem } from "../db/db";
 import { useAuth } from "../context/useAuth";
-import { Volume2, Square, Flame, Droplets, Dumbbell, X, Loader2 } from "lucide-react";
+import { Volume2, Square, Flame, Droplets, Dumbbell, X, Loader2, TreePalm } from "lucide-react";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight } from "../lib/nutrition";
 import { computeLoggingStreak } from "../lib/streak";
@@ -24,6 +24,7 @@ import {
   detectNewWeightMilestone,
   buildWeightMilestoneMessage,
 } from "../lib/milestones";
+import { isVacationDay, toggleVacationDate } from "../lib/vacationMode";
 import LogWorkoutModal from "../components/LogWorkoutModal";
 
 const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
@@ -85,6 +86,15 @@ export default function Home({ onEditMeal }: HomeProps) {
     if (!user) return;
     return subscribeWeightLogs(user.uid, setWeightLogs);
   }, [user]);
+
+  // Volný den (FEATURE_IDEAS.md sekce 3) — jednorázový tap přidá/ubere dnešek ze stejného pole
+  // jako dovolenkový režim (Profile.tsx), viz vacationMode.ts. Appka žádný vlastní stav pro
+  // "dnes je volno" nedrží — pravda je vždy jen v profile.vacationDates.
+  const todayIsVacation = isVacationDay(today, profile?.vacationDates);
+  const handleToggleVacationToday = () => {
+    if (!profile) return;
+    updateProfile({ vacationDates: toggleVacationDate(profile.vacationDates, today) });
+  };
 
   const handleAddWater = () => {
     if (!user) return;
@@ -162,7 +172,7 @@ export default function Home({ onEditMeal }: HomeProps) {
     }
   };
 
-  const streak = computeLoggingStreak(Array.from(new Set(allMeals.map((m) => m.date))));
+  const streak = computeLoggingStreak(Array.from(new Set(allMeals.map((m) => m.date))), undefined, profile?.vacationDates);
 
   // Milníková oslava (streak nebo váha, FEATURE_IDEAS.md sekce 3) — vlastní efekt oddělený od
   // fetchGreeting níž, ať streak/weightLogs (obojí dorazí asynchronně z Dexie/Firestore až po
@@ -330,12 +340,25 @@ export default function Home({ onEditMeal }: HomeProps) {
             </div>
           )}
         </div>
-        {streak >= 2 && (
-          <div className="flex items-center gap-1 shrink-0 whitespace-nowrap bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-[11px] font-bold px-2.5 py-1.5 rounded-full">
-            <Flame className="w-3 h-3" fill="currentColor" />
-            {streak} dní
-          </div>
-        )}
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          {streak >= 2 && (
+            <div className="flex items-center gap-1 whitespace-nowrap bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-[11px] font-bold px-2.5 py-1.5 rounded-full">
+              <Flame className="w-3 h-3" fill="currentColor" />
+              {streak} dní
+            </div>
+          )}
+          <button
+            onClick={handleToggleVacationToday}
+            className={`flex items-center gap-1 whitespace-nowrap text-[11px] font-bold px-2.5 py-1.5 rounded-full active:scale-95 transition-all ${
+              todayIsVacation
+                ? "bg-teal-600 text-white"
+                : "bg-slate-50 dark:bg-slate-800 text-slate-400 dark:text-slate-500 hover:text-teal-600 dark:hover:text-teal-400"
+            }`}
+          >
+            <TreePalm className="w-3 h-3" />
+            {todayIsVacation ? "Dnes máš volno" : "Dnes mám volno"}
+          </button>
+        </div>
       </div>
 
       {/* Hlavní přehled kalorií */}

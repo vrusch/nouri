@@ -29,6 +29,7 @@ export interface UserProfile {
   lastCelebratedWeightMilestoneKg?: number; // nejvyšší váhový milník (v kg pokroku od prvního záznamu), který appka už oslavila
   lastLowCalorieDismissedAt?: string; // ISO datum posledního potvrzení "citlivého" check-inu na nízký příjem (viz calorieIntakePattern.ts)
   lastCelebratedGoalReachedWeight?: number; // targetWeight, pro kterou appka už zobrazila gratulaci (viz goalReached.ts) — ne bool, ať nový (nižší/vyšší) cíl gratulaci umožní znovu
+  vacationDates?: string[]; // ISO datumy dní "mimo režim" (volný den i dovolenkový rozsah sdílí stejné pole), viz vacationMode.ts
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

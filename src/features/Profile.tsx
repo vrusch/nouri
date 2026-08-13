@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -14,6 +14,7 @@ import { parseMealsCsv } from "../lib/csvImport";
 import { computeProfileCheckStatus } from "../lib/profileCheck";
 import { QUIET_HOURS_START, QUIET_HOURS_END } from "../lib/quietHours";
 import { DAY_NAMES_CS } from "../lib/workoutPlan";
+import { addVacationRange, endVacationFromDate } from "../lib/vacationMode";
 import { db, type MealItem } from "../db/db";
 import pkg from "../../package.json";
 
@@ -73,6 +74,32 @@ export default function Profile() {
       ? plannedWorkoutDays.filter((d) => d !== day)
       : [...plannedWorkoutDays, day].sort();
     updateProfile({ plannedWorkoutDays: next });
+  };
+
+  // Dovolenkový režim (FEATURE_IDEAS.md sekce 3) — sdílí `profile.vacationDates` s jednorázovým
+  // "Dnes mám volno" tlačítkem na Home (viz vacationMode.ts), appka tu jen přidává celý rozsah
+  // najednou. Rozsah appka nikde neukládá jako {start,end} — vždy jen odvozený z aktuálních
+  // (dnešek nebo pozdějších) datumů v poli, ať appka nemá dva zdroje pravdy.
+  const [vacationStart, setVacationStart] = useState("");
+  const [vacationEnd, setVacationEnd] = useState("");
+  const todayISO = new Date().toISOString().split("T")[0];
+  const upcomingVacationDates = (profile?.vacationDates ?? []).filter((d) => d >= todayISO).sort();
+  const formatDateCs = (iso: string) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" });
+  const vacationRangeLabel =
+    upcomingVacationDates.length > 0
+      ? `${formatDateCs(upcomingVacationDates[0])} – ${formatDateCs(upcomingVacationDates[upcomingVacationDates.length - 1])}`
+      : null;
+
+  const handleSetVacationRange = () => {
+    if (!vacationStart || !vacationEnd) return;
+    updateProfile({ vacationDates: addVacationRange(profile?.vacationDates, vacationStart, vacationEnd) });
+    setVacationStart("");
+    setVacationEnd("");
+  };
+
+  const handleEndVacation = () => {
+    updateProfile({ vacationDates: endVacationFromDate(profile?.vacationDates, todayISO) });
   };
 
   const activityOptions: { id: UserProfile['activityLevel']; label: string; desc: string }[] = [
@@ -615,6 +642,72 @@ export default function Profile() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          <div
+            className={`px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${editing === 'vacation' ? accentBg : 'active:bg-slate-50 dark:active:bg-slate-800'}`}
+            onClick={() => setEditing(editing === 'vacation' ? null : 'vacation')}
+          >
+            <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+              <TreePalm className="w-4 h-4 text-teal-500" />
+              Dovolenkový režim
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-bold text-slate-800 dark:text-white">
+                {vacationRangeLabel ?? 'Vypnuto'}
+              </span>
+              <ChevronDown className={`w-4 h-4 ${editing === 'vacation' ? accentText : 'text-slate-400'}`} />
+            </div>
+          </div>
+
+          {editing === 'vacation' && (
+            <div className={`px-4 pb-4 ${accentBg}`}>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                Appka po dobu dovolené ztlumí připomínky vážení a nezapsaného oběda a dané dny se
+                nepočítají do streaku ani do týdenních průměrů.
+              </p>
+              {vacationRangeLabel && (
+                <div className="flex items-center justify-between gap-2 mb-3 bg-white dark:bg-slate-800 rounded-xl px-3 py-2.5">
+                  <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                    Naplánováno: {vacationRangeLabel}
+                  </span>
+                  <button
+                    onClick={handleEndVacation}
+                    className="text-xs font-bold text-rose-600 dark:text-rose-400 shrink-0"
+                  >
+                    Ukončit
+                  </button>
+                </div>
+              )}
+              <div className="space-y-2">
+                <label className="block">
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Od</span>
+                  <input
+                    type="date"
+                    value={vacationStart}
+                    onChange={(e) => setVacationStart(e.target.value)}
+                    className="w-full bg-white dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold dark:text-white outline-rose-500"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1 block">Do</span>
+                  <input
+                    type="date"
+                    value={vacationEnd}
+                    onChange={(e) => setVacationEnd(e.target.value)}
+                    className="w-full bg-white dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold dark:text-white outline-rose-500"
+                  />
+                </label>
+                <button
+                  onClick={handleSetVacationRange}
+                  disabled={!vacationStart || !vacationEnd}
+                  className="w-full bg-teal-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all disabled:opacity-40"
+                >
+                  Nastavit dovolenou
+                </button>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500">Max. 60 dní najednou.</p>
               </div>
             </div>
           )}
