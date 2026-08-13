@@ -211,7 +211,8 @@ export function calibrateTarget(
   dailyCalories: { date: string; calories: number }[],
   goal: Goal,
   bmr: number,
-  formulaTDEE: number
+  formulaTDEE: number,
+  avgCycleLengthDays?: number
 ): CalibrationInsight | null {
   if (manualWeighIns.length < 2) return null;
 
@@ -219,7 +220,11 @@ export function calibrateTarget(
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
   const daysSpan = Math.round((Date.parse(last.date) - Date.parse(first.date)) / 86400000);
-  if (daysSpan < MIN_CALIBRATION_SPAN_DAYS) return null;
+  // Cyklické zadržování vody (viz REFERENCE/CYCLE_TRACKING_PROPOSAL.md sekce 4.1) se v okně
+  // kratším než jeden cyklus nikdy nestihne samo vyrušit — pokud appka cyklus sleduje, vyžaduje
+  // aspoň jeho průměrnou délku, ne jen pevných 14 dní.
+  const minSpanDays = Math.max(MIN_CALIBRATION_SPAN_DAYS, avgCycleLengthDays ?? 0);
+  if (daysSpan < minSpanDays) return null;
 
   const loggedInWindow = dailyCalories.filter((d) => d.date >= first.date && d.date <= last.date);
   if (loggedInWindow.length < MIN_CALIBRATION_LOGGED_DAYS) return null;

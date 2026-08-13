@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type MealItem, type WorkoutItem } from "../db/db";
 import { useAuth } from "../context/useAuth";
-import { Volume2, Square, Flame, Droplets, Dumbbell, X, Loader2, TreePalm } from "lucide-react";
+import { Volume2, Square, Flame, Droplets, Droplet, Dumbbell, X, Loader2, TreePalm } from "lucide-react";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight } from "../lib/nutrition";
+import { getCyclePhase, DEFAULT_CYCLE_LENGTH_DAYS, LUTEAL_CALORIE_BONUS } from "../lib/cyclePhase";
 import { computeLoggingStreak } from "../lib/streak";
 import { pickDailyCustomReminder } from "../lib/customReminders";
 import { WATER_TARGET_GLASSES, getWaterProgressPercent } from "../lib/water";
@@ -15,8 +16,10 @@ import {
   saveMealTemplate,
   deleteWorkout,
   subscribeWeightLogs,
+  subscribeCycleLogs,
   type MealTemplateItem,
   type WeightLogEntry,
+  type CycleLogEntry,
 } from "../lib/cloudSync";
 import {
   detectNewStreakMilestone,
@@ -59,10 +62,30 @@ export default function Home({ onEditMeal }: HomeProps) {
   const [templateNameInput, setTemplateNameInput] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [showLogWorkout, setShowLogWorkout] = useState(false);
-  const nutrition = profile ? calculateNutrition(profile) : null;
-  const GOAL_CALORIES = nutrition ? nutrition.targetCalories : 1800;
-
   const today = new Date().toISOString().split('T')[0];
+
+  // Cyklus (REFERENCE/CYCLE_TRACKING_PROPOSAL.md, Úroveň 2) — appka data odebírá jen když je
+  // sledování zapnuté, stejné pravidlo jako ve Stats.tsx.
+  const [cycleLogs, setCycleLogs] = useState<CycleLogEntry[]>([]);
+  const baseNutrition = profile ? calculateNutrition(profile) : null;
+  const cyclePhaseInfo = profile?.cycleTrackingEnabled
+    ? getCyclePhase(cycleLogs, profile.avgCycleLength ?? DEFAULT_CYCLE_LENGTH_DAYS, today)
+    : null;
+  // Luteální kalorický bonus jde znovu přes calculateNutrition (ne scalar přičtený ke
+  // GOAL_CALORIES jako u tréninkového bonusu níž) — jinak by appka posunula jen zobrazené
+  // kalorie a makra (protein/tuky/sacharidy) by zůstala na neupraveném cíli, viz sekce 5,
+  // Úroveň 2 v proposal dokumentu ("Kam to zapsat").
+  const lutealBonusActive = !!cyclePhaseInfo && cyclePhaseInfo.phase === "luteal" && !profile?.onHormonalContraception;
+  const nutrition =
+    profile && baseNutrition && lutealBonusActive
+      ? calculateNutrition({ ...profile, calibratedTDEE: baseNutrition.tdee + LUTEAL_CALORIE_BONUS })
+      : baseNutrition;
+  const GOAL_CALORIES = nutrition ? nutrition.targetCalories : 1800;
+  // BMR pojistka v applyGoalAdjustment (nutrition.ts) může bonus úplně pohltit (cíl zůstane
+  // ořezaný na BMR beze změny) — badge se ukáže, jen když bonus opravdu posunul cílové
+  // kalorie, ať appka netvrdí "+X kcal", když se ve skutečnosti nic nezměnilo.
+  const lutealBonusVisible = lutealBonusActive && !!nutrition && !!baseNutrition && nutrition.targetCalories !== baseNutrition.targetCalories;
+
   const meals = useLiveQuery(() => db.meals.where('date').equals(today).toArray()) || [];
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
   const todaysWorkouts = useLiveQuery(() => db.workouts.where('date').equals(today).toArray()) || [];
@@ -78,6 +101,14 @@ export default function Home({ onEditMeal }: HomeProps) {
     if (!user) return;
     return subscribeWaterLog(user.uid, today, setWaterGlasses);
   }, [user, today]);
+
+  useEffect(() => {
+    if (!user || !profile?.cycleTrackingEnabled) {
+      setCycleLogs([]);
+      return;
+    }
+    return subscribeCycleLogs(user.uid, setCycleLogs);
+  }, [user, profile?.cycleTrackingEnabled]);
 
   // Váhové milníky (viz fetchGreeting níž) potřebují první i poslední záznam váhy —
   // Home dosud weightLogs vůbec netahal, na rozdíl od Stats.tsx.
@@ -437,6 +468,11 @@ export default function Home({ onEditMeal }: HomeProps) {
             {todaysWorkoutCalories > 0 && (
               <p className="text-[11px] font-semibold text-orange-500 dark:text-orange-400 mt-1.5 flex items-center gap-1">
                 <Dumbbell className="w-3 h-3" /> +{todaysWorkoutCalories} kcal z tréninku
+              </p>
+            )}
+            {lutealBonusVisible && (
+              <p className="text-[11px] font-semibold text-rose-500 dark:text-rose-400 mt-1.5 flex items-center gap-1">
+                <Droplet className="w-3 h-3" /> +{LUTEAL_CALORIE_BONUS} kcal (luteální fáze)
               </p>
             )}
           </div>

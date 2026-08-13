@@ -273,6 +273,50 @@ describe("calibrateTarget", () => {
     const daily = dailyRange(START, addDays(START, 14), 2199); // 199/2000 = 9.95 % < 10 %
     expect(calibrateTarget(weighIns, daily, "maintain", 1400, 2000)).toBeNull();
   });
+
+  // REGRESE (CYCLE_TRACKING_PROPOSAL.md sekce 4.1): 14denní okno je kratší než jeden
+  // menstruační cyklus, takže cyklické zadržování vody (typicky 1-3 kg v luteální fázi) se
+  // v něm nikdy nestihne samo vyrušit. Bez znalosti délky cyklu appka takový vodní výkyv
+  // spletla za skutečnou změnu tělesné hmoty a navrhla chybnou kalibraci.
+  it("REGRESE: 14denní okno kontaminované zadržováním vody bez znalosti cyklu navrhne kalibraci", () => {
+    const weighIns = [
+      { date: START, weight: 70 },
+      { date: addDays(START, 14), weight: 71.5 }, // +1.5 kg, ve skutečnosti hlavně zadržená voda
+    ];
+    const daily = dailyRange(START, addDays(START, 14), 1800);
+    const result = calibrateTarget(weighIns, daily, "maintain", 1400, 2000);
+    expect(result).not.toBeNull(); // appka bez cyklických dat nemá jak poznat, že jde o vodu
+  });
+
+  it("REGRESE: se znalostí délky cyklu appka 14denní okno kratší než cyklus odmítne", () => {
+    const weighIns = [
+      { date: START, weight: 70 },
+      { date: addDays(START, 14), weight: 71.5 },
+    ];
+    const daily = dailyRange(START, addDays(START, 14), 1800);
+    // avgCycleLengthDays = 28 > daysSpan (14) -> appka radši mlčí, než navrhne cíl podle vody.
+    expect(calibrateTarget(weighIns, daily, "maintain", 1400, 2000, 28)).toBeNull();
+  });
+
+  it("se znalostí délky cyklu okno dlouhé aspoň jako cyklus normálně projde", () => {
+    const weighIns = [
+      { date: START, weight: 70 },
+      { date: addDays(START, 28), weight: 71.5 },
+    ];
+    const daily = dailyRange(START, addDays(START, 28), 1800);
+    expect(calibrateTarget(weighIns, daily, "maintain", 1400, 2000, 28)).not.toBeNull();
+  });
+
+  it("kratší cyklus než výchozích 14 dní appku pořád drží na MIN_CALIBRATION_SPAN_DAYS", () => {
+    const weighIns = [
+      { date: START, weight: 70 },
+      { date: addDays(START, 10), weight: 71 },
+    ];
+    const daily = dailyRange(START, addDays(START, 10), 1800);
+    // avgCycleLengthDays (7) je kratší než MIN_CALIBRATION_SPAN_DAYS (14) -> pořád platí 14denní
+    // minimum, appka cyklem nikdy práh nesníží pod obecné bezpečné minimum.
+    expect(calibrateTarget(weighIns, daily, "maintain", 1400, 2000, 7)).toBeNull();
+  });
 });
 
 describe("getProgressCaption (regrese: 'Skvělé tempo' při 0 kcal)", () => {

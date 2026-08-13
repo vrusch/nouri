@@ -31,6 +31,10 @@ export interface UserProfile {
   lastCelebratedGoalReachedWeight?: number; // targetWeight, pro kterou appka už zobrazila gratulaci (viz goalReached.ts) — ne bool, ať nový (nižší/vyšší) cíl gratulaci umožní znovu
   vacationDates?: string[]; // ISO datumy dní "mimo režim" (volný den i dovolenkový rozsah sdílí stejné pole), viz vacationMode.ts
   lastCalibrationDismissedAt?: string; // ISO datum posledního odmítnutí ("Zatím ne") návrhu kalibrace cíle (viz nutrition.ts calibrateTarget)
+  cycleTrackingEnabled?: boolean; // explicitní opt-in sledování cyklu, výchozí vypnuto i pro gender: 'female' (viz cyclePhase.ts, REFERENCE/CYCLE_TRACKING_PROPOSAL.md)
+  avgCycleLength?: number; // dny, appka si ho průběžně přepočítává z cycleLogs (computeAvgCycleLength v cyclePhase.ts), výchozí 28 (DEFAULT_CYCLE_LENGTH_DAYS)
+  cycleRegularity?: 'regular' | 'irregular'; // explicitní přepínač, ne jen odvození z variance zápisů — u 'irregular' appka ukazuje nižší jistotu odhadu fáze
+  onHormonalContraception?: boolean; // gate pro luteální kalorický bonus (Úroveň 2) — na hormonální antikoncepci není přirozený vzestup progesteronu jako v běžné luteální fázi
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

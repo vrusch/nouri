@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart, PartyPopper } from "lucide-react";
+import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart, PartyPopper, Droplet, X } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, calibrateTarget, CALIBRATION_DISMISS_COOLDOWN_DAYS } from "../lib/nutrition";
@@ -16,6 +16,7 @@ import { isVacationDay } from "../lib/vacationMode";
 import { computeMeasurementTrend, MEASUREMENT_FIELDS, MEASUREMENT_LABELS_CS } from "../lib/bodyMeasurements";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { daysSince } from "../lib/weighIn";
+import { getCyclePhase, computeAvgCycleLength, PHASE_LABELS_CS, PHASE_NOTES_CS, DEFAULT_CYCLE_LENGTH_DAYS } from "../lib/cyclePhase";
 import { isQuietHours } from "../lib/quietHours";
 import { MyaAI } from "../lib/ai";
 import {
@@ -25,9 +26,13 @@ import {
   subscribeProgressPhotos,
   uploadProgressPhoto,
   deleteProgressPhoto,
+  subscribeCycleLogs,
+  logCycleStart,
+  deleteCycleLog,
   type WeightLogEntry,
   type BodyMeasurementEntry,
   type ProgressPhotoEntry,
+  type CycleLogEntry,
 } from "../lib/cloudSync";
 import ProgressPhotoLightbox from "../components/ProgressPhotoLightbox";
 
@@ -87,6 +92,57 @@ export default function Stats() {
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [lightboxPhoto, setLightboxPhoto] = useState<ProgressPhotoEntry | null>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Cyklus (REFERENCE/CYCLE_TRACKING_PROPOSAL.md, Úroveň 0) — appka data odebírá jen když je
+  // sledování zapnuté, ne jen podle gender: 'female' (appka to nikdy nezapne sama za uživatelku).
+  const [cycleLogs, setCycleLogs] = useState<CycleLogEntry[]>([]);
+  useEffect(() => {
+    if (!user || !profile?.cycleTrackingEnabled) {
+      setCycleLogs([]);
+      return;
+    }
+    return subscribeCycleLogs(user.uid, setCycleLogs);
+  }, [user, profile?.cycleTrackingEnabled]);
+  const [showLogCycle, setShowLogCycle] = useState(false);
+  const [cycleLogDateInput, setCycleLogDateInput] = useState("");
+  const [savingCycleLog, setSavingCycleLog] = useState(false);
+
+  // Appka si průběžně přepočítává vlastní průměr délky cyklu z posledních zápisů (viz
+  // computeAvgCycleLength v cyclePhase.ts) — nepředpokládá se pravidelnost, jen se to zapíše
+  // do profilu, jakmile se liší, ať ho i Home.tsx (luteální bonus) může použít bez vlastního
+  // přepočtu z celé historie cycleLogs.
+  useEffect(() => {
+    if (!profile?.cycleTrackingEnabled) return;
+    const computed = computeAvgCycleLength(cycleLogs);
+    if (computed !== null && computed !== profile.avgCycleLength) {
+      updateProfile({ avgCycleLength: computed });
+    }
+  }, [cycleLogs, profile?.cycleTrackingEnabled, profile?.avgCycleLength, updateProfile]);
+
+  const cyclePhaseInfo = profile?.cycleTrackingEnabled
+    ? getCyclePhase(cycleLogs, profile.avgCycleLength ?? DEFAULT_CYCLE_LENGTH_DAYS, today)
+    : null;
+
+  const handleToggleLogCycle = () => {
+    setCycleLogDateInput(today);
+    setShowLogCycle((v) => !v);
+  };
+
+  const handleLogCycleStart = async () => {
+    if (!user || !cycleLogDateInput) return;
+    setSavingCycleLog(true);
+    try {
+      await logCycleStart(user.uid, cycleLogDateInput);
+      setShowLogCycle(false);
+    } finally {
+      setSavingCycleLog(false);
+    }
+  };
+
+  const handleDeleteCycleLog = (dateISO: string) => {
+    if (!user) return;
+    deleteCycleLog(user.uid, dateISO);
+  };
 
   const totalsByDay = new Map<string, number>();
   allMeals.forEach((m) => totalsByDay.set(m.date, (totalsByDay.get(m.date) || 0) + m.value));
@@ -168,7 +224,14 @@ export default function Stats() {
   const manualWeighIns = weightLogs.filter((w) => w.source === "manual");
   const calibration =
     profile && nutrition
-      ? calibrateTarget(manualWeighIns, dailyCalories, profile.goal, nutrition.bmr, nutrition.tdee)
+      ? calibrateTarget(
+          manualWeighIns,
+          dailyCalories,
+          profile.goal,
+          nutrition.bmr,
+          nutrition.tdee,
+          profile.cycleTrackingEnabled ? profile.avgCycleLength : undefined
+        )
       : null;
   const calibrationDismissedRecently = profile?.lastCalibrationDismissedAt
     ? daysSince(profile.lastCalibrationDismissedAt) < CALIBRATION_DISMISS_COOLDOWN_DAYS
@@ -634,6 +697,83 @@ export default function Stats() {
           </>
         )}
       </div>
+
+      {/* Cyklus (REFERENCE/CYCLE_TRACKING_PROPOSAL.md) — jen gender: 'female' a jen po zapnutí
+          v Profilu, appka gender nikdy nepoužije k automatickému zapnutí. */}
+      {profile?.gender === 'female' && profile.cycleTrackingEnabled && (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Droplet className="w-4 h-4 text-rose-400 dark:text-rose-300" />
+              <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Cyklus</h3>
+            </div>
+            <button
+              onClick={handleToggleLogCycle}
+              aria-label="Zapsat začátek menstruace"
+              className="w-7 h-7 rounded-full bg-rose-500 text-white flex items-center justify-center active:scale-90 transition-all shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+            </button>
+          </div>
+
+          {cyclePhaseInfo ? (
+            <div className="mt-3">
+              <p className="text-sm font-bold text-slate-700 dark:text-slate-200">
+                {PHASE_LABELS_CS[cyclePhaseInfo.phase]}{" "}
+                <span className="font-normal text-slate-400 dark:text-slate-500">· den {cyclePhaseInfo.dayInCycle}</span>
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 leading-relaxed">
+                {PHASE_NOTES_CS[cyclePhaseInfo.phase]}
+              </p>
+              {profile.cycleRegularity === 'irregular' && (
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
+                  Cyklus máš označený jako nepravidelný — odhad fáze je proto míň jistý.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400 dark:text-slate-500 mt-3">
+              Zatím žádný záznam — přidej datum začátku poslední menstruace.
+            </p>
+          )}
+
+          {showLogCycle && (
+            <div className="mt-4 pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center gap-2">
+              <input
+                type="date"
+                value={cycleLogDateInput}
+                max={today}
+                onChange={(e) => setCycleLogDateInput(e.target.value)}
+                className="flex-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+              />
+              <button
+                onClick={handleLogCycleStart}
+                disabled={!cycleLogDateInput || savingCycleLog}
+                className="shrink-0 bg-rose-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-50 active:scale-95 transition-all flex items-center gap-1.5"
+              >
+                {savingCycleLog && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Uložit
+              </button>
+            </div>
+          )}
+
+          {cycleLogs.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {[...cycleLogs].slice(-6).reverse().map((log) => (
+                <button
+                  key={log.date}
+                  onClick={() => handleDeleteCycleLog(log.date)}
+                  aria-label={`Smazat záznam ${log.date}`}
+                  className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-400 text-xs font-semibold px-3 py-1.5 rounded-full active:scale-95 transition-all"
+                >
+                  {new Date(`${log.date}T00:00:00`).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" })}
+                  <X className="w-3 h-3" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Detekce dosaženého cíle — gratulace + nabídka přepnutí na Udržovat váhu */}
       {showGoalReachedCard && (

@@ -25,6 +25,10 @@ function weightLogsCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "weightLogs");
 }
 
+function cycleLogsCollection(uid: string) {
+  return collection(firestoreDb, "users", uid, "cycleLogs");
+}
+
 function shoppingListCollection(uid: string) {
   return collection(firestoreDb, "users", uid, "shoppingList");
 }
@@ -270,6 +274,54 @@ export async function seedWeightLogIfEmpty(uid: string, currentWeight: number): 
   } catch (error) {
     console.error("Založení výchozí váhové historie selhalo:", error);
   }
+}
+
+// Cyklus (REFERENCE/CYCLE_TRACKING_PROPOSAL.md, Úroveň 0) — jen datum začátku menstruace,
+// stejný doc-id-je-datum vzor jako logWeight, ať oprava překlepu ve stejný den přepíše
+// existující bod místo duplicity. Žádná lokální Dexie cache, appka streamuje přímo do React
+// stavu stejně jako subscribeWeightLogs/subscribeBodyMeasurements.
+export interface CycleLogEntry {
+  date: string;
+}
+
+export async function logCycleStart(uid: string, dateISO: string): Promise<void> {
+  try {
+    await setDoc(doc(cycleLogsCollection(uid), dateISO), { date: dateISO });
+  } catch (error) {
+    console.error("Zápis začátku cyklu do cloudu selhal:", error);
+  }
+}
+
+export async function deleteCycleLog(uid: string, dateISO: string): Promise<void> {
+  try {
+    await deleteDoc(doc(cycleLogsCollection(uid), dateISO));
+  } catch (error) {
+    console.error("Smazání záznamu cyklu selhalo:", error);
+  }
+}
+
+// Jednorázové načtení pro JSON export (viz Profile.tsx handleExportJson) — stejný vzor
+// jako fetchWeightLogs výš.
+export async function fetchCycleLogs(uid: string): Promise<CycleLogEntry[]> {
+  const q = query(cycleLogsCollection(uid), orderBy("date", "asc"));
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data() as CycleLogEntry);
+}
+
+export function subscribeCycleLogs(
+  uid: string,
+  callback: (entries: CycleLogEntry[]) => void,
+  onError?: (error: unknown) => void
+): Unsubscribe {
+  const q = query(cycleLogsCollection(uid), orderBy("date", "asc"));
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => d.data() as CycleLogEntry)),
+    (error) => {
+      console.error("Synchronizace historie cyklu selhala:", error);
+      onError?.(error);
+    }
+  );
 }
 
 // Míry těla (FEATURE_IDEAS.md sekce 4) — pas/boky/hrudník, každé pole nezávisle volitelné

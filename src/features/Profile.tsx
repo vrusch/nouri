@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, Droplet, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -17,6 +17,7 @@ import {
   fetchMealTemplates,
   fetchProgressPhotos,
   fetchChatMessages,
+  fetchCycleLogs,
 } from "../lib/cloudSync";
 import { buildMonthlyReportData } from "../lib/report";
 import { downloadMonthlyReportPdf } from "../lib/pdfReport";
@@ -210,6 +211,7 @@ export default function Profile() {
         mealTemplates,
         progressPhotos,
         chatMessages,
+        cycleLogs,
       ] = await Promise.all([
         fetchWeightLogs(user.uid),
         fetchBodyMeasurements(user.uid),
@@ -218,6 +220,7 @@ export default function Profile() {
         fetchMealTemplates(user.uid),
         fetchProgressPhotos(user.uid),
         fetchChatMessages(user.uid),
+        fetchCycleLogs(user.uid),
       ]);
       const backup = {
         exportedAt: new Date().toISOString(),
@@ -256,6 +259,7 @@ export default function Profile() {
         // Jen metadata (URL/cesta ve Storage) — samotné soubory fotek záloha neobsahuje.
         progressPhotos,
         chatMessages,
+        cycleLogs,
       };
       const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -771,6 +775,79 @@ export default function Profile() {
           )}
         </div>
       </div>
+
+      {/* 2.5 CYKLUS — jen gender: 'female', appka gender nikdy nepoužije k automatickému zapnutí
+          (výslovný opt-in krok, viz REFERENCE/CYCLE_TRACKING_PROPOSAL.md sekce 7) */}
+      {profile?.gender === 'female' && (
+        <div className="space-y-1.5 px-4">
+          <h2 className="px-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider transition-colors">Cyklus</h2>
+          <div className="bg-white dark:bg-slate-900 rounded-2xl overflow-hidden shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+            <div className="px-4 py-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+                <Droplet className="w-4 h-4 text-rose-500" />
+                Sledovat cyklus
+              </div>
+              <button
+                onClick={() => updateProfile({ cycleTrackingEnabled: !profile.cycleTrackingEnabled })}
+                className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${profile.cycleTrackingEnabled ? 'bg-rose-600' : 'bg-slate-200 dark:bg-slate-700'}`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${profile.cycleTrackingEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                />
+              </button>
+            </div>
+
+            {!profile.cycleTrackingEnabled ? (
+              <p className="px-4 pb-4 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                Appka umí sledovat fázi cyklu a jemně na ni upozornit — je to čistě dobrovolné,
+                data zůstávají jen tvoje a nikdy se nesdílí.
+              </p>
+            ) : (
+              <div className="px-4 pb-4 space-y-4 border-t border-slate-50 dark:border-slate-800 pt-4">
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Datum začátku menstruace zapisuješ ve Statistikách — tohle jsou jen doplňující nastavení.
+                </p>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">Pravidelný cyklus</span>
+                  <div className="flex bg-slate-50 dark:bg-slate-800 p-1 rounded-xl gap-1 border border-slate-100 dark:border-slate-700 shrink-0">
+                    <button
+                      onClick={() => updateProfile({ cycleRegularity: 'regular' })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${(profile.cycleRegularity ?? 'regular') === 'regular' ? 'bg-white dark:bg-slate-600 shadow-sm text-rose-600 dark:text-white' : 'text-slate-400'}`}
+                    >
+                      Ano
+                    </button>
+                    <button
+                      onClick={() => updateProfile({ cycleRegularity: 'irregular' })}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${profile.cycleRegularity === 'irregular' ? 'bg-white dark:bg-slate-600 shadow-sm text-rose-600 dark:text-white' : 'text-slate-400'}`}
+                    >
+                      Ne
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">Hormonální antikoncepce</span>
+                  <button
+                    onClick={() => updateProfile({ onHormonalContraception: !profile.onHormonalContraception })}
+                    className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${profile.onHormonalContraception ? 'bg-rose-600' : 'bg-slate-200 dark:bg-slate-700'}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${profile.onHormonalContraception ? 'translate-x-5' : 'translate-x-0'}`}
+                    />
+                  </button>
+                </div>
+                {profile.onHormonalContraception && (
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                    Appka proto nepřidává luteální kalorický bonus k cíli — na antikoncepci není
+                    přirozený hormonální vzestup jako v běžném cyklu.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 3. AI REPORT */}
       <div className="px-4 space-y-1.5">
