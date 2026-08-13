@@ -2,6 +2,10 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.16.0] - 2026-08-13
+### Přidáno
+- **Vlastní makra místo automatického výpočtu**: možnost ručně nastavit bílkoviny a tuky (např. podle výživového poradce/lékaře) místo formulkového výpočtu — appka je respektuje ve všech výpočtech i AI reportech, sacharidy dál dopočítá jako zbytek do cíle. Nastavitelné v Profilu, s možností kdykoliv se vrátit k automatickému výpočtu.
+
 ## [0.15.0] - 2026-08-13
 ### Přidáno
 - **Fitness modul**: rychlý textový zápis tréninku s AI odhadem spálených kalorií a délky, dynamický denní cíl navýšený o dnešní trénink, přehled tréninků za týden ve Statistikách.
