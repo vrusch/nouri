@@ -659,6 +659,139 @@ bílkovin denně, cíl je ${input.targetProtein}g. Cíl uživatele: ${goalLabel}
   }
 );
 
+interface CalorieIntakePatternInput {
+  avgCalories: number;
+  targetCalories: number;
+  daysConsidered: number;
+  goal: Goal;
+}
+
+// Citlivé sledování nízkého příjmu (FEATURE_IDEAS.md sekce 3) — appka místo tichého grafu
+// pošle jemnou, pečovatelskou zprávu, když vidí dlouhodobě podprůměrný příjem (viz
+// detectLowCaloriePattern v calorieIntakePattern.ts). Stejná kostra jako suggestMacroFix,
+// jen s výslovným zákazem kárajícího/dietního tónu v system promptu.
+export const checkLowCalorieIntake = onCall(
+  { secrets: [openaiApiKey], region: "us-central1" },
+  async (request) => {
+    requireAuth(request);
+    const input = request.data as CalorieIntakePatternInput | undefined;
+    if (!input || !Number.isFinite(input.avgCalories) || !Number.isFinite(input.targetCalories)) {
+      throw new HttpsError("invalid-argument", "Chybí platná data o kalorickém příjmu.");
+    }
+
+    const fallback = `Posledních pár dní jíš výrazně méně, než je tvůj cíl (${input.targetCalories} kcal/den) — je u tebe všechno v pořádku?`;
+
+    const systemPrompt = `Jsi Mya, empatická AI nutriční asistentka aplikace Nouri. Appka si všimla, že uživatel
+dlouhodobě jí výrazně méně, než je jeho denní cíl. Napiš krátkou (2-3 věty), vřelou a citlivou zprávu, která se
+opatrně a s péčí zeptá, jestli je vše v pořádku. NENÍ to "hlídání" ani kárání — je to projev toho, že appce na
+uživateli záleží. Nenavrhuj konkrétní jídla ani "jez víc", spíš otevři prostor pro odpověď (může to být záměr,
+stres, nechutenství, cokoliv). Piš česky, neformálně. Vrať jen čistý text zprávy, žádný markdown ani uvozovky okolo.`;
+
+    const userPrompt = `Za posledních ${input.daysConsidered} spolehlivě zapsaných dní měl uživatel v průměru ${input.avgCalories} kcal
+denně, cíl je ${input.targetCalories} kcal. Cíl uživatele: ${GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain}.`;
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 120,
+        }),
+      });
+
+      if (response.status === 429) return { text: fallback };
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      const content = json.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
+        return { text: fallback };
+      }
+      return { text: content };
+    } catch (error) {
+      console.error("Mya Low Calorie Check-in Error:", error);
+      return { text: fallback };
+    }
+  }
+);
+
+interface WeeklySummaryInput {
+  avgCalories: number;
+  targetCalories: number;
+  daysLogged: number;
+  weekdayAvgProtein: number;
+  weekdayDaysLogged: number;
+  weekendAvgProtein: number;
+  weekendDaysLogged: number;
+  targetProtein: number;
+  goal: Goal;
+}
+
+// Týdenní AI shrnutí na vyžádání (FEATURE_IDEAS.md sekce 3, "tenhle týden ti chyběly bílkoviny
+// hlavně o víkendech") — na rozdíl od suggestMacroFix/checkLowCalorieIntake appka tuhle funkci
+// nevolá automaticky při detekci vzorce, ale až na klik tlačítka na Stats (viz Stats.tsx).
+export const getWeeklySummary = onCall(
+  { secrets: [openaiApiKey], region: "us-central1" },
+  async (request) => {
+    requireAuth(request);
+    const input = request.data as WeeklySummaryInput | undefined;
+    if (!input || !Number.isFinite(input.avgCalories) || !Number.isFinite(input.targetCalories)) {
+      throw new HttpsError("invalid-argument", "Chybí platná týdenní data.");
+    }
+
+    const fallback = `Tenhle týden jsi v průměru měla ${input.avgCalories} kcal/den z cíle ${input.targetCalories} kcal (zapsáno ${input.daysLogged}/7 dní).`;
+
+    const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel si vyžádal shrnutí uplynulého
+týdne. Napiš krátké (2-4 věty), věcné a přátelské shrnutí, které vyzdvihne nejzajímavější vzorec v datech —
+například rozdíl mezi všedními dny a víkendem, jestli se dařilo dosahovat cíle na bílkoviny nebo kalorie, nebo
+kolik dní bylo vůbec zapsáno. Pokud je dat málo (méně než 3 zapsané dny), zmiň to a nepřeháněj s jistotou závěrů.
+Piš česky, neformálně, žádné obecné fráze. Vrať jen čistý text zprávy, žádný markdown ani uvozovky okolo.`;
+
+    const userPrompt = `Cíl uživatele: ${GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain}.
+Kalorie: průměr ${input.avgCalories} kcal/den z cíle ${input.targetCalories} kcal, zapsáno ${input.daysLogged}/7 dní.
+Bílkoviny: cíl ${input.targetProtein}g/den. Všední dny průměr ${input.weekdayAvgProtein}g (${input.weekdayDaysLogged} zapsaných dní), víkend průměr ${input.weekendAvgProtein}g (${input.weekendDaysLogged} zapsaných dní).`;
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 160,
+        }),
+      });
+
+      if (response.status === 429) return { text: fallback };
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      const content = json.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
+        return { text: fallback };
+      }
+      return { text: content };
+    } catch (error) {
+      console.error("Mya Weekly Summary Error:", error);
+      return { text: fallback };
+    }
+  }
+);
+
 interface ChatMessageInput {
   role: "user" | "assistant";
   content: string;

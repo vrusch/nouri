@@ -43,6 +43,29 @@ export interface MacroPatternInput {
 
 const suggestMacroFixFn = httpsCallable<MacroPatternInput, { text: string }>(functions, "suggestMacroFix");
 
+export interface CalorieIntakePatternInput {
+  avgCalories: number;
+  targetCalories: number;
+  daysConsidered: number;
+  goal: Goal;
+}
+
+const checkLowCalorieIntakeFn = httpsCallable<CalorieIntakePatternInput, { text: string }>(functions, "checkLowCalorieIntake");
+
+export interface WeeklySummaryInput {
+  avgCalories: number;
+  targetCalories: number;
+  daysLogged: number;
+  weekdayAvgProtein: number;
+  weekdayDaysLogged: number;
+  weekendAvgProtein: number;
+  weekendDaysLogged: number;
+  targetProtein: number;
+  goal: Goal;
+}
+
+const getWeeklySummaryFn = httpsCallable<WeeklySummaryInput, { text: string }>(functions, "getWeeklySummary");
+
 export interface ChatMessageInput {
   role: "user" | "assistant";
   content: string;
@@ -119,6 +142,34 @@ export const MyaAI = {
     } catch (error) {
       console.error("Mya AI Error:", error);
       return `Posledních pár dní ti chybí bílkoviny k cíli (${input.targetProtein}g/den) — zkus přidat větší porci masa, tvarohu nebo luštěnin k jednomu z jídel.`;
+    }
+  },
+
+  /**
+   * Jemná, pečovatelská zpráva, když appka delší dobu vidí výrazně podprůměrný kalorický příjem
+   * (viz detectLowCaloriePattern v calorieIntakePattern.ts) — místo tichého reportování v grafu.
+   */
+  async checkLowCalorieIntake(input: CalorieIntakePatternInput): Promise<string> {
+    try {
+      const response = await checkLowCalorieIntakeFn(input);
+      return response.data.text;
+    } catch (error) {
+      console.error("Mya AI Error:", error);
+      return `Posledních pár dní jíš výrazně méně, než je tvůj cíl (${input.targetCalories} kcal/den) — je u tebe všechno v pořádku?`;
+    }
+  },
+
+  /**
+   * Týdenní shrnutí na vyžádání (viz computeWeekdayWeekendProteinBreakdown v weekSummary.ts) —
+   * na rozdíl od ostatních proaktivních funkcí se volá jen na klik tlačítka, ne automaticky.
+   */
+  async getWeeklySummary(input: WeeklySummaryInput): Promise<string> {
+    try {
+      const response = await getWeeklySummaryFn(input);
+      return response.data.text;
+    } catch (error) {
+      console.error("Mya AI Error:", error);
+      return `Tenhle týden jsi v průměru měla ${input.avgCalories} kcal/den z cíle ${input.targetCalories} kcal (zapsáno ${input.daysLogged}/7 dní).`;
     }
   },
 

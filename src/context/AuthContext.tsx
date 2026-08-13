@@ -24,6 +24,9 @@ export interface UserProfile {
   quietHoursStart?: number; // hodina 0-23, výchozí 22 (QUIET_HOURS_START v quietHours.ts)
   quietHoursEnd?: number; // hodina 0-23, výchozí 7 (QUIET_HOURS_END v quietHours.ts)
   plannedWorkoutDays?: number[]; // dny v týdnu, kdy appka připomíná trénink (0=neděle..6=sobota, Date.getDay()), viz workoutPlan.ts
+  lastCelebratedStreakDays?: number; // nejvyšší streak milník, který appka už oslavila (viz milestones.ts)
+  lastCelebratedWeightMilestoneKg?: number; // nejvyšší váhový milník (v kg pokroku od prvního záznamu), který appka už oslavila
+  lastLowCalorieDismissedAt?: string; // ISO datum posledního potvrzení "citlivého" check-inu na nízký příjem (viz calorieIntakePattern.ts)
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

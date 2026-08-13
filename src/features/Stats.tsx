@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2 } from "lucide-react";
+import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
-import { summarizeWeek } from "../lib/weekSummary";
+import { summarizeWeek, computeWeekdayWeekendProteinBreakdown } from "../lib/weekSummary";
 import { computeLoggingStreak } from "../lib/streak";
 import { generateWeeklyShareCardBlob } from "../lib/shareCard";
 import { formatWorkoutsCs } from "../lib/format";
 import { buildDailyProteinRecords, detectLowProteinPattern, MACRO_PATTERN_COOLDOWN_DAYS } from "../lib/macroPattern";
+import { buildDailyCalorieRecords, detectLowCaloriePattern, LOW_CALORIE_PATTERN_COOLDOWN_DAYS } from "../lib/calorieIntakePattern";
+import { computeMonthRetrospective } from "../lib/monthRetrospective";
 import { computeMeasurementTrend, MEASUREMENT_FIELDS, MEASUREMENT_LABELS_CS } from "../lib/bodyMeasurements";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { daysSince } from "../lib/weighIn";
@@ -72,6 +74,8 @@ export default function Stats() {
   const [measurementInputs, setMeasurementInputs] = useState<Record<string, string>>({ waist: "", hips: "", chest: "" });
   const [savingMeasurement, setSavingMeasurement] = useState(false);
   const [isGeneratingCard, setIsGeneratingCard] = useState(false);
+  const [weeklySummaryText, setWeeklySummaryText] = useState<string | null>(null);
+  const [generatingWeeklySummary, setGeneratingWeeklySummary] = useState(false);
 
   const [progressPhotos, setProgressPhotos] = useState<ProgressPhotoEntry[]>([]);
   useEffect(() => {
@@ -91,6 +95,12 @@ export default function Stats() {
   const { avgCalories, daysLogged } = summarizeWeek(values);
   const { avgCalories: previousAvgCalories, daysLogged: previousDaysLogged } = summarizeWeek(previousWeekValues);
   const targetLinePercent = Math.min(100, (targetCalories / maxValue) * 100);
+
+  // Týdenní AI shrnutí (FEATURE_IDEAS.md sekce 3) — stejné `days` okno jako avgCalories výš,
+  // ne 14denní okno jako macroPatternWindowStart níž (to je pro dlouhodobou detekci vzorce,
+  // tohle je vyloženě "tenhle týden").
+  const weekProteinRecords = buildDailyProteinRecords(allMeals).filter((r) => days.includes(r.date));
+  const weekdayWeekendBreakdown = computeWeekdayWeekendProteinBreakdown(weekProteinRecords);
 
   // Sdílecí karta (FEATURE_IDEAS.md sekce 5) — streak a váhový posun počítané ze stejného
   // `days` okna jako avgCalories/daysLogged výš, ať karta nikdy netvrdí jiná čísla než ta,
@@ -128,6 +138,12 @@ export default function Stats() {
   const weightDelta = hasWeightTrend
     ? Math.round((latestWeight.weight - chartWeights[0].weight) * 10) / 10
     : 0;
+  // Retrospektiva pracuje s celou historií, ne jen posledními 30 záznamy jako graf výš —
+  // 30 zaznamenaných vážení může pokrýt méně než 30 kalendářních dní.
+  const monthRetrospective = computeMonthRetrospective(weightLogs, today);
+  const monthAgoLabel = monthRetrospective
+    ? new Date(`${monthRetrospective.monthAgoDate}T00:00:00`).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" })
+    : null;
 
   const dailyCalories = Array.from(totalsByDay, ([date, calories]) => ({ date, calories }));
   const manualWeighIns = weightLogs.filter((w) => w.source === "manual");
@@ -145,12 +161,26 @@ export default function Stats() {
   const macroPatternDismissedRecently = profile?.lastMacroPatternDismissedAt
     ? daysSince(profile.lastMacroPatternDismissedAt) < MACRO_PATTERN_COOLDOWN_DAYS
     : false;
+
+  // Citlivé sledování nízkého příjmu (FEATURE_IDEAS.md sekce 3) — stejné okno a stejný "reliable
+  // day" princip jako bílkoviny výš, jen na celkové kalorie.
+  const calorieRecords = buildDailyCalorieRecords(allMeals).filter((r) => r.date >= macroPatternWindowStart);
+  const lowCaloriePattern = nutrition ? detectLowCaloriePattern(calorieRecords, targetCalories) : null;
+  const lowCalorieDismissedRecently = profile?.lastLowCalorieDismissedAt
+    ? daysSince(profile.lastLowCalorieDismissedAt) < LOW_CALORIE_PATTERN_COOLDOWN_DAYS
+    : false;
+
   // Během tichých hodin appka neotvírá nový proaktivní nudge (a nevolá kvůli němu AI) —
   // stejné pravidlo a stejné uživatelsky nastavitelné okno jako červená tečka na zvonu
   // v App.tsx (viz FEATURE_IDEAS.md sekce 12).
   const quietHoursActive =
     (profile?.quietHoursEnabled ?? true) && isQuietHours(new Date().getHours(), profile?.quietHoursStart, profile?.quietHoursEnd);
-  const showMacroPatternCard = !!lowProteinPattern?.detected && !macroPatternDismissedRecently && !quietHoursActive;
+  const showLowCaloriePatternCard = !!lowCaloriePattern?.detected && !lowCalorieDismissedRecently && !quietHoursActive;
+  // Když appka vidí celkově nízký příjem, karta na bílkoviny konkrétně mlčí — nedává smysl radit
+  // "přidej bílkoviny", když člověk celkově nejí dost. Nízký příjem jako celek je důležitější
+  // signál, viz "Citlivé sledování" výš.
+  const showMacroPatternCard =
+    !!lowProteinPattern?.detected && !macroPatternDismissedRecently && !quietHoursActive && !lowCaloriePattern?.detected;
 
   const [macroSuggestion, setMacroSuggestion] = useState<string | null>(null);
   useEffect(() => {
@@ -177,6 +207,29 @@ export default function Stats() {
   const handleDismissMacroPattern = () => {
     updateProfile({ lastMacroPatternDismissedAt: new Date().toISOString().split("T")[0] });
     setMacroSuggestion(null);
+  };
+
+  const [calorieCheckInMessage, setCalorieCheckInMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showLowCaloriePatternCard || !nutrition || !lowCaloriePattern || !profile) return;
+
+    const goal = profile.goal;
+    const avgCalories = lowCaloriePattern.avgCalories;
+    const daysConsidered = lowCaloriePattern.reliableDaysConsidered;
+
+    let cancelled = false;
+    MyaAI.checkLowCalorieIntake({ avgCalories, targetCalories, daysConsidered, goal }).then((text) => {
+      if (!cancelled) setCalorieCheckInMessage(text);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showLowCaloriePatternCard, lowCaloriePattern?.avgCalories, lowCaloriePattern?.reliableDaysConsidered, targetCalories, profile?.goal]);
+
+  const handleDismissLowCaloriePattern = () => {
+    updateProfile({ lastLowCalorieDismissedAt: new Date().toISOString().split("T")[0] });
+    setCalorieCheckInMessage(null);
   };
 
   const handleLogMeasurement = async () => {
@@ -254,6 +307,27 @@ export default function Stats() {
     }
   };
 
+  const handleGenerateWeeklySummary = async () => {
+    if (!profile || !nutrition) return;
+    setGeneratingWeeklySummary(true);
+    try {
+      const text = await MyaAI.getWeeklySummary({
+        avgCalories,
+        targetCalories,
+        daysLogged,
+        weekdayAvgProtein: weekdayWeekendBreakdown.weekdayAvgProtein,
+        weekdayDaysLogged: weekdayWeekendBreakdown.weekdayDaysLogged,
+        weekendAvgProtein: weekdayWeekendBreakdown.weekendAvgProtein,
+        weekendDaysLogged: weekdayWeekendBreakdown.weekendDaysLogged,
+        targetProtein: nutrition.macros.protein,
+        goal: profile.goal,
+      });
+      setWeeklySummaryText(text);
+    } finally {
+      setGeneratingWeeklySummary(false);
+    }
+  };
+
   return (
     <>
     <div className="space-y-6 pt-6 transition-colors">
@@ -298,6 +372,27 @@ export default function Stats() {
             )}
           </div>
         )}
+      </div>
+
+      {/* Týdenní AI shrnutí — na vyžádání tlačítkem, nevolá se automaticky */}
+      <div className="bg-linear-to-br from-sky-50 to-indigo-50/60 dark:from-sky-950/20 dark:to-indigo-950/10 rounded-3xl p-6 border border-sky-100/60 dark:border-sky-900/30 transition-colors">
+        <div className="flex items-center gap-2 mb-2">
+          <Sparkles className="w-4 h-4 text-sky-500 dark:text-sky-400" />
+          <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Týdenní shrnutí od Myi</h3>
+        </div>
+        {weeklySummaryText ? (
+          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">{weeklySummaryText}</p>
+        ) : (
+          <p className="text-sm text-slate-400 dark:text-slate-500 mb-4">Necháš Myu shrnout, jak se ti tenhle týden dařilo?</p>
+        )}
+        <button
+          onClick={handleGenerateWeeklySummary}
+          disabled={daysLogged === 0 || generatingWeeklySummary}
+          className="w-full bg-sky-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          {generatingWeeklySummary && <Loader2 className="w-4 h-4 animate-spin" />}
+          {weeklySummaryText ? "Shrnout znovu" : "Shrnout tento týden"}
+        </button>
       </div>
 
       {/* Graf kalorií */}
@@ -440,6 +535,11 @@ export default function Stats() {
                 <circle key={p.date} cx={p.x} cy={p.y} r="1.5" className="fill-rose-500 dark:fill-rose-400" />
               ))}
             </svg>
+            {monthRetrospective && (
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-3 pt-3 border-t border-slate-50 dark:border-slate-800">
+                Před měsícem ({monthAgoLabel}): {monthRetrospective.monthAgoWeight} kg → dnes: {monthRetrospective.currentWeight} kg
+              </p>
+            )}
           </>
         ) : (
           <>
@@ -592,6 +692,29 @@ export default function Stats() {
             className="w-full bg-rose-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all"
           >
             Upravit cíl na {calibration.suggestedTargetCalories} kcal
+          </button>
+        </div>
+      )}
+
+      {/* Citlivé sledování nízkého příjmu — pečovatelský check-in, ne "hlídání" */}
+      {showLowCaloriePatternCard && (
+        <div className="bg-linear-to-br from-amber-50 to-orange-50/60 dark:from-amber-950/20 dark:to-orange-950/10 rounded-3xl p-6 border border-amber-100/60 dark:border-amber-900/30 transition-colors">
+          <div className="flex items-center gap-2 mb-2">
+            <Heart className="w-4 h-4 text-amber-500 dark:text-amber-400" />
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Jak se máš?</h3>
+          </div>
+          {calorieCheckInMessage ? (
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">{calorieCheckInMessage}</p>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500 mb-4">
+              <Loader2 className="w-4 h-4 animate-spin" /> Mya přemýšlí...
+            </div>
+          )}
+          <button
+            onClick={handleDismissLowCaloriePattern}
+            className="w-full bg-amber-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all"
+          >
+            Beru na vědomí
           </button>
         </div>
       )}

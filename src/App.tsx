@@ -18,8 +18,9 @@ import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
 import { computeProfileCheckStatus } from "./lib/profileCheck";
 import { computeWorkoutPlanStatus } from "./lib/workoutPlan";
+import { computeMealReminderStatus } from "./lib/mealReminder";
 import { isQuietHours } from "./lib/quietHours";
-import { Bell, Search, Dumbbell, MessageCircle, ClipboardList } from "lucide-react";
+import { Bell, Search, Dumbbell, MessageCircle, ClipboardList, UtensilsCrossed } from "lucide-react";
 
 export default function App() {
   const { user, profile, loading } = useAuth();
@@ -45,6 +46,7 @@ export default function App() {
   // Hook musí běžet nepodmíněně na každém renderu, i před přesměrováním na Onboarding níže —
   // proto tady, ne až za `if (!user...)`.
   const todaysWorkoutCount = useLiveQuery(() => db.workouts.where("date").equals(today).count()) ?? 0;
+  const todaysMeals = useLiveQuery(() => db.meals.where("date").equals(today).toArray()) ?? [];
 
   useEffect(() => {
     if (!showReminder) return;
@@ -103,6 +105,7 @@ export default function App() {
 
   const profileCheck = computeProfileCheckStatus(profile.lastProfileCheckAt);
   const workoutPlan = computeWorkoutPlanStatus(profile.plannedWorkoutDays, todaysWorkoutCount > 0);
+  const mealReminder = computeMealReminderStatus(todaysMeals.map((m) => m.type));
   // Appka během tichých hodin nesmí sama upoutávat pozornost na připomínky — červená tečka
   // je jediný pasivní "nudge" prvek, zvon samotný jde otevřít ručně kdykoliv. Okno je uživatelem
   // nastavitelné v Profilu (výchozí 22-7, viz quietHours.ts), vypínatelné přes quietHoursEnabled.
@@ -167,7 +170,7 @@ export default function App() {
                 className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
               >
                 <Bell className="w-6 h-6 stroke-2" />
-                {(weighInOverdue || profileCheck.checkOverdue || workoutPlan.reminderDue) && !quietHoursActive && (
+                {(weighInOverdue || profileCheck.checkOverdue || workoutPlan.reminderDue || mealReminder.lunchOverdue) && !quietHoursActive && (
                   <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
                 )}
               </button>
@@ -212,6 +215,21 @@ export default function App() {
                         className="w-full bg-orange-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
                       >
                         Přejít na Home
+                      </button>
+                    </>
+                  )}
+                  {mealReminder.lunchOverdue && (
+                    <>
+                      <div className="h-px bg-slate-100 dark:bg-slate-700 my-3" />
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mb-3 flex items-center gap-1.5">
+                        <UtensilsCrossed className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                        Dneska ještě nemáš zapsaný oběd.
+                      </p>
+                      <button
+                        onClick={() => { setAddMealAction(null); setAddMealOpen(true); setShowReminder(false); }}
+                        className="w-full bg-emerald-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
+                      >
+                        Zapsat oběd
                       </button>
                     </>
                   )}

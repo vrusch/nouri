@@ -9,7 +9,21 @@ import { computeLoggingStreak } from "../lib/streak";
 import { pickDailyCustomReminder } from "../lib/customReminders";
 import { WATER_TARGET_GLASSES, getWaterProgressPercent } from "../lib/water";
 import { formatGlassesCs, formatWorkoutsCs } from "../lib/format";
-import { subscribeWaterLog, logWater, saveMealTemplate, deleteWorkout, type MealTemplateItem } from "../lib/cloudSync";
+import {
+  subscribeWaterLog,
+  logWater,
+  saveMealTemplate,
+  deleteWorkout,
+  subscribeWeightLogs,
+  type MealTemplateItem,
+  type WeightLogEntry,
+} from "../lib/cloudSync";
+import {
+  detectNewStreakMilestone,
+  buildStreakMilestoneMessage,
+  detectNewWeightMilestone,
+  buildWeightMilestoneMessage,
+} from "../lib/milestones";
 import LogWorkoutModal from "../components/LogWorkoutModal";
 
 const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
@@ -25,7 +39,7 @@ interface HomeProps {
 }
 
 export default function Home({ onEditMeal }: HomeProps) {
-  const { profile, user } = useAuth();
+  const { profile, user, updateProfile } = useAuth();
   const [greeting, setGreeting] = useState<string>("Přemýšlím o tvém dni...");
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [waterGlasses, setWaterGlasses] = useState(0);
@@ -45,6 +59,14 @@ export default function Home({ onEditMeal }: HomeProps) {
     if (!user) return;
     return subscribeWaterLog(user.uid, today, setWaterGlasses);
   }, [user, today]);
+
+  // Váhové milníky (viz fetchGreeting níž) potřebují první i poslední záznam váhy —
+  // Home dosud weightLogs vůbec netahal, na rozdíl od Stats.tsx.
+  const [weightLogs, setWeightLogs] = useState<WeightLogEntry[]>([]);
+  useEffect(() => {
+    if (!user) return;
+    return subscribeWeightLogs(user.uid, setWeightLogs);
+  }, [user]);
 
   const handleAddWater = () => {
     if (!user) return;
@@ -104,9 +126,65 @@ export default function Home({ onEditMeal }: HomeProps) {
 
   const streak = computeLoggingStreak(Array.from(new Set(allMeals.map((m) => m.date))));
 
+  // Milníková oslava (streak nebo váha, FEATURE_IDEAS.md sekce 3) — vlastní efekt oddělený od
+  // fetchGreeting níž, ať streak/weightLogs (obojí dorazí asynchronně z Dexie/Firestore až po
+  // prvním renderu) nespouští další volání OpenAI v efektu níž. Jednou zobrazená oslava zůstává
+  // celý den beze změny (klíč nezávisí na meals.length) — kdyby sdílela klíč s cacheKey níž,
+  // zápis dalšího jídla ten samý den by ji přepsal běžným pozdravem: updateProfile totiž mění
+  // profil, takže by se detectNewStreakMilestone spustil znovu s lastCelebratedStreakDays už
+  // aktualizovaným a podruhé by vrátil null. Po refreshi stránky ten samý den se milník naopak
+  // ztratí (sessionStorage se vyprázdní) a appka ukáže normální pozdrav — profil si ale pořád
+  // pamatuje, že oslaveno bylo, takže se nespustí znovu. To je záměr, ne bug: milník je "záblesk"
+  // pro danou session, ne trvalá zpráva.
+  useEffect(() => {
+    if (!profile) return;
+
+    const milestoneCacheKey = `mya_milestone_${today}`;
+    if (sessionStorage.getItem(milestoneCacheKey)) return;
+
+    const streakMilestone = detectNewStreakMilestone(streak, profile.lastCelebratedStreakDays);
+    if (streakMilestone) {
+      const msg = buildStreakMilestoneMessage(streakMilestone);
+      sessionStorage.setItem(milestoneCacheKey, msg);
+      setGreeting(msg);
+      updateProfile({ lastCelebratedStreakDays: streakMilestone });
+      return;
+    }
+
+    if (weightLogs.length >= 2) {
+      // subscribeWeightLogs vrací záznamy už seřazené podle data (orderBy v cloudSync.ts).
+      const startWeight = weightLogs[0].weight;
+      const currentWeight = weightLogs[weightLogs.length - 1].weight;
+      const weightMilestone = detectNewWeightMilestone(
+        startWeight,
+        currentWeight,
+        profile.goal,
+        profile.lastCelebratedWeightMilestoneKg
+      );
+      if (weightMilestone) {
+        const msg = buildWeightMilestoneMessage(weightMilestone, profile.goal);
+        sessionStorage.setItem(milestoneCacheKey, msg);
+        setGreeting(msg);
+        updateProfile({ lastCelebratedWeightMilestoneKg: weightMilestone });
+      }
+    }
+    // profile jde do deps jen přes primitiva, ze stejného důvodu jako showMacroPatternCard v
+    // Stats.tsx — celý objekt mění referenci při každém renderu AuthProvideru, i kvůli poli,
+    // které tenhle efekt vůbec nezajímá.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.lastCelebratedStreakDays, profile?.lastCelebratedWeightMilestoneKg, profile?.goal, today, streak, weightLogs, updateProfile]);
+
   useEffect(() => {
     const fetchGreeting = async () => {
       if (!profile) return;
+
+      // Milníková oslava (viz efekt výš) má přednost, pokud appka dnes nějakou zobrazila.
+      const milestoneCacheKey = `mya_milestone_${today}`;
+      const cachedMilestone = sessionStorage.getItem(milestoneCacheKey);
+      if (cachedMilestone) {
+        setGreeting(cachedMilestone);
+        return;
+      }
 
       // Kešování na dnešek + počet zapsaných jídel, ať se pozdrav obnoví po každém novém zápisu
       const cacheKey = `mya_greeting_${today}_${meals.length}`;
