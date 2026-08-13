@@ -2,6 +2,32 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.15.0] - 2026-08-13
+### Přidáno
+- **Fitness modul**: rychlý textový zápis tréninku s AI odhadem spálených kalorií a délky, dynamický denní cíl navýšený o dnešní trénink, přehled tréninků za týden ve Statistikách.
+- **Plánování tréninků**: nastavení pravidelných dnů v týdnu v Profilu, appka připomene nezapsaný trénink v plánovaný den.
+- **Rozbalovací tlačítko pro zápis jídla**: tlačítko "+" nabídne tři rychlé cesty — foto, hlas, text — místo jednoho kroku navíc.
+- **Míry těla**: zápis pasu/boků/hrudníku ve Statistikách, nezávisle volitelná pole s trendem oproti prvnímu záznamu.
+- **Progress fotky**: appka poprvé používá Firebase Storage — nahrání a prohlížení fotek postavy v čase, mazání s potvrzením.
+- **PDF report pro lékaře**: měsíční shrnutí (kalorie, makra, trend váhy, míry těla) ke stažení, s vlastním vloženým fontem pro českou diakritiku.
+- **Sdílená týdenní karta**: obrázek ke stažení/sdílení s kaloriemi, streakem a váhovým posunem za týden.
+- **Volný chat s Myou**: celoobrazovkový chat s historií konverzace — appka poprvé volá AI opakovaně podle používání, ne jednorázově za funkci.
+- **Samostatný nákupní seznam**: ruční přidávání položek, sdílí jeden seznam s recepto-navázanými položkami.
+- **Rozpad jídla na ingredience**: složené jídlo (např. "kuřecí salát") jde rozepsat na jednotlivé suroviny s vlastními kaloriemi/makry.
+- **Proaktivní check-iny od Myi**: připomínka nezapsaného oběda, "před měsícem vs. dnes" v trendu váhy, milníkové oslavy (streak/váha), citlivé sledování dlouhodobě nízkého příjmu, týdenní AI shrnutí na vyžádání.
+- **Detekce dosaženého cíle váhy**: appka pozná, že váha dosáhla cílové hodnoty, pogratuluje a nabídne přepnutí na "Udržovat váhu" — nové pole cílové váhy v Profilu.
+- **Nálada/energie check-in**: rychlý tap na emoji na Home, appka reakci zohlední v denním pozdravu.
+- **Volný den a dovolenkový režim**: appka ztlumí připomínky vážení a nezapsaného oběda, vynechané dny se nepočítají do streaku ani týdenních průměrů.
+- **Sledování cyklu ovlivňujícího kalorie**: explicitní opt-in pro ženy — fáze cyklu ve Statistikách, oprava kalibrace cíle proti zkreslení zadržováním vody v luteální fázi, luteální kalorický bonus (+75 kcal) do cíle i maker.
+- **Onboarding vynucuje reálná data**: appka dřív povinná pole (výška, váha, datum narození, pohlaví, aktivita, cíl) předvyplňovala věrohodnými výchozími hodnotami, které šlo projít bez úpravy — appka teď nepustí dál, dokud nejsou skutečně vyplněná a v rozumných mezích.
+- **"Nedost dat" hlášky místo ticha**: appka ukáže, kolik dat ještě chybí (kalibrace cíle, dlouhodobé vzorce příjmu), místo aby sekci beze slova skryla; chybějící cílová váha a výchozí délka cyklu appka teď taky přiznává.
+- **Varování před skoro prázdným PDF exportem**: appka upozorní, než necháte stáhnout report bez dostatku dat.
+
+### Opraveno
+- **24 nálezů z auditu existujících featur** — mj. dovolenkový režim si odporoval s připomínkou vážení, milníková oslava se mohla trvale ztratit kvůli race podmínce, "Plná záloha (JSON)" nebyla plná, kalibrace cíle mohla zkreslit odhad při řídkém zapisování, nedokončený dnešek se počítal jako celý den ve vzorcích příjmu, a další drobnosti v datové/synchronizační vrstvě (`REFERENCE/AUDIT_2026-08-13.md`).
+- **Lokální cache jídel/tréninků nebyla vázaná na účet** — po přepnutí účtu ve stejném prohlížeči appka dočasně zobrazovala jídla předchozího účtu jako vlastní data.
+- **AI denní pozdrav** posílal doslovnou nulu, i když uživatel den ještě jen nezačal zapisovat, ne že by opravdu nic nesnědl.
+
 ## [0.14.0] - 2026-08-11
 ### Přidáno
 - **PWA zástupci appky**: dlouhé podržení ikony appky na ploše nabídne "Zapsat jídlo" rovnou, appka se otevře přímo v modálu pro zápis.
