@@ -16,6 +16,8 @@ const generateWelcomeReportFn = httpsCallable<{ profile: UserProfile }, AIRespon
 interface DailyStats {
   consumedCalories: number;
   consumedProtein: number;
+  mood?: number; // 1-5, z "Jak se cítíš?" na Home (viz handleSubmitMood v Home.tsx)
+  moodNote?: string;
 }
 
 const getDailyGreetingFn = httpsCallable<{ profile: UserProfile } & DailyStats, { text: string }>(

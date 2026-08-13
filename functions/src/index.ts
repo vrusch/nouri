@@ -127,6 +127,11 @@ export const getDailyGreeting = onCall(
     const profile = request.data?.profile as UserProfileInput | undefined;
     const consumedCalories = Number(request.data?.consumedCalories) || 0;
     const consumedProtein = Number(request.data?.consumedProtein) || 0;
+    // Nálada/energie check-in (FEATURE_IDEAS.md sekce 3) — appka mood/moodNote nikam neukládá,
+    // jen je jednorázově protlačí do tohohle promptu (viz handleSubmitMood v Home.tsx).
+    const rawMood = Number(request.data?.mood);
+    const mood = Number.isInteger(rawMood) && rawMood >= 1 && rawMood <= 5 ? rawMood : undefined;
+    const moodNote = typeof request.data?.moodNote === "string" ? request.data.moodNote.trim().slice(0, 300) : undefined;
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
 
     // Živě přepočteno z profilu, ne z uloženého profile.targetCalories — to může být
@@ -145,9 +150,18 @@ export const getDailyGreeting = onCall(
     const proteinRemaining = Math.max(0, targetProtein - consumedProtein);
 
     const systemPrompt = `Jsi Mya z aplikace Nouri. Piš krátké, úderné a motivující zprávy (max 2 věty).
-Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem k denní době, zmiň to konkrétně (počet gramů).`;
+Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem k denní době, zmiň to konkrétně (počet gramů).${
+      mood !== undefined
+        ? " Uživatel právě odpověděl na otázku, jak se dnes cítí — zohledni to v tónu zprávy (empaticky, ale stručně), aniž by to bylo hlavní téma zprávy."
+        : ""
+    }`;
 
-    const userPrompt = `Uživatel: ${profile.name}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g). Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.`;
+    const moodContext =
+      mood !== undefined
+        ? ` Dnešní nálada/energie: ${mood}/5 (1 = mizerně, 5 = skvěle).${moodNote ? ` Poznámka od uživatele: "${moodNote}"` : ""}`
+        : "";
+
+    const userPrompt = `Uživatel: ${profile.name}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g). Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.${moodContext}`;
 
     try {
       const response = await fetch(OPENAI_API_URL, {

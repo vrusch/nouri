@@ -34,6 +34,17 @@ const TRAFFIC_LIGHT_STYLE = {
   red: { bg: "bg-red-50 dark:bg-red-900/20", text: "text-red-600 dark:text-red-400", dot: "bg-red-500", label: "Nad cílem" },
 } as const;
 
+// Nálada/energie check-in (FEATURE_IDEAS.md sekce 3) — appka nikam nálady/poznámky neukládá
+// jako vlastní data, jen je jednorázově pošle jako kontext do getDailyGreeting (viz
+// handleSubmitMood níž), ať appka nemá druhou samostatnou AI zprávu vedle sebe.
+const MOOD_OPTIONS = [
+  { value: 1, emoji: "😞", label: "Mizerně" },
+  { value: 2, emoji: "🙁", label: "Spíš špatně" },
+  { value: 3, emoji: "😐", label: "Neutrálně" },
+  { value: 4, emoji: "🙂", label: "Dobře" },
+  { value: 5, emoji: "😄", label: "Skvěle" },
+] as const;
+
 interface HomeProps {
   onEditMeal: (meal: MealItem) => void;
 }
@@ -54,6 +65,13 @@ export default function Home({ onEditMeal }: HomeProps) {
   const meals = useLiveQuery(() => db.meals.where('date').equals(today).toArray()) || [];
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
   const todaysWorkouts = useLiveQuery(() => db.workouts.where('date').equals(today).toArray()) || [];
+
+  // "Jak se cítíš?" zmizí, jakmile appka na dnešek dostane odpověď (sessionStorage, stejný
+  // "záblesk pro danou session" princip jako milníky výš) — lazy init čte rovnou při mountu,
+  // ať appka po refreshi stránky stejný den otázku znovu neukáže.
+  const [moodAnswered, setMoodAnswered] = useState(() => !!sessionStorage.getItem(`mya_mood_answered_${today}`));
+  const [moodNoteInput, setMoodNoteInput] = useState("");
+  const [submittingMood, setSubmittingMood] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -124,6 +142,26 @@ export default function Home({ onEditMeal }: HomeProps) {
       ]
     : [];
 
+  const handleSubmitMood = async (value: number) => {
+    if (!profile || submittingMood) return;
+    setSubmittingMood(true);
+    try {
+      const note = moodNoteInput.trim();
+      const msg = await MyaAI.getDailyGreeting(profile, {
+        consumedCalories,
+        consumedProtein,
+        mood: value,
+        moodNote: note || undefined,
+      });
+      sessionStorage.setItem(`mya_mood_greeting_${today}`, msg);
+      sessionStorage.setItem(`mya_mood_answered_${today}`, "1");
+      setGreeting(msg);
+      setMoodAnswered(true);
+    } finally {
+      setSubmittingMood(false);
+    }
+  };
+
   const streak = computeLoggingStreak(Array.from(new Set(allMeals.map((m) => m.date))));
 
   // Milníková oslava (streak nebo váha, FEATURE_IDEAS.md sekce 3) — vlastní efekt oddělený od
@@ -186,6 +224,16 @@ export default function Home({ onEditMeal }: HomeProps) {
         return;
       }
 
+      // Reakce na náladu (viz handleSubmitMood níž) má přednost hned po milníku — jednou
+      // vyžádaná zůstává celý den beze změny, i když appka mezitím normálně přepočítá pozdrav
+      // kvůli nově zapsanému jídlu (cacheKey níž závisí na meals.length).
+      const moodGreetingCacheKey = `mya_mood_greeting_${today}`;
+      const cachedMoodGreeting = sessionStorage.getItem(moodGreetingCacheKey);
+      if (cachedMoodGreeting) {
+        setGreeting(cachedMoodGreeting);
+        return;
+      }
+
       // Kešování na dnešek + počet zapsaných jídel, ať se pozdrav obnoví po každém novém zápisu
       const cacheKey = `mya_greeting_${today}_${meals.length}`;
       const cached = sessionStorage.getItem(cacheKey);
@@ -204,9 +252,13 @@ export default function Home({ onEditMeal }: HomeProps) {
 
       try {
         const msg = await MyaAI.getDailyGreeting(profile, { consumedCalories, consumedProtein });
+        // Mezitím (appka na odpověď OpenAI čeká) mohla appka dostat reakci na náladu — ta má
+        // přednost, tenhle běžný pozdrav by ji jinak přepsal, jakmile doletí později.
+        if (sessionStorage.getItem(moodGreetingCacheKey)) return;
         setGreeting(msg);
         sessionStorage.setItem(cacheKey, msg);
       } catch {
+        if (sessionStorage.getItem(moodGreetingCacheKey)) return;
         setGreeting(`Ahoj ${profile.name}! Nezapomeň dnes pít hodně vody. ✨`);
       }
     };
@@ -245,13 +297,38 @@ export default function Home({ onEditMeal }: HomeProps) {
     <div className="space-y-6 pt-6 transition-colors">
       {/* Uvítání */}
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="font-display italic text-2xl font-medium tracking-tight dark:text-slate-100">
             Krásné ráno, {profile?.name || 'Petya'}
           </h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
-            Dnes to bude skvělý den. Jak se cítíš?
-          </p>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Dnes to bude skvělý den.</p>
+          {!moodAnswered && (
+            <div className="mt-2.5">
+              <p className="text-slate-500 dark:text-slate-400 text-sm mb-1.5">Jak se cítíš?</p>
+              <div className="flex items-center gap-1.5">
+                {MOOD_OPTIONS.map((m) => (
+                  <button
+                    key={m.value}
+                    onClick={() => handleSubmitMood(m.value)}
+                    disabled={submittingMood}
+                    aria-label={m.label}
+                    className="w-9 h-9 rounded-full bg-white dark:bg-slate-900 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center justify-center text-base active:scale-90 transition-all disabled:opacity-40"
+                  >
+                    {m.emoji}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                value={moodNoteInput}
+                onChange={(e) => setMoodNoteInput(e.target.value)}
+                disabled={submittingMood}
+                placeholder="Chceš něco dodat? (nepovinné)"
+                maxLength={300}
+                className="mt-2 w-full max-w-xs bg-transparent border-b border-slate-200 dark:border-slate-700 text-sm outline-none py-1 placeholder:text-slate-400 dark:text-white dark:placeholder:text-slate-500 disabled:opacity-40"
+              />
+            </div>
+          )}
         </div>
         {streak >= 2 && (
           <div className="flex items-center gap-1 shrink-0 whitespace-nowrap bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-[11px] font-bold px-2.5 py-1.5 rounded-full">
