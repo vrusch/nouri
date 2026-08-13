@@ -13,6 +13,7 @@ export interface UserProfile {
   activityLevel: 1 | 1.2 | 1.375 | 1.55 | 1.725 | 1.9; // BMR multipliers
   goal: 'lose' | 'maintain' | 'gain';
   targetCalories: number;
+  targetWeight?: number; // cílová váha v kg — jen pro goal 'lose'/'gain', u 'maintain' se nesbírá (viz goalReached.ts)
   setupComplete: boolean;
   lastAiReport?: string; // Uložený AI report od Myi
   weighInReminderDays?: number; // Jak často připomínat vážení (1-7 dní)
@@ -27,6 +28,7 @@ export interface UserProfile {
   lastCelebratedStreakDays?: number; // nejvyšší streak milník, který appka už oslavila (viz milestones.ts)
   lastCelebratedWeightMilestoneKg?: number; // nejvyšší váhový milník (v kg pokroku od prvního záznamu), který appka už oslavila
   lastLowCalorieDismissedAt?: string; // ISO datum posledního potvrzení "citlivého" check-inu na nízký příjem (viz calorieIntakePattern.ts)
+  lastCelebratedGoalReachedWeight?: number; // targetWeight, pro kterou appka už zobrazila gratulaci (viz goalReached.ts) — ne bool, ať nový (nižší/vyšší) cíl gratulaci umožní znovu
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

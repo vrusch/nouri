@@ -66,6 +66,14 @@ export interface WeeklySummaryInput {
 
 const getWeeklySummaryFn = httpsCallable<WeeklySummaryInput, { text: string }>(functions, "getWeeklySummary");
 
+export interface GoalReachedInput {
+  targetWeight: number;
+  currentWeight: number;
+  goal: Goal;
+}
+
+const congratulateGoalReachedFn = httpsCallable<GoalReachedInput, { text: string }>(functions, "congratulateGoalReached");
+
 export interface ChatMessageInput {
   role: "user" | "assistant";
   content: string;
@@ -170,6 +178,20 @@ export const MyaAI = {
     } catch (error) {
       console.error("Mya AI Error:", error);
       return `Tenhle týden jsi v průměru měla ${input.avgCalories} kcal/den z cíle ${input.targetCalories} kcal (zapsáno ${input.daysLogged}/7 dní).`;
+    }
+  },
+
+  /**
+   * Gratulace při dosažení cílové váhy (viz detectGoalReached v goalReached.ts) — appka detekci
+   * dělá sama, tahle metoda jen zprostředkuje personalizovaný text.
+   */
+  async congratulateGoalReached(input: GoalReachedInput): Promise<string> {
+    try {
+      const response = await congratulateGoalReachedFn(input);
+      return response.data.text;
+    } catch (error) {
+      console.error("Mya AI Error:", error);
+      return `Gratuluji, dosáhla jsi cílové váhy ${input.targetWeight} kg! Co kdybychom teď přepnuly na Udržování, ať se tam udržíš?`;
     }
   },
 

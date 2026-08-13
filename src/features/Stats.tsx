@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart } from "lucide-react";
+import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart, PartyPopper } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, calibrateTarget } from "../lib/nutrition";
@@ -11,6 +11,7 @@ import { formatWorkoutsCs } from "../lib/format";
 import { buildDailyProteinRecords, detectLowProteinPattern, MACRO_PATTERN_COOLDOWN_DAYS } from "../lib/macroPattern";
 import { buildDailyCalorieRecords, detectLowCaloriePattern, LOW_CALORIE_PATTERN_COOLDOWN_DAYS } from "../lib/calorieIntakePattern";
 import { computeMonthRetrospective } from "../lib/monthRetrospective";
+import { detectGoalReached } from "../lib/goalReached";
 import { computeMeasurementTrend, MEASUREMENT_FIELDS, MEASUREMENT_LABELS_CS } from "../lib/bodyMeasurements";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { daysSince } from "../lib/weighIn";
@@ -182,6 +183,15 @@ export default function Stats() {
   const showMacroPatternCard =
     !!lowProteinPattern?.detected && !macroPatternDismissedRecently && !quietHoursActive && !lowCaloriePattern?.detected;
 
+  // Detekce dosaženého cíle (FEATURE_IDEAS.md sekce 3) — poslední známá váha je buď nejnovější
+  // zápis, nebo (bez jediného zápisu vůbec) aktuální profile.weight.
+  const latestKnownWeight = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : profile?.weight;
+  const goalReached =
+    profile && latestKnownWeight !== undefined
+      ? detectGoalReached(latestKnownWeight, profile.targetWeight, profile.goal, profile.lastCelebratedGoalReachedWeight)
+      : false;
+  const showGoalReachedCard = goalReached && !quietHoursActive;
+
   const [macroSuggestion, setMacroSuggestion] = useState<string | null>(null);
   useEffect(() => {
     if (!showMacroPatternCard || !nutrition || !lowProteinPattern || !profile) return;
@@ -230,6 +240,36 @@ export default function Stats() {
   const handleDismissLowCaloriePattern = () => {
     updateProfile({ lastLowCalorieDismissedAt: new Date().toISOString().split("T")[0] });
     setCalorieCheckInMessage(null);
+  };
+
+  const [goalReachedMessage, setGoalReachedMessage] = useState<string | null>(null);
+  useEffect(() => {
+    if (!showGoalReachedCard || !profile?.targetWeight || latestKnownWeight === undefined) return;
+
+    const targetWeight = profile.targetWeight;
+    const goal = profile.goal;
+    const currentWeight = latestKnownWeight;
+
+    let cancelled = false;
+    MyaAI.congratulateGoalReached({ targetWeight, currentWeight, goal }).then((text) => {
+      if (!cancelled) setGoalReachedMessage(text);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showGoalReachedCard, profile?.targetWeight, profile?.goal, latestKnownWeight]);
+
+  // Přepnutí na "Udržovat váhu" i prosté zavření karty obojí zapíšou lastCelebratedGoalReachedWeight
+  // (viz detectGoalReached v goalReached.ts) — appka se stejným cílem znovu nenudguje, ať uživatelka
+  // reaguje jakkoliv.
+  const handleSwitchToMaintainAfterGoalReached = () => {
+    if (!profile?.targetWeight) return;
+    updateProfile({ goal: "maintain", lastCelebratedGoalReachedWeight: profile.targetWeight });
+  };
+
+  const handleDismissGoalReached = () => {
+    if (!profile?.targetWeight) return;
+    updateProfile({ lastCelebratedGoalReachedWeight: profile.targetWeight });
   };
 
   const handleLogMeasurement = async () => {
@@ -550,6 +590,37 @@ export default function Stats() {
           </>
         )}
       </div>
+
+      {/* Detekce dosaženého cíle — gratulace + nabídka přepnutí na Udržovat váhu */}
+      {showGoalReachedCard && (
+        <div className="bg-linear-to-br from-emerald-50 to-teal-50/60 dark:from-emerald-950/20 dark:to-teal-950/10 rounded-3xl p-6 border border-emerald-100/60 dark:border-emerald-900/30 transition-colors">
+          <div className="flex items-center gap-2 mb-2">
+            <PartyPopper className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Cíl dosažen!</h3>
+          </div>
+          {goalReachedMessage ? (
+            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">{goalReachedMessage}</p>
+          ) : (
+            <div className="flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500 mb-4">
+              <Loader2 className="w-4 h-4 animate-spin" /> Mya přemýšlí...
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={handleSwitchToMaintainAfterGoalReached}
+              className="flex-1 bg-emerald-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all"
+            >
+              Přepnout na Udržovat váhu
+            </button>
+            <button
+              onClick={handleDismissGoalReached}
+              className="flex-1 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-bold py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 active:scale-[0.98] transition-all"
+            >
+              Pokračovat dál
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Míry těla */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">

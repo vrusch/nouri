@@ -964,6 +964,68 @@ interface FridgeRecipeInput {
   preferences?: string;
 }
 
+interface GoalReachedInput {
+  targetWeight: number;
+  currentWeight: number;
+  goal: Goal;
+}
+
+// Gratulace při dosažení cílové váhy (FEATURE_IDEAS.md sekce 3, "Detekce dosaženého cíle") —
+// appka detekci dělá sama (viz detectGoalReached v goalReached.ts), tahle funkce jen dodá osobní
+// gratulační text, stejná kostra jako checkLowCalorieIntake.
+export const congratulateGoalReached = onCall(
+  { secrets: [openaiApiKey], region: "us-central1" },
+  async (request) => {
+    requireAuth(request);
+    const input = request.data as GoalReachedInput | undefined;
+    if (!input || !Number.isFinite(input.targetWeight) || !Number.isFinite(input.currentWeight)) {
+      throw new HttpsError("invalid-argument", "Chybí platná data o váze.");
+    }
+
+    const fallback = `Gratuluji, dosáhla jsi cílové váhy ${input.targetWeight} kg! Co kdybychom teď přepnuly na Udržování, ať se tam udržíš?`;
+
+    const systemPrompt = `Jsi Mya, empatická AI nutriční asistentka aplikace Nouri. Uživatelka právě dosáhla své
+cílové váhy. Napiš krátkou (2-3 věty), radostnou a upřímnou gratulační zprávu, oceň její vytrvalost. Jemně navrhni,
+ať zváží přepnutí režimu na "Udržovat váhu" místo pokračování ve stejném kalorickém deficitu/přebytku — appka
+k tomu hned pod zprávou nabídne tlačítko, takže to jen zmiň, nepiš instrukce jak to udělat. Piš česky, neformálně.
+Vrať jen čistý text zprávy, žádný markdown ani uvozovky okolo.`;
+
+    const goalLabel = input.goal === "gain" ? "nabírání" : "hubnutí";
+    const userPrompt = `Uživatelka měla cíl ${goalLabel} na váhu ${input.targetWeight} kg a právě dosáhla ${input.currentWeight} kg.`;
+
+    try {
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiApiKey.value()}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          max_tokens: 120,
+        }),
+      });
+
+      if (response.status === 429) return { text: fallback };
+
+      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
+      const content = json.choices?.[0]?.message?.content?.trim();
+      if (!content) {
+        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
+        return { text: fallback };
+      }
+      return { text: content };
+    } catch (error) {
+      console.error("Mya Goal Reached Congrats Error:", error);
+      return { text: fallback };
+    }
+  }
+);
+
 export const generateRecipeFromFridge = onCall(
   { secrets: [openaiApiKey], region: "us-central1", memory: "512MiB", timeoutSeconds: 60 },
   async (request): Promise<RecipeResult | null> => {

@@ -5,7 +5,7 @@ import { auth, googleProvider } from "../lib/firebase";
 import { useAuth } from "../context/useAuth";
 import { type UserProfile } from "../context/AuthContext";
 import { LogoHorizontal } from "../components/Logo";
-import { Ruler, Weight, ChevronRight, LogIn, Mail, Lock, User as UserIcon, Zap, Calendar } from "lucide-react";
+import { Ruler, Weight, ChevronRight, LogIn, Mail, Lock, User as UserIcon, Zap, Calendar, Flag } from "lucide-react";
 
 export default function Onboarding() {
   const { user, updateProfile } = useAuth();
@@ -339,6 +339,30 @@ export default function Onboarding() {
                </button>
              ))}
           </div>
+
+          {formData.goal !== 'maintain' && (
+            <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-rose-500 transition-all">
+              <div className="flex items-center gap-4 text-slate-400 dark:text-slate-500">
+                <Flag className="w-6 h-6" />
+                <span className="font-bold">Cílová váha (kg)</span>
+              </div>
+              <input
+                type="number"
+                placeholder="volitelné"
+                value={formData.targetWeight ?? ''}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setFormData((prev) => {
+                    const next = { ...prev };
+                    if (raw === '') delete next.targetWeight;
+                    else next.targetWeight = parseInt(raw);
+                    return next;
+                  });
+                }}
+                className="w-20 text-right font-bold text-2xl bg-transparent outline-none dark:text-white placeholder:text-base placeholder:font-normal"
+              />
+            </div>
+          )}
         </div>
         <button onClick={handleNext} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
           Vše nastaveno! ✨

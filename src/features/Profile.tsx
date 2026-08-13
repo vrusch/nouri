@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -87,7 +87,7 @@ export default function Profile() {
     if (!tempValue) return setEditing(null);
     
     let val: string | number = tempValue;
-    if (field === 'weight' || field === 'height') val = Number(tempValue);
+    if (field === 'weight' || field === 'height' || field === 'targetWeight') val = Number(tempValue);
 
     const weightChanged = field === 'weight' && val !== profile?.weight;
     await updateProfile({ [field]: val });
@@ -416,6 +416,32 @@ export default function Profile() {
                   {profile?.goal === opt.id && <Check className={`w-4 h-4 ${accentText}`} />}
                 </button>
               ))}
+            </div>
+          )}
+
+          {profile?.goal !== 'maintain' && (
+            <div className="px-4 py-3.5 flex items-center justify-between group active:bg-slate-50 dark:active:bg-slate-800 transition-colors cursor-pointer"
+                 onClick={() => editing !== 'targetWeight' && startEdit('targetWeight', profile?.targetWeight)}>
+              <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+                <Flag className={`w-4 h-4 ${accentText}`} />
+                Cílová váha
+              </div>
+              {editing === 'targetWeight' ? (
+                <input
+                  type="number" autoFocus
+                  className="w-16 bg-slate-100 dark:bg-slate-800 rounded px-2 py-1 text-sm font-bold dark:text-white outline-rose-500 text-right"
+                  value={tempValue}
+                  onChange={(e) => setTempValue(e.target.value)}
+                  onBlur={() => handleSave('targetWeight')}
+                />
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-[15px] font-bold text-slate-800 dark:text-white">
+                    {profile?.targetWeight !== undefined ? `${profile.targetWeight} kg` : 'Nastavit'}
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-slate-400" />
+                </div>
+              )}
             </div>
           )}
 
