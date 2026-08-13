@@ -54,6 +54,7 @@ export default function Profile() {
   const [isExporting, setIsExporting] = useState(false);
   const [isExportingJson, setIsExportingJson] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pdfLowDataConfirm, setPdfLowDataConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -281,6 +282,16 @@ export default function Profile() {
     try {
       const meals = await db.meals.orderBy('date').toArray();
       const weightLogs = await fetchWeightLogs(user.uid);
+      // B6 v REFERENCE/DATA_COMPLETENESS_PLAN.md — appka dřív nechala stáhnout skoro prázdný PDF
+      // beze slova; "nedost dat" hlášky appka umí (viz pdfReport.ts), ale schované až uvnitř
+      // staženého souboru. Dvojklikový vzor stejný jako u handleDeleteHistory výš.
+      const hasEnoughData = meals.length > 0 || weightLogs.length > 1;
+      if (!hasEnoughData && !pdfLowDataConfirm) {
+        setPdfLowDataConfirm(true);
+        setTimeout(() => setPdfLowDataConfirm(false), 4000);
+        return;
+      }
+      setPdfLowDataConfirm(false);
       const measurements = await fetchBodyMeasurements(user.uid);
       const reportData = buildMonthlyReportData(meals, weightLogs, measurements);
       await downloadMonthlyReportPdf(profile, metrics, reportData);
@@ -1035,13 +1046,19 @@ export default function Profile() {
                 <button
                   onClick={handleExportPdf}
                   disabled={isExportingPdf}
-                  className="w-full flex items-center justify-center gap-2 py-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50"
+                  className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50 ${
+                    pdfLowDataConfirm ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-slate-50 dark:bg-slate-800/50'
+                  }`}
                 >
-                  {isExportingPdf ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <FileText className="w-4 h-4 text-slate-500" />}
-                  <span className="text-sm font-bold text-slate-700 dark:text-slate-200">PDF report pro lékaře</span>
+                  {isExportingPdf ? <Loader2 className="w-4 h-4 animate-spin text-slate-500" /> : <FileText className={`w-4 h-4 ${pdfLowDataConfirm ? 'text-amber-500' : 'text-slate-500'}`} />}
+                  <span className={`text-sm font-bold ${pdfLowDataConfirm ? 'text-amber-700 dark:text-amber-400' : 'text-slate-700 dark:text-slate-200'}`}>
+                    {pdfLowDataConfirm ? 'Klikni znovu pro stažení i tak' : 'PDF report pro lékaře'}
+                  </span>
                 </button>
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5 px-1">
-                  Shrnutí za posledních 30 dní — kalorie, makra, trend váhy a míry těla.
+                  {pdfLowDataConfirm
+                    ? 'Zatím máš málo dat, report bude z větší části prázdný.'
+                    : 'Shrnutí za posledních 30 dní — kalorie, makra, trend váhy a míry těla.'}
                 </p>
               </div>
               <div>

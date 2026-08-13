@@ -3,6 +3,7 @@ import {
   calculateAge,
   calculateNutrition,
   calibrateTarget,
+  getCalibrationProgress,
   getProgressCaption,
   getDayTrafficLight,
   computeRemainingMacros,
@@ -316,6 +317,84 @@ describe("calibrateTarget", () => {
     // avgCycleLengthDays (7) je kratší než MIN_CALIBRATION_SPAN_DAYS (14) -> pořád platí 14denní
     // minimum, appka cyklem nikdy práh nesníží pod obecné bezpečné minimum.
     expect(calibrateTarget(weighIns, daily, "maintain", 1400, 2000, 7)).toBeNull();
+  });
+});
+
+// B1 v REFERENCE/DATA_COMPLETENESS_PLAN.md: calibrateTarget vrací null jak pro "málo dat", tak
+// pro "dost dat, ale odhad sedí formulce" — appka to dřív nerozlišovala. getCalibrationProgress
+// zrcadlí stejné gate-checky ve stejném pořadí, ať appka ukáže první nesplněný práh.
+describe("getCalibrationProgress", () => {
+  const START = "2026-07-01";
+
+  it("chybí vážení: méně než 2 zápisy", () => {
+    const result = getCalibrationProgress([{ date: START, weight: 80 }], [], 2200);
+    expect(result).toEqual({ status: "not-enough-weighins", current: 1, target: 2 });
+  });
+
+  it("chybí vážení: žádný zápis", () => {
+    expect(getCalibrationProgress([], [], 2200)).toEqual({ status: "not-enough-weighins", current: 0, target: 2 });
+  });
+
+  it("krátké rozpětí mezi váženími", () => {
+    const weighIns = [
+      { date: START, weight: 80 },
+      { date: addDays(START, 10), weight: 78 },
+    ];
+    const result = getCalibrationProgress(weighIns, [], 2200);
+    expect(result).toEqual({ status: "span-too-short", current: 10, target: 14 });
+  });
+
+  it("delší cyklus zvedne požadované rozpětí nad výchozích 14 dní", () => {
+    const weighIns = [
+      { date: START, weight: 80 },
+      { date: addDays(START, 20), weight: 78 },
+    ];
+    const result = getCalibrationProgress(weighIns, [], 2200, 30);
+    expect(result).toEqual({ status: "span-too-short", current: 20, target: 30 });
+  });
+
+  it("dost dlouhé rozpětí, ale málo zapsaných dní s jídlem", () => {
+    const weighIns = [
+      { date: START, weight: 80 },
+      { date: addDays(START, 20), weight: 77 },
+    ];
+    const daily = dailyRange(START, addDays(START, 5), 1500); // jen 5 dní z 20
+    const result = getCalibrationProgress(weighIns, daily, 2200);
+    expect(result).toEqual({ status: "not-enough-logged-days", current: 5, target: 7 });
+  });
+
+  it("splněn MIN_CALIBRATION_LOGGED_DAYS, ale pokrytí vůči rozpětí je příliš řídké", () => {
+    const weighIns = [
+      { date: START, weight: 90 },
+      { date: addDays(START, 60), weight: 85 },
+    ];
+    const daily = dailyRange(START, addDays(START, 7), 1500); // 7 z 60 dní, poměr ~0.12 < 1/3
+    const result = getCalibrationProgress(weighIns, daily, 2200);
+    expect(result.status).toBe("coverage-too-sparse");
+    expect(result.current).toBe(7);
+    expect(result.target).toBe(20); // ceil(60 * 1/3)
+  });
+
+  it("dost dat, ale odhad se od formulky liší míň než práh — matches-formula, ne ticho", () => {
+    const weighIns = [
+      { date: START, weight: 75 },
+      { date: addDays(START, 14), weight: 75 },
+    ];
+    const daily = dailyRange(START, addDays(START, 14), 2199); // 199/2000 = 9.95 % < 10 % (stejný case jako calibrateTarget test výš)
+    expect(calibrateTarget(weighIns, daily, "maintain", 1400, 2000)).toBeNull();
+    const result = getCalibrationProgress(weighIns, daily, 2000);
+    expect(result.status).toBe("matches-formula");
+  });
+
+  it("dost dat a reálná odchylka — ready, přesně když calibrateTarget vrací kalibraci", () => {
+    const weighIns = [
+      { date: START, weight: 80 },
+      { date: addDays(START, 21), weight: 77.5 },
+    ];
+    const daily = dailyRange(START, addDays(START, 21), 1700);
+    expect(calibrateTarget(weighIns, daily, "lose", 1450, 2200)).not.toBeNull();
+    const result = getCalibrationProgress(weighIns, daily, 2200);
+    expect(result.status).toBe("ready");
   });
 });
 

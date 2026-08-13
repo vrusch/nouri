@@ -249,3 +249,67 @@ export function calibrateTarget(
     weightChangeKg,
   };
 }
+
+export type CalibrationProgressStatus =
+  | "not-enough-weighins"
+  | "span-too-short"
+  | "not-enough-logged-days"
+  | "coverage-too-sparse"
+  | "matches-formula"
+  | "ready";
+
+export interface CalibrationProgress {
+  status: CalibrationProgressStatus;
+  current: number;
+  target: number;
+}
+
+/**
+ * Vysvětlí, PROČ calibrateTarget vrací null (REFERENCE/DATA_COMPLETENESS_PLAN.md, B1) — appka
+ * dřív "málo dat" a "dost dat, ale odhad sedí formulce" appka nerozlišovala, Stats.tsx kartu
+ * v obou případech stejně skryla. Zrcadlí gate-checky calibrateTarget přesně ve stejném pořadí,
+ * ať appka ukáže první práh, který uživatelka ještě nesplnila, ne až ten poslední. `status:
+ * "ready"` v praxi nastane jen tehdy, když by calibrateTarget zrovna vrátil reálnou kalibraci
+ * (appka se k němu proto v UI nikdy nedostane — calibration by v tu chvíli už nebyl null).
+ */
+export function getCalibrationProgress(
+  manualWeighIns: { date: string; weight: number }[],
+  dailyCalories: { date: string; calories: number }[],
+  formulaTDEE: number,
+  avgCycleLengthDays?: number
+): CalibrationProgress {
+  if (manualWeighIns.length < 2) {
+    return { status: "not-enough-weighins", current: manualWeighIns.length, target: 2 };
+  }
+
+  const sorted = [...manualWeighIns].sort((a, b) => a.date.localeCompare(b.date));
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const daysSpan = Math.round((Date.parse(last.date) - Date.parse(first.date)) / 86400000);
+  const minSpanDays = Math.max(MIN_CALIBRATION_SPAN_DAYS, avgCycleLengthDays ?? 0);
+  if (daysSpan < minSpanDays) {
+    return { status: "span-too-short", current: daysSpan, target: minSpanDays };
+  }
+
+  const loggedInWindow = dailyCalories.filter((d) => d.date >= first.date && d.date <= last.date);
+  if (loggedInWindow.length < MIN_CALIBRATION_LOGGED_DAYS) {
+    return { status: "not-enough-logged-days", current: loggedInWindow.length, target: MIN_CALIBRATION_LOGGED_DAYS };
+  }
+  const minCoverageLoggedDays = Math.ceil(daysSpan * MIN_CALIBRATION_COVERAGE_RATIO);
+  if (loggedInWindow.length / daysSpan < MIN_CALIBRATION_COVERAGE_RATIO) {
+    return { status: "coverage-too-sparse", current: loggedInWindow.length, target: minCoverageLoggedDays };
+  }
+
+  const avgLoggedCalories = Math.round(
+    loggedInWindow.reduce((sum, d) => sum + d.calories, 0) / loggedInWindow.length
+  );
+  const weightChangeKg = Math.round((last.weight - first.weight) * 10) / 10;
+  const actualDailyBalance = (weightChangeKg * KCAL_PER_KG) / daysSpan;
+  const estimatedTDEE = Math.round(avgLoggedCalories - actualDailyBalance);
+  const deviation = Math.abs(estimatedTDEE - formulaTDEE) / formulaTDEE;
+
+  if (deviation < CALIBRATION_DEVIATION_THRESHOLD) {
+    return { status: "matches-formula", current: loggedInWindow.length, target: loggedInWindow.length };
+  }
+  return { status: "ready", current: loggedInWindow.length, target: loggedInWindow.length };
+}

@@ -193,8 +193,11 @@ test("kalibrace cíle: našeje historii, ověří návrh a jeho zápis", async (
       await expect(applyButton).toBeVisible();
       await applyButton.click();
 
-      // Karta zmizí, protože po zápisu se nový odhad shoduje s aktuálním cílem.
-      await expect(page.getByText("Kalibrace cíle podle dat")).not.toBeVisible();
+      // Actionable karta (tlačítko "Upravit cíl na...") zmizí, protože po zápisu se nový odhad
+      // shoduje s aktuálním cílem — appka ale místo ticha (B1 v REFERENCE/DATA_COMPLETENESS_PLAN.md)
+      // teď ukáže potvrzující hlášku, ne nechá "Kalibrace cíle podle dat" zmizet úplně beze slova.
+      await expect(applyButton).not.toBeVisible();
+      await expect(page.getByText("zatím se v podstatě shodují")).toBeVisible();
       await expect(page.getByText(`Cíl: ${expectedCalibration!.suggestedTargetCalories} kcal/den`)).toBeVisible();
     });
 

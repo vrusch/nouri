@@ -1,15 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart, PartyPopper, Droplet, X } from "lucide-react";
+import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart, PartyPopper, Droplet, Flag, X } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
-import { calculateNutrition, calibrateTarget, CALIBRATION_DISMISS_COOLDOWN_DAYS } from "../lib/nutrition";
+import {
+  calculateNutrition,
+  calibrateTarget,
+  getCalibrationProgress,
+  CALIBRATION_DISMISS_COOLDOWN_DAYS,
+  type CalibrationProgressStatus,
+} from "../lib/nutrition";
 import { summarizeWeek, computeWeekdayWeekendProteinBreakdown } from "../lib/weekSummary";
 import { computeLoggingStreak } from "../lib/streak";
 import { generateWeeklyShareCardBlob } from "../lib/shareCard";
 import { formatWorkoutsCs, formatDaysCs } from "../lib/format";
-import { buildDailyProteinRecords, detectLowProteinPattern, MACRO_PATTERN_COOLDOWN_DAYS } from "../lib/macroPattern";
-import { buildDailyCalorieRecords, detectLowCaloriePattern, LOW_CALORIE_PATTERN_COOLDOWN_DAYS } from "../lib/calorieIntakePattern";
+import {
+  buildDailyProteinRecords,
+  detectLowProteinPattern,
+  MACRO_PATTERN_COOLDOWN_DAYS,
+  MIN_RELIABLE_DAYS as MIN_RELIABLE_PROTEIN_DAYS,
+} from "../lib/macroPattern";
+import {
+  buildDailyCalorieRecords,
+  detectLowCaloriePattern,
+  LOW_CALORIE_PATTERN_COOLDOWN_DAYS,
+  MIN_RELIABLE_DAYS as MIN_RELIABLE_CALORIE_DAYS,
+} from "../lib/calorieIntakePattern";
 import { computeMonthRetrospective } from "../lib/monthRetrospective";
 import { detectGoalReached } from "../lib/goalReached";
 import { isVacationDay } from "../lib/vacationMode";
@@ -35,8 +51,28 @@ import {
   type CycleLogEntry,
 } from "../lib/cloudSync";
 import ProgressPhotoLightbox from "../components/ProgressPhotoLightbox";
+import EmptyState from "../components/EmptyState";
 
 const DAY_LABELS = ["Ne", "Po", "Út", "St", "Čt", "Pá", "So"];
+
+// B1 v REFERENCE/DATA_COMPLETENESS_PLAN.md — calibrateTarget vrací null jak pro "málo dat", tak
+// pro "dost dat, ale odhad sedí formulce"; appka to dřív nerozlišovala a kartu v obou případech
+// stejně skryla. Text pro "matches-formula"/"ready" appka řeší přímo v render těle (jiný vzhled
+// karty), ne tady.
+function calibrationProgressText(status: CalibrationProgressStatus): string {
+  switch (status) {
+    case "not-enough-weighins":
+      return "Appka potřebuje aspoň dva zápisy váhy, ať má co porovnávat.";
+    case "span-too-short":
+      return "Appka potřebuje delší odstup mezi prvním a posledním zápisem váhy, ať cyklické výkyvy stihnou odeznít.";
+    case "not-enough-logged-days":
+      return "Appka potřebuje víc zapsaných dní s jídlem v tomhle období.";
+    case "coverage-too-sparse":
+      return "Zapsaných dní je zatím málo vůči délce sledovaného období — přidej pár dalších zápisů.";
+    default:
+      return "";
+  }
+}
 
 // offsetDays posouvá celé okno dál do minulosti — lastNDates(7, 7) je týden bezprostředně
 // před lastNDates(7), použito pro porovnání "tento týden vs. minulý týden".
@@ -207,7 +243,7 @@ export default function Stats() {
   const weightPoints = chartWeights.map((w, i) => {
     const x = chartWeights.length > 1 ? (i / (chartWeights.length - 1)) * 100 : 50;
     const y = 28 - ((w.weight - minWeight) / weightRange) * 26;
-    return { x, y, date: w.date, weight: w.weight };
+    return { x, y, date: w.date, weight: w.weight, source: w.source };
   });
   const latestWeight = chartWeights[chartWeights.length - 1];
   const weightDelta = hasWeightTrend
@@ -236,6 +272,17 @@ export default function Stats() {
   const calibrationDismissedRecently = profile?.lastCalibrationDismissedAt
     ? daysSince(profile.lastCalibrationDismissedAt) < CALIBRATION_DISMISS_COOLDOWN_DAYS
     : false;
+  // Jen když appka nemá reálnou kalibraci k nabídnutí — appka appce vysvětlí PROČ mlčí, ne
+  // aby duplikovala samotnou kartu.
+  const calibrationProgress =
+    profile && nutrition && !calibration
+      ? getCalibrationProgress(
+          manualWeighIns,
+          dailyCalories,
+          nutrition.tdee,
+          profile.cycleTrackingEnabled ? profile.avgCycleLength : undefined
+        )
+      : null;
 
   // Dlouhodobý vzorec nízkých bílkovin — jen z posledních 14 dní, ne z celé historie. Dnešek
   // appka vyloučí (excludeDates) — dokud den neskončil, nejde ho spravedlivě posoudit vůči
@@ -281,6 +328,22 @@ export default function Stats() {
     !vacationActive &&
     !lowCaloriePattern?.detected;
 
+  // B3 v REFERENCE/DATA_COMPLETENESS_PLAN.md — appka dřív o sledování vzorců příjmu mlčela úplně,
+  // dokud vzorec nebyl detekovaný. Ukáže se jen v rozjezdu (aspoň 1 spolehlivý den, ale ještě ne
+  // dost) a jen když zrovna neběží actionable karta výš, ať appka neduplikuje dvě zprávy najednou.
+  const intakePatternProgress =
+    !showLowCaloriePatternCard && !showMacroPatternCard && !quietHoursActive && !vacationActive
+      ? lowCaloriePattern &&
+        lowCaloriePattern.reliableDaysConsidered > 0 &&
+        lowCaloriePattern.reliableDaysConsidered < MIN_RELIABLE_CALORIE_DAYS
+        ? { current: lowCaloriePattern.reliableDaysConsidered, target: MIN_RELIABLE_CALORIE_DAYS }
+        : lowProteinPattern &&
+            lowProteinPattern.reliableDaysConsidered > 0 &&
+            lowProteinPattern.reliableDaysConsidered < MIN_RELIABLE_PROTEIN_DAYS
+          ? { current: lowProteinPattern.reliableDaysConsidered, target: MIN_RELIABLE_PROTEIN_DAYS }
+          : null
+      : null;
+
   // Detekce dosaženého cíle (FEATURE_IDEAS.md sekce 3) — poslední známá váha je buď nejnovější
   // zápis, nebo (bez jediného zápisu vůbec) aktuální profile.weight.
   const latestKnownWeight = weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : profile?.weight;
@@ -289,6 +352,9 @@ export default function Stats() {
       ? detectGoalReached(latestKnownWeight, profile.targetWeight, profile.goal, profile.lastCelebratedGoalReachedWeight)
       : false;
   const showGoalReachedCard = goalReached && !quietHoursActive;
+  // B4 v REFERENCE/DATA_COMPLETENESS_PLAN.md — bez targetWeight appka nikdy nemůže detekovat
+  // dosažený cíl a dřív o tom mlčela úplně, bez odkazu zpátky na to, co appce chybí.
+  const showTargetWeightHint = !!profile && profile.goal !== "maintain" && profile.targetWeight === undefined && !quietHoursActive;
 
   const [macroSuggestion, setMacroSuggestion] = useState<string | null>(null);
   useEffect(() => {
@@ -540,6 +606,11 @@ export default function Stats() {
           {generatingWeeklySummary && <Loader2 className="w-4 h-4 animate-spin" />}
           {weeklySummaryText ? "Shrnout znovu" : "Shrnout tento týden"}
         </button>
+        {daysLogged === 0 && (
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2 text-center">
+            Nejdřív zapiš aspoň jeden den, ať má appka co shrnout.
+          </p>
+        )}
       </div>
 
       {/* Graf kalorií */}
@@ -678,9 +749,28 @@ export default function Stats() {
                 strokeWidth="2"
                 vectorEffect="non-scaling-stroke"
               />
-              {weightPoints.map((p) => (
-                <circle key={p.date} cx={p.x} cy={p.y} r="1.5" className="fill-rose-500 dark:fill-rose-400" />
-              ))}
+              {/* C2 v REFERENCE/DATA_COMPLETENESS_PLAN.md — bod založený seedWeightLogIfEmpty
+                  appka dřív vykreslila identicky se skutečným zápisem, i když mohl vzejít
+                  z needitované výchozí váhy z Onboardingu. */}
+              {weightPoints.map((p) =>
+                p.source === "seed" ? (
+                  <circle
+                    key={p.date}
+                    cx={p.x}
+                    cy={p.y}
+                    r="1.5"
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                    className="fill-white dark:fill-slate-900 stroke-rose-300 dark:stroke-rose-700"
+                  >
+                    <title>Výchozí hodnota z profilu, ne skutečné vážení</title>
+                  </circle>
+                ) : (
+                  <circle key={p.date} cx={p.x} cy={p.y} r="1.5" className="fill-rose-500 dark:fill-rose-400">
+                    <title>{p.weight} kg · {p.date}</title>
+                  </circle>
+                )
+              )}
             </svg>
             {monthRetrospective && (
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-3 pt-3 border-t border-slate-50 dark:border-slate-800">
@@ -730,6 +820,14 @@ export default function Stats() {
                   Cyklus máš označený jako nepravidelný — odhad fáze je proto míň jistý.
                 </p>
               )}
+              {/* B5 v REFERENCE/DATA_COMPLETENESS_PLAN.md — appka dřív mlčela o tom, že bez dost
+                  historie (aspoň dva zaznamenané cykly) počítá s obecným průměrem, ne s vlastními
+                  daty uživatelky. */}
+              {profile.avgCycleLength === undefined && (
+                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1.5">
+                  Zatím počítáme s obecným průměrem {DEFAULT_CYCLE_LENGTH_DAYS} dní — jakmile appka uvidí víc záznamů, odhad se upřesní.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-sm text-slate-400 dark:text-slate-500 mt-3">
@@ -776,7 +874,7 @@ export default function Stats() {
       )}
 
       {/* Detekce dosaženého cíle — gratulace + nabídka přepnutí na Udržovat váhu */}
-      {showGoalReachedCard && (
+      {showGoalReachedCard ? (
         <div className="bg-linear-to-br from-emerald-50 to-teal-50/60 dark:from-emerald-950/20 dark:to-teal-950/10 rounded-3xl p-6 border border-emerald-100/60 dark:border-emerald-900/30 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <PartyPopper className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
@@ -804,7 +902,17 @@ export default function Stats() {
             </button>
           </div>
         </div>
-      )}
+      ) : showTargetWeightHint ? (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+          <div className="flex items-center gap-2 mb-2">
+            <Flag className="w-4 h-4 text-slate-400" />
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Cílová váha není nastavená</h3>
+          </div>
+          <p className="text-sm text-slate-400 dark:text-slate-500">
+            Nastav cílovou váhu v Profilu, ať ti appka umí říct, až tam budeš.
+          </p>
+        </div>
+      ) : null}
 
       {/* Míry těla */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
@@ -925,7 +1033,7 @@ export default function Stats() {
       </div>
 
       {/* Kalibrace cíle podle skutečných dat */}
-      {showCalibrationCard && calibration && (
+      {showCalibrationCard && calibration ? (
         <div className="bg-linear-to-br from-rose-50 to-amber-50/60 dark:from-rose-950/20 dark:to-amber-950/10 rounded-3xl p-6 border border-rose-100/60 dark:border-rose-900/30 transition-colors">
           <div className="flex items-center gap-2 mb-2">
             <Gauge className="w-4 h-4 text-rose-500 dark:text-rose-400" />
@@ -955,7 +1063,24 @@ export default function Stats() {
             Zatím ne
           </button>
         </div>
-      )}
+      ) : calibrationProgress?.status === "matches-formula" ? (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+          <div className="flex items-center gap-2 mb-2">
+            <Gauge className="w-4 h-4 text-slate-400 dark:text-slate-500" />
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Kalibrace cíle podle dat</h3>
+          </div>
+          <p className="text-sm text-slate-400 dark:text-slate-500">
+            Appka porovnala tvá zapsaná data s formulkovým odhadem — zatím se v podstatě shodují, není co upravovat.
+          </p>
+        </div>
+      ) : calibrationProgress && calibrationProgress.status !== "ready" ? (
+        <EmptyState
+          icon={<Gauge className="w-6 h-6" />}
+          title="Kalibrace cíle podle dat"
+          text={calibrationProgressText(calibrationProgress.status)}
+          progress={{ current: calibrationProgress.current, target: calibrationProgress.target }}
+        />
+      ) : null}
 
       {/* Citlivé sledování nízkého příjmu — pečovatelský check-in, ne "hlídání" */}
       {showLowCaloriePatternCard && (
@@ -1001,6 +1126,18 @@ export default function Stats() {
             Beru na vědomí
           </button>
         </div>
+      )}
+
+      {/* B3 v REFERENCE/DATA_COMPLETENESS_PLAN.md — appka dřív o sledování vzorců příjmu mlčela
+          úplně, dokud nebyl vzorec detekovaný (karty výš). Ukáže postup, jen když právě neběží
+          jedna z nich. */}
+      {intakePatternProgress && (
+        <EmptyState
+          icon={<Heart className="w-6 h-6" />}
+          title="Appka sleduje tvůj příjem"
+          text="Zatím nemá dost spolehlivě zapsaných dní na to, aby poznala dlouhodobý vzorec — zapisuj dál."
+          progress={intakePatternProgress}
+        />
       )}
     </div>
     {/* Mimo space-y-6 kontejner výš — Tailwindí space-y dává margin i "poslednímu" prvku,

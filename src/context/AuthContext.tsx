@@ -2,7 +2,15 @@ import { useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
+import { db as localDb } from "../db/db";
 import { AuthContext } from "./AuthContextBase";
+
+// Lokální Dexie cache (meals/workouts, viz src/db/db.ts) není vázaná na uid — appka ji jinak
+// při přepnutí účtu ve stejném prohlížeči vůbec nemazala, takže nový uživatel dočasně viděl
+// jídla/tréninky předchozího účtu jako vlastní, se stejnou jistotou jako reálná data (objeveno
+// při živém ověření REFERENCE/DATA_COMPLETENESS_PLAN.md). Appka má jen jednoho reálného
+// uživatele, takže dopad je v praxi nízký, ale je to reálná díra v datové izolaci.
+const LAST_SYNCED_UID_KEY = "nouri_last_synced_uid";
 
 export interface UserProfile {
   name: string;
@@ -44,13 +52,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        // Musí doběhnout PŘED setUser níž — jakmile appka nastaví `user`, App.tsx efekt na
+        // něm závislý může okamžitě spustit subscribeMeals/subscribeWorkouts pro nový uid a
+        // začít do Dexie zapisovat čerstvá data; kdyby clear běžel až po setUser, mohl by je
+        // smazat těsně po zápisu (race).
+        const lastSyncedUid = localStorage.getItem(LAST_SYNCED_UID_KEY);
+        if (lastSyncedUid && lastSyncedUid !== currentUser.uid) {
+          await Promise.all([localDb.meals.clear(), localDb.workouts.clear()]);
+        }
+        localStorage.setItem(LAST_SYNCED_UID_KEY, currentUser.uid);
+      }
+
       setUser(currentUser);
-      
+
       if (currentUser) {
         // Načíst profil z Firestore
         const docRef = doc(db, "users", currentUser.uid);
         const docSnap = await getDoc(docRef);
-        
+
         if (docSnap.exists()) {
           setProfile(docSnap.data() as UserProfile);
         } else {

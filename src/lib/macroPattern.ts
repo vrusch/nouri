@@ -2,7 +2,7 @@
 // "cooldown" logika jako lastProfileCheckAt (viz profileCheck.ts), jen jiné pole v profilu.
 export const MACRO_PATTERN_COOLDOWN_DAYS = 14;
 
-const MIN_RELIABLE_DAYS = 7;
+export const MIN_RELIABLE_DAYS = 7;
 const LOW_RATIO = 0.7; // pod 70 % cíle se den počítá jako "nízký"
 const LOW_DAY_FRACTION = 0.7; // aspoň 70 % spolehlivých dní musí být nízkých
 

@@ -2,7 +2,7 @@
 // v profilu — appka po potvrzení mlčí, než stejný vzorek nízkého příjmu nabídne znovu.
 export const LOW_CALORIE_PATTERN_COOLDOWN_DAYS = 14;
 
-const MIN_RELIABLE_DAYS = 7;
+export const MIN_RELIABLE_DAYS = 7;
 const LOW_RATIO = 0.7; // pod 70 % cíle se den počítá jako "nízký" — stejný práh jako u bílkovin
 const LOW_DAY_FRACTION = 0.7; // aspoň 70 % spolehlivých dní musí být nízkých
 

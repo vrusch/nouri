@@ -4,29 +4,35 @@ import { FirebaseError } from "firebase/app";
 import { auth, googleProvider } from "../lib/firebase";
 import { useAuth } from "../context/useAuth";
 import { type UserProfile } from "../context/AuthContext";
+import { calculateAge } from "../lib/nutrition";
 import { LogoHorizontal } from "../components/Logo";
 import { Ruler, Weight, ChevronRight, LogIn, Mail, Lock, User as UserIcon, Zap, Calendar, Flag } from "lucide-react";
+
+// Meze pro krok 2 (REFERENCE/DATA_COMPLETENESS_PLAN.md, A1) — appka dřív tahle pole
+// předvyplňovala věrohodně vyhlížejícími defaulty (165 cm/65 kg/1995), které šlo proklikat
+// beze změny a appka je od té chvíle brala jako reálná data. Pole teď startují prázdná a
+// appka nepustí dál, dokud nejsou v rozumném rozsahu — kryje to i překlepy typu "16 cm".
+const MIN_HEIGHT_CM = 100;
+const MAX_HEIGHT_CM = 250;
+const MIN_WEIGHT_KG = 30;
+const MAX_WEIGHT_KG = 300;
+const MIN_AGE_YEARS = 10;
+const MAX_AGE_YEARS = 100;
 
 export default function Onboarding() {
   const { user, updateProfile } = useAuth();
   const [step, setStep] = useState(0);
-  
+
   // Auth stavy
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isRegistering, setIsRegistering] = useState(false);
   const [authError, setAuthError] = useState("");
 
-  // Dočasný stav pro formulář profilu
+  // Dočasný stav pro formulář profilu — žádné tělesné/volbové pole nemá výchozí hodnotu
+  // (viz A1 výš); appka je uloží, až je uživatel skutečně zadá.
   const [formData, setFormData] = useState<Partial<UserProfile>>({
     name: "",
-    gender: 'female',
-    height: 165,
-    weight: 65,
-    birthDate: "1995-01-01",
-    activityLevel: 1.2,
-    goal: 'lose',
-    targetCalories: 1800,
     setupComplete: false
   });
 
@@ -192,7 +198,7 @@ export default function Onboarding() {
              ))}
           </div>
         </div>
-        <button onClick={handleNext} disabled={!formData.name && !user.displayName} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.97] transition-all">
+        <button onClick={handleNext} disabled={(!formData.name && !user.displayName) || !formData.gender} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.97] transition-all">
           Pokračovat <ChevronRight className="w-5 h-5" />
         </button>
       </div>
@@ -201,6 +207,19 @@ export default function Onboarding() {
 
   // 3. DATUM, VÝŠKA A VÁHA
   if (step === 2) {
+    const age = formData.birthDate ? calculateAge(formData.birthDate) : null;
+    const step2Valid =
+      !!formData.birthDate &&
+      age !== null &&
+      age >= MIN_AGE_YEARS &&
+      age <= MAX_AGE_YEARS &&
+      !!formData.height &&
+      formData.height >= MIN_HEIGHT_CM &&
+      formData.height <= MAX_HEIGHT_CM &&
+      !!formData.weight &&
+      formData.weight >= MIN_WEIGHT_KG &&
+      formData.weight <= MAX_WEIGHT_KG;
+
     return (
       <div className={`min-h-dvh ${genderBg} dark:bg-slate-950 p-8 flex flex-col justify-between transition-colors text-slate-900 dark:text-slate-100`}>
         <div className="space-y-12 pt-12">
@@ -221,8 +240,10 @@ export default function Onboarding() {
               </div>
               <input
                 type="date"
-                value={formData.birthDate}
-                onChange={(e) => setFormData({ ...formData, birthDate: e.target.value })}
+                placeholder="Datum narození"
+                value={formData.birthDate ?? ""}
+                max={new Date().toISOString().split("T")[0]}
+                onChange={(e) => setFormData({ ...formData, birthDate: e.target.value || undefined })}
                 className="text-right font-bold text-lg bg-transparent outline-none dark:text-white"
               />
             </div>
@@ -234,12 +255,16 @@ export default function Onboarding() {
               </div>
               <input
                 type="number"
-                value={formData.height}
-                onChange={(e) => setFormData({ ...formData, height: parseInt(e.target.value) })}
-                className="w-20 text-right font-bold text-2xl bg-transparent outline-none dark:text-white"
+                placeholder="cm"
+                value={formData.height ?? ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setFormData({ ...formData, height: raw === "" ? undefined : parseInt(raw) });
+                }}
+                className="w-20 text-right font-bold text-2xl bg-transparent outline-none dark:text-white placeholder:text-base placeholder:font-normal"
               />
             </div>
-            
+
             <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl shadow-sm flex items-center justify-between border border-transparent focus-within:border-rose-500 transition-all">
               <div className="flex items-center gap-4 text-slate-400 dark:text-slate-500">
                 <Weight className="w-6 h-6" />
@@ -247,14 +272,18 @@ export default function Onboarding() {
               </div>
               <input
                 type="number"
-                value={formData.weight}
-                onChange={(e) => setFormData({ ...formData, weight: parseInt(e.target.value) })}
-                className="w-20 text-right font-bold text-2xl bg-transparent outline-none dark:text-white"
+                placeholder="kg"
+                value={formData.weight ?? ""}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setFormData({ ...formData, weight: raw === "" ? undefined : parseInt(raw) });
+                }}
+                className="w-20 text-right font-bold text-2xl bg-transparent outline-none dark:text-white placeholder:text-base placeholder:font-normal"
               />
             </div>
           </div>
         </div>
-        <button onClick={handleNext} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
+        <button onClick={handleNext} disabled={!step2Valid} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.97] transition-all">
           Pokračovat <ChevronRight className="w-5 h-5" />
         </button>
       </div>
@@ -301,7 +330,7 @@ export default function Onboarding() {
              ))}
           </div>
         </div>
-        <button onClick={handleNext} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
+        <button onClick={handleNext} disabled={!formData.activityLevel} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.97] transition-all">
           Už skoro hotovo <ChevronRight className="w-5 h-5" />
         </button>
       </div>
@@ -364,7 +393,7 @@ export default function Onboarding() {
             </div>
           )}
         </div>
-        <button onClick={handleNext} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 active:scale-[0.97] transition-all">
+        <button onClick={handleNext} disabled={!formData.goal} className="bg-rose-600 text-white py-5 rounded-3xl font-bold shadow-lg shadow-rose-500/30 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.97] transition-all">
           Vše nastaveno! ✨
         </button>
       </div>

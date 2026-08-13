@@ -178,7 +178,16 @@ Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem 
         ? ` Dnešní nálada/energie: ${mood}/5 (1 = mizerně, 5 = skvěle).${moodNote ? ` Poznámka od uživatele: "${moodNote}"` : ""}`
         : "";
 
-    const userPrompt = `Uživatel: ${safeName}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g). Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.${moodContext}`;
+    // C1 v REFERENCE/DATA_COMPLETENESS_PLAN.md — appka dřív posílala doslovnou nulu i v případě,
+    // že uživatel ještě jen nic nezapsal (ne že by reálně nic nesnědl), takže Mya mohla reagovat
+    // na fiktivní hladovění. Stejný princip jako getProgressCaption v nutrition.ts: rozlišit
+    // "nic nezapsáno" od "postupuje s nízkým číslem" jen podle toho, jestli je snězeno přesně 0.
+    const intakeSummary =
+      consumedCalories === 0
+        ? "Zatím dnes nic nezapsal(a) do appky (nejde poznat, jestli ještě nejedl(a), nebo to jen ještě nezapsal(a))."
+        : `Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.`;
+
+    const userPrompt = `Uživatel: ${safeName}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g). ${intakeSummary}${moodContext}`;
 
     try {
       const response = await fetch(OPENAI_API_URL, {
