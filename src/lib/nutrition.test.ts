@@ -106,6 +106,70 @@ describe("calculateNutrition", () => {
     expect(proteinKcal + fatKcal + carbsKcal).toBeGreaterThanOrEqual(1990);
     expect(proteinKcal + fatKcal + carbsKcal).toBeLessThanOrEqual(2010);
   });
+
+  // Vlastní makra (FEATURE_IDEAS.md sekce 8) — ruční přepis místo formulky, např. od
+  // výživového poradce/lékaře. Sacharidy appka pořád dopočítá jako zbytek do cíle.
+  describe("vlastní makra (customProteinGrams/customFatGrams)", () => {
+    it("customProteinGrams přepíše formulkové bílkoviny, tuky a sacharidy beze změny principu", () => {
+      const auto = calculateNutrition({ ...base, goal: "maintain", calibratedTDEE: 2000 });
+      const result = calculateNutrition({ ...base, goal: "maintain", calibratedTDEE: 2000, customProteinGrams: 150 });
+      expect(result.macros.protein).toBe(150);
+      expect(result.macros.fat).toBe(auto.macros.fat); // tuky beze změny, appka je dál počítá sama
+      // sacharidy se přepočtou jako nový zbytek (víc bílkovin -> míň sacharidů)
+      expect(result.macros.carbs).toBeLessThan(auto.macros.carbs);
+    });
+
+    it("customFatGrams přepíše formulkové tuky, bílkoviny zůstanou automatické", () => {
+      const auto = calculateNutrition({ ...base, goal: "maintain", calibratedTDEE: 2000 });
+      const result = calculateNutrition({ ...base, goal: "maintain", calibratedTDEE: 2000, customFatGrams: 40 });
+      expect(result.macros.fat).toBe(40);
+      expect(result.macros.protein).toBe(auto.macros.protein);
+      expect(result.macros.carbs).toBeGreaterThan(auto.macros.carbs); // míň tuků -> víc sacharidů
+    });
+
+    it("oba override najednou — sacharidy dopočítané jako zbytek nad oběma", () => {
+      const result = calculateNutrition({
+        ...base,
+        goal: "maintain",
+        calibratedTDEE: 2000,
+        customProteinGrams: 150,
+        customFatGrams: 40,
+      });
+      expect(result.macros.protein).toBe(150);
+      expect(result.macros.fat).toBe(40);
+      const carbsKcal = 2000 - 150 * 4 - 40 * 9;
+      expect(result.macros.carbs).toBe(Math.round(carbsKcal / 4));
+    });
+
+    it("BMR/TDEE/targetCalories zůstávají beze změny bez ohledu na vlastní makra", () => {
+      const auto = calculateNutrition({ ...base, goal: "lose" });
+      const custom = calculateNutrition({ ...base, goal: "lose", customProteinGrams: 200, customFatGrams: 90 });
+      expect(custom.bmr).toBe(auto.bmr);
+      expect(custom.tdee).toBe(auto.tdee);
+      expect(custom.targetCalories).toBe(auto.targetCalories);
+    });
+
+    it("respektuje vlastní makra i s kalibrovaným/luteálně navýšeným cílem (sacharidy se přizpůsobí)", () => {
+      const withoutBonus = calculateNutrition({
+        ...base,
+        goal: "maintain",
+        calibratedTDEE: 2000,
+        customProteinGrams: 150,
+        customFatGrams: 40,
+      });
+      const withBonus = calculateNutrition({
+        ...base,
+        goal: "maintain",
+        calibratedTDEE: 2075, // +75 kcal luteální bonus, stejný vzor jako Home.tsx
+        customProteinGrams: 150,
+        customFatGrams: 40,
+      });
+      expect(withBonus.macros.protein).toBe(150);
+      expect(withBonus.macros.fat).toBe(40);
+      // Bonus jde celý do sacharidů, přesně jak popisuje CYCLE_TRACKING_PROPOSAL.md.
+      expect(withBonus.macros.carbs).toBeGreaterThan(withoutBonus.macros.carbs);
+    });
+  });
 });
 
 describe("calibrateTarget", () => {

@@ -99,7 +99,9 @@ export const MyaAI = {
       birthDate: profile.birthDate,
       activityLevel: profile.activityLevel,
       goal: profile.goal,
-      calibratedTDEE: profile.calibratedTDEE
+      calibratedTDEE: profile.calibratedTDEE,
+      customProteinGrams: profile.customProteinGrams,
+      customFatGrams: profile.customFatGrams,
     });
 
     try {

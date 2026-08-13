@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, Droplet, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, Droplet, Beef, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -40,6 +40,11 @@ function renderBoldSegments(text: string) {
     </span>
   ));
 }
+
+// Horní mez jen proti překlepu (appka nehodnotí, co je zdravé — to je na výživovém
+// poradci/lékaři, kteří vlastní makra typicky předepisují), ne medicínský strop.
+const MAX_CUSTOM_PROTEIN_G = 500;
+const MAX_CUSTOM_FAT_G = 500;
 
 export default function Profile() {
   const { theme, setTheme } = useTheme();
@@ -132,6 +137,41 @@ export default function Profile() {
     { id: 1.55, label: "Střední", desc: "Aktivní pohyb 3-5x týdně" },
     { id: 1.725, label: "Vysoká", desc: "Denní intenzivní trénink" },
   ];
+
+  // Vlastní makra (FEATURE_IDEAS.md sekce 8) — appka respektuje ručně zadané bílkoviny/tuky
+  // (např. od výživového poradce/lékaře) místo formulky v calculateNutrition; sacharidy appka
+  // pořád dopočítá jako zbytek do (případně kalibrovaného) cíle, ať appka nemá dva zdroje
+  // pravdy pro kalorie. Prázdné pole = appka se vrátí k automatickému výpočtu daného makra.
+  const [customProteinInput, setCustomProteinInput] = useState("");
+  const [customFatInput, setCustomFatInput] = useState("");
+  const hasCustomMacros = profile?.customProteinGrams !== undefined || profile?.customFatGrams !== undefined;
+
+  const handleToggleCustomMacros = () => {
+    if (editing === 'customMacros') {
+      setEditing(null);
+      return;
+    }
+    setCustomProteinInput(profile?.customProteinGrams !== undefined ? String(profile.customProteinGrams) : '');
+    setCustomFatInput(profile?.customFatGrams !== undefined ? String(profile.customFatGrams) : '');
+    setEditing('customMacros');
+  };
+
+  const handleSaveCustomMacros = async () => {
+    const proteinRaw = customProteinInput.trim();
+    const fatRaw = customFatInput.trim();
+    const protein = proteinRaw === '' ? undefined : Number(proteinRaw);
+    const fat = fatRaw === '' ? undefined : Number(fatRaw);
+    if (protein !== undefined && (!Number.isFinite(protein) || protein < 0 || protein > MAX_CUSTOM_PROTEIN_G)) return;
+    if (fat !== undefined && (!Number.isFinite(fat) || fat < 0 || fat > MAX_CUSTOM_FAT_G)) return;
+
+    await updateProfile({ customProteinGrams: protein, customFatGrams: fat });
+    setEditing(null);
+  };
+
+  const handleResetCustomMacros = async () => {
+    await updateProfile({ customProteinGrams: undefined, customFatGrams: undefined });
+    setEditing(null);
+  };
 
   const handleSave = async (field: keyof UserProfile | 'name') => {
     if (!tempValue && field === 'name') return setEditing(null);
@@ -371,7 +411,9 @@ export default function Profile() {
     birthDate: profile.birthDate,
     activityLevel: profile.activityLevel,
     goal: profile.goal,
-    calibratedTDEE: profile.calibratedTDEE
+    calibratedTDEE: profile.calibratedTDEE,
+    customProteinGrams: profile.customProteinGrams,
+    customFatGrams: profile.customFatGrams,
   }) : null;
 
   const accentBg = profile?.gender === 'female' ? 'bg-rose-50 dark:bg-rose-900/10' : 'bg-sky-50 dark:bg-sky-900/10';
@@ -576,6 +618,72 @@ export default function Profile() {
                   <span className="text-[10px] text-slate-500 dark:text-slate-400">{opt.desc}</span>
                 </button>
               ))}
+            </div>
+          )}
+
+          <div
+            className={`px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${editing === 'customMacros' ? accentBg : 'active:bg-slate-50 dark:active:bg-slate-800'}`}
+            onClick={handleToggleCustomMacros}
+          >
+            <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+              <Beef className="w-4 h-4 text-red-500" />
+              Vlastní makra
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-bold text-slate-800 dark:text-white">
+                {hasCustomMacros ? 'Vlastní' : 'Automaticky'}
+              </span>
+              <ChevronDown className={`w-4 h-4 ${editing === 'customMacros' ? accentText : 'text-slate-400'}`} />
+            </div>
+          </div>
+
+          {editing === 'customMacros' && (
+            <div className={`px-4 pb-4 space-y-3 ${accentBg}`}>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                Máš bílkoviny nebo tuky předepsané od výživového poradce/lékaře? Appka je bude
+                respektovat místo vlastního výpočtu — sacharidy dál dopočítá jako zbytek do
+                cílových kalorií. Nech pole prázdné, ať appka počítá dané makro sama.
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Bílkoviny (g)</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="automaticky"
+                    value={customProteinInput}
+                    onChange={(e) => setCustomProteinInput(e.target.value)}
+                    className="w-full mt-1 bg-white dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tuky (g)</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="automaticky"
+                    value={customFatInput}
+                    onChange={(e) => setCustomFatInput(e.target.value)}
+                    className="w-full mt-1 bg-white dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveCustomMacros}
+                  className={`flex-1 ${profile?.gender === 'female' ? 'bg-rose-600' : 'bg-sky-600'} text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all`}
+                >
+                  Uložit
+                </button>
+                {hasCustomMacros && (
+                  <button
+                    onClick={handleResetCustomMacros}
+                    className="flex-1 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-sm font-bold py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 active:scale-[0.98] transition-all"
+                  >
+                    Zpět na automatický výpočet
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

@@ -14,6 +14,8 @@ interface UserProfileInput {
   activityLevel: number;
   goal: Goal;
   calibratedTDEE?: number;
+  customProteinGrams?: number;
+  customFatGrams?: number;
 }
 
 function requireAuth(request: CallableRequest) {
@@ -62,6 +64,8 @@ export const generateWelcomeReport = onCall(
       activityLevel: profile.activityLevel,
       goal: profile.goal,
       calibratedTDEE: profile.calibratedTDEE,
+      customProteinGrams: profile.customProteinGrams,
+      customFatGrams: profile.customFatGrams,
     });
 
     const age = new Date().getFullYear() - new Date(profile.birthDate).getFullYear();
@@ -161,6 +165,8 @@ export const getDailyGreeting = onCall(
       activityLevel: profile.activityLevel,
       goal: profile.goal,
       calibratedTDEE: profile.calibratedTDEE,
+      customProteinGrams: profile.customProteinGrams,
+      customFatGrams: profile.customFatGrams,
     });
     const targetProtein = nutrition.macros.protein;
     const remaining = nutrition.targetCalories - consumedCalories;
@@ -907,6 +913,8 @@ export const chatWithMya = onCall(
       activityLevel: profile.activityLevel,
       goal: profile.goal,
       calibratedTDEE: profile.calibratedTDEE,
+      customProteinGrams: profile.customProteinGrams,
+      customFatGrams: profile.customFatGrams,
     });
     const goalLabel = profile.goal === "lose" ? "hubnutí" : profile.goal === "gain" ? "nabírání svalové hmoty" : "udržování váhy";
 

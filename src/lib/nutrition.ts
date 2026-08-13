@@ -58,6 +58,8 @@ export function calculateNutrition(data: {
   activityLevel: number;
   goal: Goal;
   calibratedTDEE?: number;
+  customProteinGrams?: number; // ruční přepis místo formulky 1.8g/kg (např. od výživového poradce)
+  customFatGrams?: number; // ruční přepis místo formulky 25 % cílových kalorií
 }): NutritionResults {
   const age = calculateAge(data.birthDate);
 
@@ -76,13 +78,15 @@ export function calculateNutrition(data: {
   // 3. Stanovení cílových kalorií podle cíle
   const targetCalories = applyGoalAdjustment(tdee, data.goal, bmr);
 
-  // 4. Výpočet maker (Makroživin)
+  // 4. Výpočet maker (Makroživin) — vlastní zadané hodnoty (např. od výživového poradce/lékaře)
+  // mají přednost před formulkou, sacharidy appka dopočítá jako zbytek kalorií v obou případech,
+  // ať zůstanou v souladu s (případně kalibrovaným) cílem, i když appka bílkoviny/tuky nepočítá sama.
   // Bílkoviny: 1.8g - 2.2g na kg váhy (pro hubnutí/svaly)
-  const proteinGrams = Math.round(data.weight * 1.8);
-  
+  const proteinGrams = data.customProteinGrams ?? Math.round(data.weight * 1.8);
+
   // Tuky: cca 25-30 % celkového příjmu
-  const fatGrams = Math.round((targetCalories * 0.25) / 9);
-  
+  const fatGrams = data.customFatGrams ?? Math.round((targetCalories * 0.25) / 9);
+
   // Sacharidy: zbytek kalorií
   const proteinKcal = proteinGrams * 4;
   const fatKcal = fatGrams * 9;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, deleteField } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import { db as localDb } from "../db/db";
 import { AuthContext } from "./AuthContextBase";
@@ -43,6 +43,8 @@ export interface UserProfile {
   avgCycleLength?: number; // dny, appka si ho průběžně přepočítává z cycleLogs (computeAvgCycleLength v cyclePhase.ts), výchozí 28 (DEFAULT_CYCLE_LENGTH_DAYS)
   cycleRegularity?: 'regular' | 'irregular'; // explicitní přepínač, ne jen odvození z variance zápisů — u 'irregular' appka ukazuje nižší jistotu odhadu fáze
   onHormonalContraception?: boolean; // gate pro luteální kalorický bonus (Úroveň 2) — na hormonální antikoncepci není přirozený vzestup progesteronu jako v běžné luteální fázi
+  customProteinGrams?: number; // ruční přepis bílkovin (g/den) místo formulky 1.8g/kg — např. podle výživového poradce/lékaře, viz calculateNutrition v nutrition.ts
+  customFatGrams?: number; // ruční přepis tuků (g/den) místo formulky 25 % cílových kalorií — sacharidy appka i s override dopočítá jako zbytek do cílových kalorií
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -87,9 +89,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const updateProfile = async (data: Partial<UserProfile>) => {
     if (!user) return;
-    
+
     const newProfile = { ...profile, ...data } as UserProfile;
-    await setDoc(doc(db, "users", user.uid), newProfile, { merge: true });
+    // Appka umí i smazat nepovinné pole zpět na "spočítej si to sama" (undefined v data) —
+    // Firestore setDoc s merge:true samotné undefined ve writu odmítne (SDK to nepovoluje),
+    // takže appka pro takové klíče pošle explicitní deleteField() a zároveň je vyhodí i z
+    // lokálního optimistického stavu, ať zůstane v syncu s tím, co skutečně leží ve Firestore.
+    const firestorePayload: Record<string, unknown> = { ...data };
+    (Object.keys(data) as (keyof UserProfile)[]).forEach((key) => {
+      if (data[key] === undefined) {
+        firestorePayload[key] = deleteField();
+        delete (newProfile as unknown as Record<string, unknown>)[key];
+      }
+    });
+
+    await setDoc(doc(db, "users", user.uid), firestorePayload, { merge: true });
     setProfile(newProfile);
   };
 

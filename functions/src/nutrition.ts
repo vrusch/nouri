@@ -31,6 +31,8 @@ export function calculateNutrition(data: {
   activityLevel: number;
   goal: Goal;
   calibratedTDEE?: number;
+  customProteinGrams?: number;
+  customFatGrams?: number;
 }): NutritionResults {
   const age = calculateAge(data.birthDate);
 
@@ -53,8 +55,8 @@ export function calculateNutrition(data: {
     targetCalories = tdee + 300;
   }
 
-  const proteinGrams = Math.round(data.weight * 1.8);
-  const fatGrams = Math.round((targetCalories * 0.25) / 9);
+  const proteinGrams = data.customProteinGrams ?? Math.round(data.weight * 1.8);
+  const fatGrams = data.customFatGrams ?? Math.round((targetCalories * 0.25) / 9);
   const proteinKcal = proteinGrams * 4;
   const fatKcal = fatGrams * 9;
   const carbKcal = targetCalories - proteinKcal - fatKcal;

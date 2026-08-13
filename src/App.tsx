@@ -78,7 +78,7 @@ export default function App() {
       if (cancelled) return;
 
       // Živé listenery místo jednorázového čtení — appka se drží v syncu i s dalšími
-      // zařízeními/taby, dokud běží (Fáze 5 synchronizace, viz REFERENCE/IMPLEMENTATION_PLAN.md).
+      // zařízeními/taby, dokud běží (Fáze 5 synchronizace, viz REFERENCE/done/IMPLEMENTATION_PLAN.md).
       unsubscribeMeals = subscribeMeals(uid);
       unsubscribeWorkouts = subscribeWorkouts(uid);
       unsubscribeWeights = subscribeWeightLogs(uid, (entries) => {
