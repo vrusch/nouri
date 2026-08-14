@@ -55,21 +55,14 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/api\./,
-            handler: "NetworkFirst",
-            options: {
-              cacheName: "api-cache",
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 86400,
-              },
-            },
-          },
-        ],
-      },
+      // N27 (AUDIT_2026-08-14.md) — dřív tu bylo runtimeCaching pravidlo pro `^https://api\./`,
+      // na které appka nikdy nemluví (jen firestore.googleapis.com, identitytoolkit.googleapis.com,
+      // firebasestorage.app, *.cloudfunctions.net) — mrtvá konfigurace, pravděpodobně zkopírovaná
+      // ze šablony. Přepsat na skutečné hostitele appka záměrně nedělá: Firestore/Auth SDK má
+      // vlastní offline persistenci (persistentLocalCache, viz CLAUDE.md), takže Workbox cache by
+      // byla redundantní; a všech 14 Cloud Functions je onCall (POST s proměnným body) — NetworkFirst
+      // by je cachoval podle URL, ne obsahu, takže by appka riskovala vrácení odpovědi z JINÉHO
+      // požadavku (jiná zpráva v chatu, jiná fotka jídla) jako "cached" výsledek.
     }),
   ],
 });

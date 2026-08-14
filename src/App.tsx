@@ -1,16 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { LogoHorizontal, LogoIcon } from "./components/Logo";
 import BottomNav, { type NavTab, type AddMealAction } from "./components/BottomNav";
-import AddMealModal from "./components/AddMealModal";
-import QuickLookupModal from "./components/QuickLookupModal";
-import MyaChatModal from "./components/MyaChatModal";
-import ShoppingListModal from "./components/ShoppingListModal";
 import Home from "./features/Home";
-import Stats from "./features/Stats";
-import Recipes from "./features/Recipes";
-import Profile from "./features/Profile";
-import Onboarding from "./features/Onboarding";
 import { db, type MealItem } from "./db/db";
 import { useAuth } from "./context/useAuth";
 import {
@@ -32,6 +24,35 @@ import { computeMealReminderStatus } from "./lib/mealReminder";
 import { isQuietHours } from "./lib/quietHours";
 import { isVacationDay } from "./lib/vacationMode";
 import { Bell, Search, Dumbbell, MessageCircle, ClipboardList, UtensilsCrossed, TreePalm } from "lucide-react";
+
+// N28 (AUDIT_2026-08-14.md) — appka dřív staticky importovala všechny 4 taby i všechny 4 modaly,
+// takže hlavní JS chunk (952,8 KB, gzip 292,4 KB) nesl i kód pro Recipes/Profile/Stats a modaly,
+// které uživatelka ten den třeba vůbec neotevře. Home zůstává statický import — je to výchozí tab,
+// appka ho stejně potřebuje hned při prvním vykreslení.
+const Stats = lazy(() => import("./features/Stats"));
+const Recipes = lazy(() => import("./features/Recipes"));
+const Profile = lazy(() => import("./features/Profile"));
+const Onboarding = lazy(() => import("./features/Onboarding"));
+const AddMealModal = lazy(() => import("./components/AddMealModal"));
+const QuickLookupModal = lazy(() => import("./components/QuickLookupModal"));
+const MyaChatModal = lazy(() => import("./components/MyaChatModal"));
+const ShoppingListModal = lazy(() => import("./components/ShoppingListModal"));
+
+function TabLoadingFallback() {
+  return (
+    <div className="flex items-center justify-center py-20">
+      <LogoIcon className="w-10 h-10" animated />
+    </div>
+  );
+}
+
+function ModalLoadingFallback() {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <LogoIcon className="w-10 h-10" animated />
+    </div>
+  );
+}
 
 export default function App() {
   const { user, profile, loading } = useAuth();
@@ -181,7 +202,17 @@ export default function App() {
   }
 
   if (!user || !profile?.setupComplete) {
-    return <Onboarding />;
+    return (
+      <Suspense
+        fallback={
+          <div className="h-dvh flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+            <LogoIcon className="w-16 h-16" animated />
+          </div>
+        }
+      >
+        <Onboarding />
+      </Suspense>
+    );
   }
 
   const profileCheck = computeProfileCheckStatus(profile.lastProfileCheckAt);
@@ -351,7 +382,7 @@ export default function App() {
 
         {/* --- OBSAH --- */}
         <main className="flex-1 overflow-y-auto px-6 hide-scrollbar">
-          {renderContent()}
+          <Suspense fallback={<TabLoadingFallback />}>{renderContent()}</Suspense>
           {/* Spodní padding aby obsah nekončil pod menu */}
           <div className="h-32 shrink-0"></div>
         </main>
@@ -368,23 +399,35 @@ export default function App() {
       </div>
 
       {(addMealOpen || editingMeal) && (
-        <AddMealModal
-          editMeal={editingMeal ?? undefined}
-          initialAction={addMealAction ?? undefined}
-          effectiveCalibratedTDEE={effectiveCalibratedTDEE}
-          onClose={() => {
-            setAddMealOpen(false);
-            setEditingMeal(null);
-            setAddMealAction(null);
-          }}
-        />
+        <Suspense fallback={<ModalLoadingFallback />}>
+          <AddMealModal
+            editMeal={editingMeal ?? undefined}
+            initialAction={addMealAction ?? undefined}
+            effectiveCalibratedTDEE={effectiveCalibratedTDEE}
+            onClose={() => {
+              setAddMealOpen(false);
+              setEditingMeal(null);
+              setAddMealAction(null);
+            }}
+          />
+        </Suspense>
       )}
 
-      {quickLookupOpen && <QuickLookupModal onClose={() => setQuickLookupOpen(false)} />}
-      {myaChatOpen && (
-        <MyaChatModal effectiveCalibratedTDEE={effectiveCalibratedTDEE} onClose={() => setMyaChatOpen(false)} />
+      {quickLookupOpen && (
+        <Suspense fallback={<ModalLoadingFallback />}>
+          <QuickLookupModal onClose={() => setQuickLookupOpen(false)} />
+        </Suspense>
       )}
-      {shoppingListOpen && <ShoppingListModal onClose={() => setShoppingListOpen(false)} />}
+      {myaChatOpen && (
+        <Suspense fallback={<ModalLoadingFallback />}>
+          <MyaChatModal effectiveCalibratedTDEE={effectiveCalibratedTDEE} onClose={() => setMyaChatOpen(false)} />
+        </Suspense>
+      )}
+      {shoppingListOpen && (
+        <Suspense fallback={<ModalLoadingFallback />}>
+          <ShoppingListModal onClose={() => setShoppingListOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }
