@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart, PartyPopper, Droplet, Flag, X } from "lucide-react";
+import { Gauge, Sparkles, Loader2, Ruler, Plus, Camera, Share2, Heart, PartyPopper, Droplet, Flag, X, Layers } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import {
@@ -355,6 +355,14 @@ export default function Stats() {
   // B4 v REFERENCE/DATA_COMPLETENESS_PLAN.md — bez targetWeight appka nikdy nemůže detekovat
   // dosažený cíl a dřív o tom mlčela úplně, bez odkazu zpátky na to, co appce chybí.
   const showTargetWeightHint = !!profile && profile.goal !== "maintain" && profile.targetWeight === undefined && !quietHoursActive;
+
+  // AUDIT_2026-08-14.md — kalibrace/nízký příjem/bílkoviny se dřív mohly objevit jedna pod druhou
+  // bez jakéhokoli vysvětlení, že spolu vlastně nesouvisí. Appka je nadál nikdy neskrývá (schválně,
+  // viz D v AUDIT_2026-08-13.md — skrytí jedné kvůli druhé riskuje ztrátu relevantní informace),
+  // jen jim dá společný úvod, když je jich aktivních víc najednou.
+  const activeInsightCardCount = [showCalibrationCard, showLowCaloriePatternCard, showMacroPatternCard].filter(
+    Boolean,
+  ).length;
 
   const [macroSuggestion, setMacroSuggestion] = useState<string | null>(null);
   useEffect(() => {
@@ -1032,6 +1040,16 @@ export default function Stats() {
         )}
       </div>
 
+      {/* Společný úvod, když appka ukazuje víc "Mya si všimla" karet najednou — viz AUDIT_2026-08-14.md */}
+      {activeInsightCardCount >= 2 && (
+        <div className="flex items-center gap-2 px-1">
+          <Layers className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+          <p className="text-xs font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wide">
+            Mya si dnes všimla víc věcí
+          </p>
+        </div>
+      )}
+
       {/* Kalibrace cíle podle skutečných dat */}
       {showCalibrationCard && calibration ? (
         <div className="bg-linear-to-br from-rose-50 to-amber-50/60 dark:from-rose-950/20 dark:to-amber-950/10 rounded-3xl p-6 border border-rose-100/60 dark:border-rose-900/30 transition-colors">
@@ -1089,6 +1107,11 @@ export default function Stats() {
             <Heart className="w-4 h-4 text-amber-500 dark:text-amber-400" />
             <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Jak se máš?</h3>
           </div>
+          {showGoalReachedCard && (
+            <p className="text-xs text-slate-400 dark:text-slate-500 italic mb-2">
+              Mimochodem — appka si zároveň všimla, že jsi dosáhla cílové váhy. Obojí může platit najednou.
+            </p>
+          )}
           {calorieCheckInMessage ? (
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">{calorieCheckInMessage}</p>
           ) : (
@@ -1112,6 +1135,11 @@ export default function Stats() {
             <Sparkles className="w-4 h-4 text-violet-500 dark:text-violet-400" />
             <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">Bílkoviny dlouhodobě pod cílem</h3>
           </div>
+          {showGoalReachedCard && (
+            <p className="text-xs text-slate-400 dark:text-slate-500 italic mb-2">
+              Mimochodem — appka si zároveň všimla, že jsi dosáhla cílové váhy. Obojí může platit najednou.
+            </p>
+          )}
           {macroSuggestion ? (
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed mb-4">{macroSuggestion}</p>
           ) : (

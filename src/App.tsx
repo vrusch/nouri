@@ -35,7 +35,12 @@ export default function App() {
   });
   const [editingMeal, setEditingMeal] = useState<MealItem | null>(null);
   const [addMealAction, setAddMealAction] = useState<AddMealAction | null>(null);
-  const [weighInOverdue, setWeighInOverdue] = useState(false);
+  // N41 v AUDIT_2026-08-14.md — výchozí `true` sedí s tím, co by computeWeighInStatus(null, ...)
+  // vrátila samo (žádný záznam = appka má nudgnout), a `weighInStatusLoaded` (stejný vzor jako
+  // todaysDataLoaded, C2 v AUDIT_2026-08-13.md) brání tomu, aby červená tečka na zvonu na chvíli
+  // bliknula/zmizela dřív, než dorazí první odpověď z subscribeWeightLogs.
+  const [weighInOverdue, setWeighInOverdue] = useState(true);
+  const [weighInStatusLoaded, setWeighInStatusLoaded] = useState(false);
   const [daysSinceWeighIn, setDaysSinceWeighIn] = useState<number | null>(null);
   const [showReminder, setShowReminder] = useState(false);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
@@ -86,6 +91,7 @@ export default function App() {
         const status = computeWeighInStatus(latest, reminderDays);
         setDaysSinceWeighIn(status.daysSinceWeighIn);
         setWeighInOverdue(status.weighInOverdue);
+        setWeighInStatusLoaded(true);
       });
     })();
 
@@ -203,7 +209,7 @@ export default function App() {
                 className="relative p-2 text-slate-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 transition-colors focus:outline-none"
               >
                 <Bell className="w-6 h-6 stroke-2" />
-                {((weighInOverdue && !vacationActive) ||
+                {((weighInStatusLoaded && weighInOverdue && !vacationActive) ||
                   profileCheck.checkOverdue ||
                   workoutPlan.reminderDue ||
                   (mealReminder.lunchOverdue && !vacationActive)) &&
