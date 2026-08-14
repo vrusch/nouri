@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2, ClipboardList, ListPlus } from "lucide-react";
 import { type AddMealAction } from "./BottomNav";
@@ -120,6 +120,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   // označené jako hrubý odhad.
   const [eatingOut, setEatingOut] = useState(editMeal?.roughEstimate ?? false);
   const [hintText, setHintText] = useState("");
+  const [confirmRefineOverwrite, setConfirmRefineOverwrite] = useState(false);
   const [lastConfidence, setLastConfidence] = useState<Confidence | null>(null);
   const [templates, setTemplates] = useState<MealTemplateEntry[]>([]);
   const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null);
@@ -180,8 +181,13 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     return subscribeMealTemplates(user.uid, setTemplates);
   }, [user]);
 
-  const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
-  const recentMeals = getRecentUniqueMeals(allMeals);
+  // N22 (AUDIT_2026-08-14.md) — recentMeals se používá jen v kroku "choose", ale bez useMemo
+  // se přepočítávalo na každý úhoz klávesy v jakémkoli poli formuláře, i mimo tenhle krok.
+  // Memoizace jde přes SUROVOU hodnotu z useLiveQuery (ne přes `... || []`) — `|| []` by na
+  // každém renderu, dokud dotaz ještě běží, vyrobilo novou referenci pole a memoizaci úplně
+  // popřelo přesně v okně, na kterém appce záleží.
+  const allMealsRaw = useLiveQuery(() => db.meals.toArray());
+  const recentMeals = useMemo(() => getRecentUniqueMeals(allMealsRaw ?? []), [allMealsRaw]);
 
   const resetIngredients = () => {
     setIngredients([]);
@@ -189,14 +195,26 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     setEditingIngredientIndex(null);
   };
 
+  // N24 (AUDIT_2026-08-14.md) — appka si pamatuje poslední AI-nastavené hodnoty, ať pozná,
+  // jestli je uživatelka od posledního rozpoznání ručně upravila přímo v poli — "Upřesnit"
+  // (refine s hintem) volá stejnou resetFormFromVision a bez týhle kontroly by ruční korekci
+  // tiše přepsal novým AI odhadem.
+  const lastAiSnapshotRef = useRef<{ name: string; calories: string; protein: string; fat: string; carbs: string } | null>(
+    null
+  );
+
   const resetFormFromVision = (result: VisionResult | null, failureNotice: string) => {
     resetIngredients();
     if (result) {
+      const caloriesStr = result.calories ? String(result.calories) : "";
+      const proteinStr = result.protein ? String(result.protein) : "";
+      const fatStr = result.fat ? String(result.fat) : "";
+      const carbsStr = result.carbs ? String(result.carbs) : "";
       setName(result.name);
-      setCalories(result.calories ? String(result.calories) : "");
-      setProtein(result.protein ? String(result.protein) : "");
-      setFat(result.fat ? String(result.fat) : "");
-      setCarbs(result.carbs ? String(result.carbs) : "");
+      setCalories(caloriesStr);
+      setProtein(proteinStr);
+      setFat(fatStr);
+      setCarbs(carbsStr);
       setType(result.type);
       setLastConfidence(result.confidence);
       // V režimu "Jím venku" nahrazuje pasivní varování o nejistotě uklidňujícím textem —
@@ -208,6 +226,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
             ? "Mya si nebyla úplně jistá odhadem — zkontroluj prosím hodnoty."
             : null
       );
+      lastAiSnapshotRef.current = { name: result.name, calories: caloriesStr, protein: proteinStr, fat: fatStr, carbs: carbsStr };
     } else {
       setName("");
       setCalories("");
@@ -217,8 +236,19 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
       setType(guessMealType());
       setLastConfidence(null);
       setNotice(failureNotice);
+      lastAiSnapshotRef.current = null;
     }
     setTime(currentTime());
+  };
+
+  // resetFormFromVision vždy volá resetIngredients() první, takže `ingredients.length > 0`
+  // samo o sobě znamená "appka od posledního AI rozpoznání dostala ruční rozpad na
+  // ingredience" — nepotřebuje vlastní snapshot navíc.
+  const formEditedSinceLastAiAnalysis = () => {
+    if (ingredients.length > 0) return true;
+    const last = lastAiSnapshotRef.current;
+    if (!last) return false;
+    return name !== last.name || calories !== last.calories || protein !== last.protein || fat !== last.fat || carbs !== last.carbs;
   };
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -249,6 +279,14 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
 
   const handleRefineWithHint = async () => {
     if (!photoDataUrl || !hintText.trim()) return;
+    // N24 — jednou ozbrojené potvrzení appka drží jen 4s (stejný vzor jako handleDeleteMeal),
+    // ať appka po delší odmlce nepřepíše formulář na starý, dávno neaktuální souhlas.
+    if (formEditedSinceLastAiAnalysis() && !confirmRefineOverwrite) {
+      setConfirmRefineOverwrite(true);
+      setTimeout(() => setConfirmRefineOverwrite(false), 4000);
+      return;
+    }
+    setConfirmRefineOverwrite(false);
     setAnalyzingMessage("Mya upřesňuje odhad...");
     setStep("analyzing");
     const result = await MyaVision.analyzeFood(photoDataUrl, hintText.trim());
@@ -398,6 +436,9 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
         if (item.protein !== undefined) newMeal.protein = item.protein;
         if (item.fat !== undefined) newMeal.fat = item.fat;
         if (item.carbs !== undefined) newMeal.carbs = item.carbs;
+        // N23 (AUDIT_2026-08-14.md) — starší šablony uložené před touhle opravou pole nemají,
+        // item.ingredients je undefined a appka jídlo založí přesně jako dřív (jen souhrnná makra).
+        if (item.ingredients && item.ingredients.length > 0) newMeal.ingredients = item.ingredients;
         return newMeal;
       });
 
@@ -863,9 +904,11 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
                       <button
                         onClick={handleRefineWithHint}
                         disabled={!hintText.trim()}
-                        className="shrink-0 bg-amber-600 text-white text-xs font-bold px-3 py-2 rounded-xl disabled:opacity-40 active:scale-95 transition-all"
+                        className={`shrink-0 text-white text-xs font-bold px-3 py-2 rounded-xl disabled:opacity-40 active:scale-95 transition-all ${
+                          confirmRefineOverwrite ? "bg-red-600" : "bg-amber-600"
+                        }`}
                       >
-                        Upřesnit
+                        {confirmRefineOverwrite ? "Přepsat úpravy?" : "Upřesnit"}
                       </button>
                     </div>
                   )}

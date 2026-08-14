@@ -118,7 +118,12 @@ export default function Home({ onEditMeal }: HomeProps) {
   const withEffectiveTDEE = (p: NonNullable<typeof profile>) =>
     baseNutrition ? { ...p, calibratedTDEE: applyLutealBonus(baseNutrition.tdee, lutealBonusActive) } : p;
 
-  const meals = useLiveQuery(() => db.meals.where('date').equals(today).toArray()) || [];
+  // N26 (AUDIT_2026-08-14.md) — mealsRaw (surová hodnota, ne "|| []") appce řekne, jestli
+  // dnešní jídla ještě vůbec nedoběhla z Dexie, ne jen "nic nezapsáno" — handleSubmitMood níž
+  // na tomhle rozdílu zablokuje tlačítka nálady, ať appka nepošle Mye 0 kcal jen proto, že
+  // dotaz ještě neodpověděl.
+  const mealsRaw = useLiveQuery(() => db.meals.where('date').equals(today).toArray());
+  const meals = mealsRaw ?? [];
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
   const todaysWorkouts = useLiveQuery(() => db.workouts.where('date').equals(today).toArray()) || [];
 
@@ -190,6 +195,10 @@ export default function Home({ onEditMeal }: HomeProps) {
         if (m.protein !== undefined) item.protein = m.protein;
         if (m.fat !== undefined) item.fat = m.fat;
         if (m.carbs !== undefined) item.carbs = m.carbs;
+        // N23 (AUDIT_2026-08-14.md) — value/protein/fat/carbs nahoře zůstávají dopočítaným
+        // součtem ingrediencí (viz db.ts), takže appka kopíruje obojí ze stejného zdrojového
+        // jídla — makra i rozpad zůstanou v syncu, žádná duplicitní pravda.
+        if (m.ingredients && m.ingredients.length > 0) item.ingredients = m.ingredients;
         return item;
       });
       await saveMealTemplate(user.uid, templateNameInput.trim(), items);
@@ -222,7 +231,7 @@ export default function Home({ onEditMeal }: HomeProps) {
     : [];
 
   const handleSubmitMood = async (value: number) => {
-    if (!profile || submittingMood) return;
+    if (!profile || submittingMood || mealsRaw === undefined) return;
     setSubmittingMood(true);
     try {
       const note = moodNoteInput.trim();
@@ -421,7 +430,7 @@ export default function Home({ onEditMeal }: HomeProps) {
                   <button
                     key={m.value}
                     onClick={() => handleSubmitMood(m.value)}
-                    disabled={submittingMood}
+                    disabled={submittingMood || mealsRaw === undefined}
                     aria-label={m.label}
                     className="w-9 h-9 rounded-full bg-white dark:bg-slate-900 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center justify-center text-base active:scale-90 transition-all disabled:opacity-40"
                   >

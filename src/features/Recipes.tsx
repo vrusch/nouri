@@ -60,6 +60,13 @@ export default function Recipes() {
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipeEntry[]>([]);
   const [addedToList, setAddedToList] = useState(false);
   const [savedToLibrary, setSavedToLibrary] = useState(false);
+  // N21 (AUDIT_2026-08-14.md) — addedToList/savedToLibrary se nastavují až PO doběhnutí
+  // await, takže appka bez týhle ochrany neblokovala rychlé dvojťuknutí BĚHEM zápisu (obě
+  // volání by proběhla, jedno by přidalo suroviny/uložilo recept dvakrát). Appka drží zápis
+  // trvale zamčený (addedToList/savedToLibrary), ne jen na dobu zápisu — recept z generování
+  // je jednorázový, appka nemá důvod dovolit dvojí přidání téhož vygenerovaného výsledku.
+  const [savingRecipe, setSavingRecipe] = useState(false);
+  const [addingToList, setAddingToList] = useState(false);
   const [expandedSavedId, setExpandedSavedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -159,9 +166,25 @@ export default function Recipes() {
   };
 
   const handleSaveRecipe = async () => {
-    if (!user || !recipe) return;
-    await saveRecipe(user.uid, recipe, recipeSource);
-    setSavedToLibrary(true);
+    if (!user || !recipe || savingRecipe || savedToLibrary) return;
+    setSavingRecipe(true);
+    try {
+      await saveRecipe(user.uid, recipe, recipeSource);
+      setSavedToLibrary(true);
+    } finally {
+      setSavingRecipe(false);
+    }
+  };
+
+  const handleAddCurrentToShoppingList = async () => {
+    if (!recipe || addingToList || addedToList) return;
+    setAddingToList(true);
+    try {
+      await handleAddToShoppingList(recipe);
+      setAddedToList(true);
+    } finally {
+      setAddingToList(false);
+    }
   };
 
   const handleToggleItem = (item: ShoppingListEntry) => {
@@ -382,7 +405,7 @@ export default function Recipes() {
           <div className="flex gap-2.5">
             <button
               onClick={handleSaveRecipe}
-              disabled={savedToLibrary}
+              disabled={savedToLibrary || savingRecipe}
               className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
                 savedToLibrary
                   ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
@@ -394,11 +417,8 @@ export default function Recipes() {
             </button>
 
             <button
-              onClick={async () => {
-                await handleAddToShoppingList(recipe);
-                setAddedToList(true);
-              }}
-              disabled={addedToList}
+              onClick={handleAddCurrentToShoppingList}
+              disabled={addedToList || addingToList}
               className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
                 addedToList
                   ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
@@ -517,6 +537,37 @@ function SavedRecipesView({
     onDelete(id);
   };
 
+  // N21 (AUDIT_2026-08-14.md) — na rozdíl od tlačítka na obrazovce "Generovat" appka tady
+  // zámek NEnechává trvalý: uložený recept je knihovna, uživatelka ho může chtít přidat do
+  // seznamu znovu za týden, když si ho uvaří podruhé. addingListId blokuje jen dobu zápisu
+  // (řeší rychlé dvojťuknutí), justAddedId je jen dočasná vizuální zpětná vazba ("Přidáno"),
+  // po pár vteřinách appka tlačítko sama odemkne zpět na "Do seznamu".
+  const [addingListId, setAddingListId] = useState<string | null>(null);
+  const [justAddedId, setJustAddedId] = useState<string | null>(null);
+  const justAddedTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (justAddedTimeoutRef.current) clearTimeout(justAddedTimeoutRef.current);
+    };
+  }, []);
+
+  const handleAddClick = async (entry: SavedRecipeEntry) => {
+    if (addingListId === entry.id) return;
+    setAddingListId(entry.id);
+    try {
+      await onAddToShoppingList(entry);
+      setJustAddedId(entry.id);
+      if (justAddedTimeoutRef.current) clearTimeout(justAddedTimeoutRef.current);
+      justAddedTimeoutRef.current = setTimeout(
+        () => setJustAddedId((current) => (current === entry.id ? null : current)),
+        2000
+      );
+    } finally {
+      setAddingListId(null);
+    }
+  };
+
   if (recipes.length === 0) {
     return (
       <EmptyState
@@ -558,11 +609,12 @@ function SavedRecipesView({
                 <RecipeCard recipe={entry} />
                 <div className="flex gap-2.5">
                   <button
-                    onClick={() => onAddToShoppingList(entry)}
-                    className="flex-1 flex items-center justify-center gap-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 py-3 rounded-2xl font-bold active:scale-[0.98] transition-all"
+                    onClick={() => handleAddClick(entry)}
+                    disabled={addingListId === entry.id}
+                    className="flex-1 flex items-center justify-center gap-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 py-3 rounded-2xl font-bold active:scale-[0.98] transition-all disabled:opacity-60"
                   >
-                    <ShoppingCart className="w-4 h-4" />
-                    Do seznamu
+                    {justAddedId === entry.id ? <CheckCircle2 className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
+                    {justAddedId === entry.id ? "Přidáno" : "Do seznamu"}
                   </button>
                   <button
                     onClick={() => handleDeleteClick(entry.id)}

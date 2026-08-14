@@ -13,7 +13,7 @@ import {
 } from "firebase/firestore";
 import { ref, uploadString, getDownloadURL, deleteObject } from "firebase/storage";
 import { db as firestoreDb, storage } from "./firebase";
-import { db as dexieDb, type MealItem, type WorkoutItem } from "../db/db";
+import { db as dexieDb, type MealItem, type MealIngredient, type WorkoutItem } from "../db/db";
 import { getLocalDateISO } from "./date";
 import type { ShoppingListItemDraft } from "./shoppingList";
 import type { RecipeResult } from "./recipes";
@@ -531,6 +531,10 @@ export interface MealTemplateItem {
   protein?: number;
   fat?: number;
   carbs?: number;
+  // N23 (AUDIT_2026-08-14.md) — dřív šablona strukturálně neuměla přenést rozpad na ingredience,
+  // uložení dnešního jídla s ingrediencemi (kuřecí prsa + rýže) nenávratně sbalilo granularitu
+  // na sečtená makra. Volitelné, ať staré dřív uložené šablony (bez pole) fungují beze změny.
+  ingredients?: MealIngredient[];
 }
 
 export interface MealTemplateEntry {

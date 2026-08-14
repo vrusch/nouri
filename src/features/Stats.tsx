@@ -114,9 +114,10 @@ export default function Stats() {
     if (!user) return;
     return subscribeBodyMeasurements(user.uid, setBodyMeasurements);
   }, [user]);
+  // N25 (AUDIT_2026-08-14.md) — vstupní pole žijí ve vlastním BodyMeasurementForm níž
+  // (jen showLogMeasurement zůstává tady), ať appka psaní do nich neroztáčí přepočet
+  // totalsByDay/kalibrace/vzorců, se kterými vůbec nesouvisí.
   const [showLogMeasurement, setShowLogMeasurement] = useState(false);
-  const [measurementInputs, setMeasurementInputs] = useState<Record<string, string>>({ waist: "", hips: "", chest: "" });
-  const [savingMeasurement, setSavingMeasurement] = useState(false);
   const [isGeneratingCard, setIsGeneratingCard] = useState(false);
   const [weeklySummaryText, setWeeklySummaryText] = useState<string | null>(null);
   const [generatingWeeklySummary, setGeneratingWeeklySummary] = useState(false);
@@ -140,9 +141,8 @@ export default function Stats() {
     }
     return subscribeCycleLogs(user.uid, setCycleLogs);
   }, [user, profile?.cycleTrackingEnabled]);
+  // N25 — datum žije ve vlastním CycleStartForm níž, stejný důvod jako u BodyMeasurementForm.
   const [showLogCycle, setShowLogCycle] = useState(false);
-  const [cycleLogDateInput, setCycleLogDateInput] = useState("");
-  const [savingCycleLog, setSavingCycleLog] = useState(false);
 
   // Appka si průběžně přepočítává vlastní průměr délky cyklu z posledních zápisů (viz
   // computeAvgCycleLength v cyclePhase.ts) — nepředpokládá se pravidelnost, jen se to zapíše
@@ -161,19 +161,7 @@ export default function Stats() {
     : null;
 
   const handleToggleLogCycle = () => {
-    setCycleLogDateInput(today);
     setShowLogCycle((v) => !v);
-  };
-
-  const handleLogCycleStart = async () => {
-    if (!user || !cycleLogDateInput) return;
-    setSavingCycleLog(true);
-    try {
-      await logCycleStart(user.uid, cycleLogDateInput);
-      setShowLogCycle(false);
-    } finally {
-      setSavingCycleLog(false);
-    }
   };
 
   const handleDeleteCycleLog = (dateISO: string) => {
@@ -210,7 +198,13 @@ export default function Stats() {
   // výš — jde jen do AI promptu (getWeeklySummary), ne do žádného čísla zobrazeného appkou, takže
   // riziko z nekonzistence chybí a filtrování by stálo další deploy cyklus Cloud Function bez
   // reálného přínosu.
-  const weekProteinRecords = buildDailyProteinRecords(allMeals).filter((r) => days.includes(r.date));
+  // N25 (AUDIT_2026-08-14.md) — appka dřív volala buildDailyProteinRecords 2× nad celou
+  // historií (jednou beze excludeDates, podruhé s [today]) — druhé volání appka teď odvodí
+  // z prvního (odfiltruje dnešní záznam), místo aby přepočítala od nuly. Ekvivalentní
+  // buildDailyProteinRecords(allMeals, [today]): ta dnešek z agregace úplně vynechá, takže
+  // odstranění dnešního záznamu z už-agregovaného výsledku dá identické pole.
+  const allProteinRecords = buildDailyProteinRecords(allMeals);
+  const weekProteinRecords = allProteinRecords.filter((r) => days.includes(r.date));
   const weekdayWeekendBreakdown = computeWeekdayWeekendProteinBreakdown(weekProteinRecords);
 
   // Sdílecí karta (FEATURE_IDEAS.md sekce 5) — streak a váhový posun počítané ze stejného
@@ -289,7 +283,7 @@ export default function Stats() {
   // appka vyloučí (excludeDates) — dokud den neskončil, nejde ho spravedlivě posoudit vůči
   // celodennímu cíli (B5 v AUDIT_2026-08-13.md).
   const macroPatternWindowStart = lastNDates(14)[0];
-  const proteinRecords = buildDailyProteinRecords(allMeals, [today]).filter((r) => r.date >= macroPatternWindowStart);
+  const proteinRecords = allProteinRecords.filter((r) => r.date !== today && r.date >= macroPatternWindowStart);
   const lowProteinPattern = nutrition
     ? detectLowProteinPattern(proteinRecords, nutrition.macros.protein)
     : null;
@@ -447,25 +441,6 @@ export default function Stats() {
   const handleDismissGoalReached = () => {
     if (!profile?.targetWeight) return;
     updateProfile({ lastCelebratedGoalReachedWeight: profile.targetWeight });
-  };
-
-  const handleLogMeasurement = async () => {
-    if (!user) return;
-    const measurement: { waist?: number; hips?: number; chest?: number } = {};
-    MEASUREMENT_FIELDS.forEach((field) => {
-      const raw = measurementInputs[field];
-      if (raw.trim()) measurement[field] = Number(raw);
-    });
-    if (Object.keys(measurement).length === 0) return;
-
-    setSavingMeasurement(true);
-    try {
-      await logBodyMeasurement(user.uid, today, measurement);
-      setMeasurementInputs({ waist: "", hips: "", chest: "" });
-      setShowLogMeasurement(false);
-    } finally {
-      setSavingMeasurement(false);
-    }
   };
 
   const handlePhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -844,24 +819,13 @@ export default function Stats() {
             </p>
           )}
 
-          {showLogCycle && (
-            <div className="mt-4 pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center gap-2">
-              <input
-                type="date"
-                value={cycleLogDateInput}
-                max={today}
-                onChange={(e) => setCycleLogDateInput(e.target.value)}
-                className="flex-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
-              />
-              <button
-                onClick={handleLogCycleStart}
-                disabled={!cycleLogDateInput || savingCycleLog}
-                className="shrink-0 bg-rose-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-50 active:scale-95 transition-all flex items-center gap-1.5"
-              >
-                {savingCycleLog && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                Uložit
-              </button>
-            </div>
+          {showLogCycle && user && (
+            <CycleStartForm
+              initialDate={today}
+              maxDate={today}
+              onSave={(dateISO) => logCycleStart(user.uid, dateISO)}
+              onSaved={() => setShowLogCycle(false)}
+            />
           )}
 
           {cycleLogs.length > 0 && (
@@ -970,32 +934,11 @@ export default function Stats() {
           </div>
         )}
 
-        {showLogMeasurement && (
-          <div className="mt-4 pt-4 border-t border-slate-50 dark:border-slate-800 space-y-3">
-            <div className="grid grid-cols-3 gap-2">
-              {MEASUREMENT_FIELDS.map((field) => (
-                <div key={field}>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{MEASUREMENT_LABELS_CS[field]}</label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={measurementInputs[field]}
-                    onChange={(e) => setMeasurementInputs((prev) => ({ ...prev, [field]: e.target.value }))}
-                    placeholder="cm"
-                    className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-teal-500 dark:text-white transition-all"
-                  />
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={handleLogMeasurement}
-              disabled={savingMeasurement || Object.values(measurementInputs).every((v) => !v.trim())}
-              className="w-full bg-teal-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {savingMeasurement && <Loader2 className="w-4 h-4 animate-spin" />}
-              Uložit míry
-            </button>
-          </div>
+        {showLogMeasurement && user && (
+          <BodyMeasurementForm
+            onSave={(measurement) => logBodyMeasurement(user.uid, today, measurement)}
+            onSaved={() => setShowLogMeasurement(false)}
+          />
         )}
       </div>
 
@@ -1175,5 +1118,116 @@ export default function Stats() {
       <ProgressPhotoLightbox photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} onDelete={handleDeletePhoto} />
     )}
     </>
+  );
+}
+
+// N25 (AUDIT_2026-08-14.md) — appka dřív držela vstupní pole měr těla přímo ve Stats, takže
+// psaní do nich (žádný vztah k datům, se kterými Stats jinak počítá) rozeběhlo přepočet
+// totalsByDay/kalibrace/vzorců/weightPoints na KAŽDÝ úhoz klávesy — appka celý komponent
+// nemá memoizovaný přes useMemo (exhaustive-deps je jen "warn", viz N29, špatná deps pole by
+// se tichým stale-closure bugem neprojevila v buildu/lintu/testech, jen v běhu). Vytažením
+// vlastního stavu appka přepočet přeskočí úplně — psaní tady vyvolá jen re-render tohohle
+// malého komponentu, ne rodiče.
+function BodyMeasurementForm({
+  onSave,
+  onSaved,
+}: {
+  onSave: (measurement: { waist?: number; hips?: number; chest?: number }) => Promise<void>;
+  onSaved: () => void;
+}) {
+  const [measurementInputs, setMeasurementInputs] = useState<Record<string, string>>({ waist: "", hips: "", chest: "" });
+  const [savingMeasurement, setSavingMeasurement] = useState(false);
+
+  const handleLogMeasurement = async () => {
+    const measurement: { waist?: number; hips?: number; chest?: number } = {};
+    MEASUREMENT_FIELDS.forEach((field) => {
+      const raw = measurementInputs[field];
+      if (raw.trim()) measurement[field] = Number(raw);
+    });
+    if (Object.keys(measurement).length === 0) return;
+
+    setSavingMeasurement(true);
+    try {
+      await onSave(measurement);
+      setMeasurementInputs({ waist: "", hips: "", chest: "" });
+      onSaved();
+    } finally {
+      setSavingMeasurement(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-slate-50 dark:border-slate-800 space-y-3">
+      <div className="grid grid-cols-3 gap-2">
+        {MEASUREMENT_FIELDS.map((field) => (
+          <div key={field}>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{MEASUREMENT_LABELS_CS[field]}</label>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={measurementInputs[field]}
+              onChange={(e) => setMeasurementInputs((prev) => ({ ...prev, [field]: e.target.value }))}
+              placeholder="cm"
+              className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-teal-500 dark:text-white transition-all"
+            />
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={handleLogMeasurement}
+        disabled={savingMeasurement || Object.values(measurementInputs).every((v) => !v.trim())}
+        className="w-full bg-teal-600 text-white text-sm font-bold py-2.5 rounded-xl active:scale-[0.98] transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+      >
+        {savingMeasurement && <Loader2 className="w-4 h-4 animate-spin" />}
+        Uložit míry
+      </button>
+    </div>
+  );
+}
+
+// N25 — stejný důvod jako BodyMeasurementForm výš, jen pro datum začátku cyklu.
+function CycleStartForm({
+  initialDate,
+  maxDate,
+  onSave,
+  onSaved,
+}: {
+  initialDate: string;
+  maxDate: string;
+  onSave: (dateISO: string) => Promise<void>;
+  onSaved: () => void;
+}) {
+  const [dateInput, setDateInput] = useState(initialDate);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!dateInput) return;
+    setSaving(true);
+    try {
+      await onSave(dateInput);
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-slate-50 dark:border-slate-800 flex items-center gap-2">
+      <input
+        type="date"
+        value={dateInput}
+        max={maxDate}
+        onChange={(e) => setDateInput(e.target.value)}
+        className="flex-1 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+      />
+      <button
+        onClick={handleSave}
+        disabled={!dateInput || saving}
+        className="shrink-0 bg-rose-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl disabled:opacity-50 active:scale-95 transition-all flex items-center gap-1.5"
+      >
+        {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+        Uložit
+      </button>
+    </div>
   );
 }

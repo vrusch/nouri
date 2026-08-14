@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { X, Search, Loader2, AlertCircle } from "lucide-react";
 import { MyaVision, type VisionResult } from "../lib/vision";
 
@@ -15,11 +15,18 @@ export default function QuickLookupModal({ onClose }: QuickLookupModalProps) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<VisionResult | null>(null);
   const [notFound, setNotFound] = useState(false);
+  // N20 (AUDIT_2026-08-14.md) — appka nevynucuje "počkej na odpověď" (input i Enter fungují
+  // dál i uprostřed hledání, záměrně — appka nechce mrazit pole kvůli pomalému OpenAI volání),
+  // takže dva dotazy se mohou překrývat. Číslo požadavku appce řekne, jestli je odpověď pořád
+  // aktuální — pomalejší "banán" doběhlé PO rychlejším "avokádo" appka tiše zahodí místo
+  // přepsání výsledku tím starým.
+  const requestIdRef = useRef(0);
 
   const handleLookup = async () => {
     const trimmed = query.trim();
     if (!trimmed) return;
 
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setResult(null);
     setNotFound(false);
@@ -29,12 +36,15 @@ export default function QuickLookupModal({ onClose }: QuickLookupModalProps) {
     const cacheKey = `mya_lookup_${normalizeQuery(trimmed)}`;
     const cached = sessionStorage.getItem(cacheKey);
     if (cached) {
-      setResult(JSON.parse(cached) as VisionResult);
-      setLoading(false);
+      if (requestIdRef.current === requestId) {
+        setResult(JSON.parse(cached) as VisionResult);
+        setLoading(false);
+      }
       return;
     }
 
     const found = await MyaVision.analyzeFoodText(trimmed);
+    if (requestIdRef.current !== requestId) return;
     if (found && found.name !== "Neznámé jídlo") {
       setResult(found);
       sessionStorage.setItem(cacheKey, JSON.stringify(found));
