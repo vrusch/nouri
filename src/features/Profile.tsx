@@ -228,6 +228,13 @@ export default function Profile() {
     if (!profile) return;
     setIsGenerating(true);
     try {
+      // N-audit 2026-08-14: záměrně BEZ luteálního bonusu (na rozdíl od getDailyGreeting/
+      // chatWithMya/getMealFeedback, viz Home.tsx a App.tsx) — report.data.targetCalories se
+      // hned pod tím zapisuje trvale do profile.targetCalories. Kdyby appka poslala navýšené
+      // TDEE, luteálně nafouknutý cíl by přežil i do folikulární/ovulační fáze, dokud by
+      // uživatelka analýzu znovu neaktualizovala — tichá chyba horší než současný stav.
+      // Report je bráno jako stabilní výchozí dokument (BMR/TDEE jako fyziologický základ),
+      // ne jako denní číslo.
       const report = await MyaAI.generateWelcomeReport(profile);
       await updateProfile({ 
         lastAiReport: report.text,

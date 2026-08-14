@@ -23,6 +23,11 @@ interface AddMealModalProps {
   /** Zkratka ze satelitů rozbalovacího + tlačítka (BottomNav) — místo výběrové obrazovky
    *  rovnou spustí danou akci (foto/hlas/text). Krok "choose" zůstává dostupný přes zpět. */
   initialAction?: AddMealAction;
+  /** Luteálně navýšené TDEE z App.tsx (viz stejný výpočet v Home.tsx) — když je nastavené,
+   *  reakce na zapsané jídlo (getMealFeedback níž) počítá targetCalories z něj místo ze
+   *  syrového profile.calibratedTDEE, ať Mya nehodnotí jídlo proti nižšímu cíli, než appka
+   *  reálně ukazuje na Home. */
+  effectiveCalibratedTDEE?: number;
 }
 
 type Step = "choose" | "photo-preview" | "describe" | "recording" | "analyzing" | "form" | "feedback" | "templates";
@@ -98,7 +103,7 @@ function EatingOutToggle({ checked, onToggle }: { checked: boolean; onToggle: ()
   );
 }
 
-export default function AddMealModal({ onClose, editMeal, initialAction }: AddMealModalProps) {
+export default function AddMealModal({ onClose, editMeal, initialAction, effectiveCalibratedTDEE }: AddMealModalProps) {
   const { profile, user } = useAuth();
   const isEditing = editMeal !== undefined;
   const [step, setStep] = useState<Step>(editMeal ? "form" : "choose");
@@ -567,7 +572,9 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
       if (profile) {
         const todayMeals = await db.meals.where("date").equals(meal.date).toArray();
         const consumedTodayCalories = todayMeals.reduce((sum, m) => sum + m.value, 0);
-        const { targetCalories } = calculateNutrition(profile);
+        const { targetCalories } = calculateNutrition(
+          effectiveCalibratedTDEE !== undefined ? { ...profile, calibratedTDEE: effectiveCalibratedTDEE } : profile
+        );
         MyaAI.getMealFeedback({
           mealName: meal.name,
           calories: meal.value,

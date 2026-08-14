@@ -6,13 +6,17 @@ import { subscribeChatMessages, saveChatMessage, clearChatHistory, type ChatMess
 
 interface MyaChatModalProps {
   onClose: () => void;
+  /** Luteálně navýšené TDEE z App.tsx (viz stejný výpočet v Home.tsx) — když je nastavené,
+   *  chatWithMya níž dostane profil s tímhle calibratedTDEE místo syrového profile.calibratedTDEE,
+   *  ať Mya v chatu nemluví o nižším cíli, než appka reálně ukazuje na Home. */
+  effectiveCalibratedTDEE?: number;
 }
 
 // Appka posílá funkci jen posledních pár zpráv (ne celou historii) — drží náklady na OpenAI
 // pod kontrolou i u dlouhé konverzace, funkce sama v index.ts stejný limit i validuje.
 const MAX_CHAT_HISTORY = 20;
 
-export default function MyaChatModal({ onClose }: MyaChatModalProps) {
+export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaChatModalProps) {
   const { user, profile } = useAuth();
   const [messages, setMessages] = useState<ChatMessageEntry[]>([]);
   const [input, setInput] = useState("");
@@ -53,7 +57,9 @@ export default function MyaChatModal({ onClose }: MyaChatModalProps) {
         .map(({ role, content }) => ({ role, content }));
       // chatWithMya nikdy nezreject appce zpátky (viz ai.ts) — i offline appka doběhne rychle
       // s Czech fallback textem ("Mya právě neodpovídá..."), takže finally spolehlivě proběhne.
-      const reply = await MyaAI.chatWithMya(profile, history);
+      const effectiveProfile =
+        effectiveCalibratedTDEE !== undefined ? { ...profile, calibratedTDEE: effectiveCalibratedTDEE } : profile;
+      const reply = await MyaAI.chatWithMya(effectiveProfile, history);
       saveChatMessage(user.uid, "assistant", reply);
     } finally {
       setSending(false);

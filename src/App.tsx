@@ -13,10 +13,19 @@ import Profile from "./features/Profile";
 import Onboarding from "./features/Onboarding";
 import { db, type MealItem } from "./db/db";
 import { useAuth } from "./context/useAuth";
-import { seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs, subscribeWorkouts } from "./lib/cloudSync";
+import {
+  seedWeightLogIfEmpty,
+  subscribeMeals,
+  subscribeWeightLogs,
+  subscribeWorkouts,
+  subscribeCycleLogs,
+  type CycleLogEntry,
+} from "./lib/cloudSync";
 import { getLocalDateISO } from "./lib/date";
 import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
+import { calculateNutrition } from "./lib/nutrition";
+import { getCyclePhase, DEFAULT_CYCLE_LENGTH_DAYS, isLutealBonusActive, applyLutealBonus } from "./lib/cyclePhase";
 import { computeProfileCheckStatus } from "./lib/profileCheck";
 import { computeWorkoutPlanStatus } from "./lib/workoutPlan";
 import { computeMealReminderStatus } from "./lib/mealReminder";
@@ -59,6 +68,31 @@ export default function App() {
   const todaysDataLoaded = todaysWorkoutCountRaw !== undefined && todaysMealsRaw !== undefined;
   const todaysWorkoutCount = todaysWorkoutCountRaw ?? 0;
   const todaysMeals = todaysMealsRaw ?? [];
+
+  // N-audit 2026-08-14: Mya (denní pozdrav, chat, reakce na zapsané jídlo) počítala s cílem bez
+  // luteálního kalorického bonusu (viz stejný výpočet v Home.tsx), protože AddMealModal a
+  // MyaChatModal posílaly do AI volání syrový `profile.calibratedTDEE` místo hodnoty, kterou Home
+  // reálně zobrazuje uživatelce. Appka drží vlastní odběr cycleLogs tady (ne jen v Home.tsx), ať
+  // efektivní TDEE může protéct dolů i do modálů, které App.tsx renderuje samostatně.
+  const [cycleLogs, setCycleLogs] = useState<CycleLogEntry[]>([]);
+  useEffect(() => {
+    // Nulování stavu tady není potřeba: cyclePhaseInfo/effectiveCalibratedTDEE níž kontrolují
+    // profile?.cycleTrackingEnabled samy, takže zastaralá data v cycleLogs po vypnutí sledování
+    // nikam neprotečou.
+    if (!user || !profile?.cycleTrackingEnabled) return;
+    return subscribeCycleLogs(user.uid, setCycleLogs);
+  }, [user, profile?.cycleTrackingEnabled]);
+
+  const cyclePhaseInfo = profile?.cycleTrackingEnabled
+    ? getCyclePhase(cycleLogs, profile.avgCycleLength ?? DEFAULT_CYCLE_LENGTH_DAYS, today)
+    : null;
+  const lutealBonusActive = isLutealBonusActive(cyclePhaseInfo, profile?.onHormonalContraception);
+  // Jen scalar (ne celý přepočtený nutrition objekt jako v Home.tsx) — AddMealModal a
+  // MyaChatModal si samy volají calculateNutrition, tahle appka jim jen posílá, jaké
+  // calibratedTDEE mají použít místo profile.calibratedTDEE.
+  const effectiveCalibratedTDEE = profile && lutealBonusActive
+    ? applyLutealBonus(calculateNutrition(profile).tdee, lutealBonusActive)
+    : undefined;
 
   useEffect(() => {
     if (!showReminder) return;
@@ -322,6 +356,7 @@ export default function App() {
         <AddMealModal
           editMeal={editingMeal ?? undefined}
           initialAction={addMealAction ?? undefined}
+          effectiveCalibratedTDEE={effectiveCalibratedTDEE}
           onClose={() => {
             setAddMealOpen(false);
             setEditingMeal(null);
@@ -331,7 +366,9 @@ export default function App() {
       )}
 
       {quickLookupOpen && <QuickLookupModal onClose={() => setQuickLookupOpen(false)} />}
-      {myaChatOpen && <MyaChatModal onClose={() => setMyaChatOpen(false)} />}
+      {myaChatOpen && (
+        <MyaChatModal effectiveCalibratedTDEE={effectiveCalibratedTDEE} onClose={() => setMyaChatOpen(false)} />
+      )}
       {shoppingListOpen && <ShoppingListModal onClose={() => setShoppingListOpen(false)} />}
     </div>
   );

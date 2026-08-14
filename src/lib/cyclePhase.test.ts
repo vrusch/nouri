@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { getCyclePhase, computeAvgCycleLength, DEFAULT_CYCLE_LENGTH_DAYS } from "./cyclePhase";
+import {
+  getCyclePhase,
+  computeAvgCycleLength,
+  DEFAULT_CYCLE_LENGTH_DAYS,
+  isLutealBonusActive,
+  applyLutealBonus,
+  LUTEAL_CALORIE_BONUS,
+} from "./cyclePhase";
 
 describe("getCyclePhase", () => {
   const START = "2026-08-01";
@@ -92,5 +99,39 @@ describe("computeAvgCycleLength", () => {
     // 8 záznamů -> appka bere jen posledních 7 (= 6 rozestupů), takže první rozestup (40 dní)
     // se do průměru vůbec nedostane. Zbylých 6 rozestupů je přesně 28 dní.
     expect(computeAvgCycleLength(logs)).toBe(28);
+  });
+});
+
+describe("isLutealBonusActive", () => {
+  // REGRESE (N-audit 2026-08-14): appka měla tuhle podmínku duplikovanou zvlášť v Home.tsx a
+  // App.tsx (posílala AI funkcím cíl bez luteálního bonusu, i když Home nad tím ukazuje vyšší
+  // GOAL_CALORIES) — extrahováno do jedné funkce, ať appka drží obě místa v syncu i do budoucna.
+  it("bez záznamu cyklu je bonus neaktivní", () => {
+    expect(isLutealBonusActive(null, false)).toBe(false);
+  });
+
+  it("v luteální fázi bez hormonální antikoncepce je bonus aktivní", () => {
+    expect(isLutealBonusActive({ phase: "luteal", dayInCycle: 20 }, false)).toBe(true);
+    expect(isLutealBonusActive({ phase: "luteal", dayInCycle: 20 }, undefined)).toBe(true);
+  });
+
+  it("v luteální fázi s hormonální antikoncepcí je bonus neaktivní", () => {
+    expect(isLutealBonusActive({ phase: "luteal", dayInCycle: 20 }, true)).toBe(false);
+  });
+
+  it("mimo luteální fázi je bonus neaktivní i bez antikoncepce", () => {
+    expect(isLutealBonusActive({ phase: "follicular", dayInCycle: 8 }, false)).toBe(false);
+    expect(isLutealBonusActive({ phase: "menstruation", dayInCycle: 2 }, false)).toBe(false);
+    expect(isLutealBonusActive({ phase: "ovulation", dayInCycle: 14 }, false)).toBe(false);
+  });
+});
+
+describe("applyLutealBonus", () => {
+  it("aktivní bonus přičte LUTEAL_CALORIE_BONUS k TDEE", () => {
+    expect(applyLutealBonus(2000, true)).toBe(2000 + LUTEAL_CALORIE_BONUS);
+  });
+
+  it("neaktivní bonus vrátí TDEE beze změny", () => {
+    expect(applyLutealBonus(2000, false)).toBe(2000);
   });
 });

@@ -97,3 +97,20 @@ export const PHASE_NOTES_CS: Record<CyclePhase, string> = {
 // Konzervativní střed z výzkumu (~50-100 kcal/den), ne blogové "100-300 kcal" — appka radši
 // podhodnotí. Viz CYCLE_TRACKING_PROPOSAL.md sekce 3.1 a 5 (Úroveň 2).
 export const LUTEAL_CALORIE_BONUS = 75;
+
+/**
+ * Jestli má appka pro dnešek přičíst luteální kalorický bonus. Extrahováno z Home.tsx
+ * (N-audit 2026-08-14) — appka měla stejnou podmínku duplikovanou na třech místech
+ * (Home.tsx, App.tsx pro AI volání mimo Home), tady je jedno místo pro test i pro appku.
+ */
+export function isLutealBonusActive(
+  cyclePhaseInfo: CyclePhaseInfo | null,
+  onHormonalContraception: boolean | undefined
+): boolean {
+  return !!cyclePhaseInfo && cyclePhaseInfo.phase === "luteal" && !onHormonalContraception;
+}
+
+/** Přičte LUTEAL_CALORIE_BONUS k TDEE, jen když je bonus aktivní — jinak vrátí TDEE beze změny. */
+export function applyLutealBonus(baseTDEE: number, bonusActive: boolean): number {
+  return bonusActive ? baseTDEE + LUTEAL_CALORIE_BONUS : baseTDEE;
+}

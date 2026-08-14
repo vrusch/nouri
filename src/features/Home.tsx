@@ -5,7 +5,13 @@ import { useAuth } from "../context/useAuth";
 import { Volume2, Square, Flame, Droplets, Droplet, Dumbbell, X, Loader2, TreePalm } from "lucide-react";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight } from "../lib/nutrition";
-import { getCyclePhase, DEFAULT_CYCLE_LENGTH_DAYS, LUTEAL_CALORIE_BONUS } from "../lib/cyclePhase";
+import {
+  getCyclePhase,
+  DEFAULT_CYCLE_LENGTH_DAYS,
+  isLutealBonusActive,
+  applyLutealBonus,
+  LUTEAL_CALORIE_BONUS,
+} from "../lib/cyclePhase";
 import { computeLoggingStreak } from "../lib/streak";
 import { getLocalDateISO } from "../lib/date";
 import { pickDailyCustomReminder } from "../lib/customReminders";
@@ -76,16 +82,22 @@ export default function Home({ onEditMeal }: HomeProps) {
   // GOAL_CALORIES jako u tréninkového bonusu níž) — jinak by appka posunula jen zobrazené
   // kalorie a makra (protein/tuky/sacharidy) by zůstala na neupraveném cíli, viz sekce 5,
   // Úroveň 2 v proposal dokumentu ("Kam to zapsat").
-  const lutealBonusActive = !!cyclePhaseInfo && cyclePhaseInfo.phase === "luteal" && !profile?.onHormonalContraception;
+  const lutealBonusActive = isLutealBonusActive(cyclePhaseInfo, profile?.onHormonalContraception);
   const nutrition =
     profile && baseNutrition && lutealBonusActive
-      ? calculateNutrition({ ...profile, calibratedTDEE: baseNutrition.tdee + LUTEAL_CALORIE_BONUS })
+      ? calculateNutrition({ ...profile, calibratedTDEE: applyLutealBonus(baseNutrition.tdee, lutealBonusActive) })
       : baseNutrition;
   const GOAL_CALORIES = nutrition ? nutrition.targetCalories : 1800;
   // BMR pojistka v applyGoalAdjustment (nutrition.ts) může bonus úplně pohltit (cíl zůstane
   // ořezaný na BMR beze změny) — badge se ukáže, jen když bonus opravdu posunul cílové
   // kalorie, ať appka netvrdí "+X kcal", když se ve skutečnosti nic nezměnilo.
   const lutealBonusVisible = lutealBonusActive && !!nutrition && !!baseNutrition && nutrition.targetCalories !== baseNutrition.targetCalories;
+  // N-audit 2026-08-14: getDailyGreeting níž (obě volání) posílala syrový `profile`, takže Mya
+  // v pozdravu počítala s cílem bez luteálního bonusu, i když appka nad ním na stejné obrazovce
+  // ukazuje vyšší GOAL_CALORIES — profil rozšířený o stejné calibratedTDEE, jaké appka použila
+  // pro `nutrition` výš, ať si Mya a UI neodporují.
+  const withEffectiveTDEE = (p: NonNullable<typeof profile>) =>
+    baseNutrition ? { ...p, calibratedTDEE: applyLutealBonus(baseNutrition.tdee, lutealBonusActive) } : p;
 
   const meals = useLiveQuery(() => db.meals.where('date').equals(today).toArray()) || [];
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
@@ -189,7 +201,7 @@ export default function Home({ onEditMeal }: HomeProps) {
     setSubmittingMood(true);
     try {
       const note = moodNoteInput.trim();
-      const msg = await MyaAI.getDailyGreeting(profile, {
+      const msg = await MyaAI.getDailyGreeting(withEffectiveTDEE(profile), {
         consumedCalories,
         consumedProtein,
         mood: value,
@@ -300,7 +312,7 @@ export default function Home({ onEditMeal }: HomeProps) {
       }
 
       try {
-        const msg = await MyaAI.getDailyGreeting(profile, { consumedCalories, consumedProtein });
+        const msg = await MyaAI.getDailyGreeting(withEffectiveTDEE(profile), { consumedCalories, consumedProtein });
         // Mezitím (appka na odpověď OpenAI čeká) mohla appka dostat reakci na náladu, nebo
         // zobrazit milníkovou oslavu (efekt výš) — obě mají přednost, tenhle běžný pozdrav
         // by je jinak přepsal, jakmile doletí později.
@@ -333,6 +345,11 @@ export default function Home({ onEditMeal }: HomeProps) {
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
     };
+    // withEffectiveTDEE je nová closure na každý render (staví se z lutealBonusActive/
+    // baseNutrition, ne z primitiv) — přidání do deps by efekt (i s grace-period timeoutem)
+    // restartovalo na každý render, ne jen když se skutečně změní vstupy, které appka
+    // opravdu chce sledovat (profile už deps má).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile, today, meals.length, consumedCalories, consumedProtein]);
 
   // Nová zpráva (nový den / nově zapsané jídlo) nesmí nechat dobíhat přečtení té staré —
