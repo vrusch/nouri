@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isVacationDay, toggleVacationDate, expandDateRange, addVacationRange, endVacationFromDate } from "./vacationMode";
+import { isVacationDay, expandDateRange, datesToEndVacation } from "./vacationMode";
 
 describe("isVacationDay", () => {
   it("datum v seznamu je volný den", () => {
@@ -12,20 +12,6 @@ describe("isVacationDay", () => {
 
   it("bez seznamu (undefined) není nikdy volný den", () => {
     expect(isVacationDay("2026-08-15", undefined)).toBe(false);
-  });
-});
-
-describe("toggleVacationDate", () => {
-  it("nepřítomné datum přidá", () => {
-    expect(toggleVacationDate(["2026-08-14"], "2026-08-15")).toEqual(["2026-08-14", "2026-08-15"]);
-  });
-
-  it("přítomné datum odebere", () => {
-    expect(toggleVacationDate(["2026-08-14", "2026-08-15"], "2026-08-15")).toEqual(["2026-08-14"]);
-  });
-
-  it("bez seznamu (undefined) přidá jako první", () => {
-    expect(toggleVacationDate(undefined, "2026-08-15")).toEqual(["2026-08-15"]);
   });
 });
 
@@ -54,26 +40,15 @@ describe("expandDateRange", () => {
   });
 });
 
-describe("addVacationRange", () => {
-  it("sloučí nový rozsah s existujícím seznamem bez duplicit", () => {
-    expect(addVacationRange(["2026-08-14"], "2026-08-14", "2026-08-16")).toEqual([
+describe("datesToEndVacation", () => {
+  it("vrátí data od zadaného dne dál (k odstranění), minulost vynechá", () => {
+    expect(datesToEndVacation(["2026-08-13", "2026-08-14", "2026-08-15"], "2026-08-14")).toEqual([
       "2026-08-14",
       "2026-08-15",
-      "2026-08-16",
     ]);
   });
 
-  it("bez seznamu (undefined) vytvoří nový", () => {
-    expect(addVacationRange(undefined, "2026-08-14", "2026-08-15")).toEqual(["2026-08-14", "2026-08-15"]);
-  });
-});
-
-describe("endVacationFromDate", () => {
-  it("odstraní data od zadaného dne dál, minulost nechá beze změny", () => {
-    expect(endVacationFromDate(["2026-08-13", "2026-08-14", "2026-08-15"], "2026-08-14")).toEqual(["2026-08-13"]);
-  });
-
   it("bez seznamu (undefined) vrátí prázdné pole", () => {
-    expect(endVacationFromDate(undefined, "2026-08-14")).toEqual([]);
+    expect(datesToEndVacation(undefined, "2026-08-14")).toEqual([]);
   });
 });

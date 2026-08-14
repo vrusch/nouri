@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
-import { doc, getDoc, setDoc, deleteField } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, deleteField, arrayUnion, arrayRemove } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
 import { db as localDb } from "../db/db";
 import { AuthContext } from "./AuthContextBase";
@@ -52,8 +52,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // N16 (AUDIT_2026-08-14.md) — pole, které appka právě zapisuje (updateProfile níž je má
+  // "v letu" mezi optimistickým lokálním merge a potvrzením z Firestore). Živý listener na
+  // profilu (viz useEffect níž) je tímhle chráněný před přepsáním starší server hodnotou —
+  // bez toho by dvě rychle po sobě jdoucí volání updateProfile (N12) mohla dostat echo ze
+  // snapshotu prvního volání zpátky DŘÍV, než druhé doběhne, a ztratit ho. Refcount (ne Set),
+  // protože dva překrývající se zápisy do stejného pole se nesmí navzájem předčasně "odemknout".
+  // Appka čte/píše jen přes `.current` uvnitř uzávěrů (nikdy nedestrukturuje mapu ven), ať
+  // efekt založený jednou s `[]` deps pořád vidí aktuální stav napříč renderama.
+  const pendingFieldsRef = useRef<Map<string, number>>(new Map());
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+    let unsubscribeProfile: (() => void) | undefined;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      // Předchozí uživatelův profilový listener appka vždy nejdřív odhlásí — jinak by po
+      // odhlášení/přepnutí účtu na stejném prohlížeči mohl dorazit echo z cizího docu (a
+      // appka by navíc dostala zbytečnou permission-denied chybu do konzole).
+      unsubscribeProfile?.();
+      unsubscribeProfile = undefined;
+
       if (currentUser) {
         // Musí doběhnout PŘED setUser níž — jakmile appka nastaví `user`, App.tsx efekt na
         // něm závislý může okamžitě spustit subscribeMeals/subscribeWorkouts pro nový uid a
@@ -66,36 +84,79 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(LAST_SYNCED_UID_KEY, currentUser.uid);
       }
 
+      // Nový uživatel (nebo odhlášení) = žádné rozjeté zápisy z předchozí session appku
+      // nezajímají.
+      pendingFieldsRef.current.clear();
       setUser(currentUser);
 
       if (currentUser) {
-        // Načíst profil z Firestore
-        const docRef = doc(db, "users", currentUser.uid);
-        const docSnap = await getDoc(docRef);
-
-        if (docSnap.exists()) {
-          setProfile(docSnap.data() as UserProfile);
-        } else {
-          setProfile(null);
-        }
+        // Živý listener místo jednorázového getDoc — appka se drží v syncu s dalšími
+        // zařízeními/taby stejně jako zbytek appky (Fáze 5 synchronizace), ne jen s vlastními
+        // zápisy. `merge`/`delete`-if-absent logika níž je to, co dělá tenhle listener bezpečný
+        // souběžně s updateProfile's fire-and-forget optimistickým merge (viz N16 v auditu).
+        unsubscribeProfile = onSnapshot(
+          doc(db, "users", currentUser.uid),
+          (snap) => {
+            if (!snap.exists()) {
+              setProfile(null);
+              setLoading(false);
+              return;
+            }
+            const serverData = snap.data() as UserProfile;
+            setProfile((prev) => {
+              if (!prev) return serverData;
+              const merged: Record<string, unknown> = { ...serverData };
+              pendingFieldsRef.current.forEach((_count, key) => {
+                const prevRecord = prev as unknown as Record<string, unknown>;
+                if (key in prevRecord) {
+                  merged[key] = prevRecord[key];
+                } else {
+                  // Appka pole i lokálně smazala (deleteField() cesta v updateProfile) —
+                  // server ještě nemusí odrážet smazání, appka mu tedy nevěří, dokud zápis
+                  // nedoběhne.
+                  delete merged[key];
+                }
+              });
+              return merged as unknown as UserProfile;
+            });
+            setLoading(false);
+          },
+          (error) => {
+            console.error("Synchronizace profilu selhala:", error);
+            setLoading(false);
+          }
+        );
       } else {
         setProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      unsubscribeProfile?.();
+    };
   }, []);
 
   const updateProfile = async (data: Partial<UserProfile>) => {
     if (!user) return;
+
+    // N16 (AUDIT_2026-08-14.md) — appka pole na dobu zápisu zaznamená do pendingFieldsRef
+    // (viz useEffect výš), ať profilový listener nepřepíše lokální hodnotu zastaralou serverovou
+    // dřív, než tenhle konkrétní zápis doběhne. Počítadlo, ne jen zápis true/false — kdyby
+    // druhé překrývající se volání do stejného pole smazalo ochranu hned po svém doběhnutí,
+    // první (ještě běžící) zápis by zůstal nechráněný.
+    const keys = Object.keys(data) as (keyof UserProfile)[];
+    keys.forEach((key) => {
+      pendingFieldsRef.current.set(key, (pendingFieldsRef.current.get(key) ?? 0) + 1);
+    });
 
     // Appka umí i smazat nepovinné pole zpět na "spočítej si to sama" (undefined v data) —
     // Firestore setDoc s merge:true samotné undefined ve writu odmítne (SDK to nepovoluje),
     // takže appka pro takové klíče pošle explicitní deleteField() a zároveň je vyhodí i z
     // lokálního optimistického stavu, ať zůstane v syncu s tím, co skutečně leží ve Firestore.
     const firestorePayload: Record<string, unknown> = { ...data };
-    (Object.keys(data) as (keyof UserProfile)[]).forEach((key) => {
+    keys.forEach((key) => {
       if (data[key] === undefined) {
         firestorePayload[key] = deleteField();
       }
@@ -110,7 +171,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // a zápis do Firestore doběhne na pozadí, chybu jen zaloguje.
     setProfile((prev) => {
       const next = { ...prev, ...data } as UserProfile;
-      (Object.keys(data) as (keyof UserProfile)[]).forEach((key) => {
+      keys.forEach((key) => {
         if (data[key] === undefined) {
           delete (next as unknown as Record<string, unknown>)[key];
         }
@@ -118,9 +179,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return next;
     });
 
-    setDoc(doc(db, "users", user.uid), firestorePayload, { merge: true }).catch((error) => {
-      console.error("updateProfile: zápis do Firestore selhal na pozadí", error);
-    });
+    setDoc(doc(db, "users", user.uid), firestorePayload, { merge: true })
+      .catch((error) => {
+        console.error("updateProfile: zápis do Firestore selhal na pozadí", error);
+      })
+      .finally(() => {
+        keys.forEach((key) => {
+          const count = (pendingFieldsRef.current.get(key) ?? 1) - 1;
+          if (count <= 0) pendingFieldsRef.current.delete(key);
+          else pendingFieldsRef.current.set(key, count);
+        });
+      });
+  };
+
+  // N15 (AUDIT_2026-08-14.md) — vacationDates/plannedWorkoutDays měly stejnou třídu race-bugu
+  // jako voda před C4: appka je počítala jako read-modify-write z lokálního stavu, takže dvě
+  // zařízení přidávající různou hodnotu téměř současně mohla jedno přidání ztratit (last-write-
+  // wins na celém poli). arrayUnion()/arrayRemove() je server-side atomické stejně jako
+  // increment() u vody — appka proto (stejně jako adjustWaterGlasses/subscribeWaterLog)
+  // záměrně NEdělá lokální optimistický merge, spolehá na živý profilový listener výš (N16),
+  // který změnu vrátí zpátky prakticky okamžitě z lokální Firestore cache, ještě před
+  // potvrzením ze serveru. customReminders zůstává mimo (viz AUDIT_2026-08-14.md) — appka
+  // maže podle indexu, ne podle hodnoty, a arrayRemove(hodnota) by při duplicitním textu
+  // smazal obě položky najednou, ne jen tu jednu vybranou.
+  const updateProfileArray = async (
+    field: "vacationDates" | "plannedWorkoutDays",
+    op: "union" | "remove",
+    values: (string | number)[]
+  ) => {
+    if (!user || values.length === 0) return;
+    try {
+      await setDoc(
+        doc(db, "users", user.uid),
+        { [field]: op === "union" ? arrayUnion(...values) : arrayRemove(...values) },
+        { merge: true }
+      );
+    } catch (error) {
+      console.error(`updateProfileArray(${field}): zápis do Firestore selhal`, error);
+    }
   };
 
   const logout = async () => {
@@ -128,7 +224,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, updateProfile, logout }}>
+    <AuthContext.Provider value={{ user, profile, loading, updateProfile, updateProfileArray, logout }}>
       {children}
     </AuthContext.Provider>
   );

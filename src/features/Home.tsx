@@ -34,7 +34,7 @@ import {
   detectNewWeightMilestone,
   buildWeightMilestoneMessage,
 } from "../lib/milestones";
-import { isVacationDay, toggleVacationDate } from "../lib/vacationMode";
+import { isVacationDay } from "../lib/vacationMode";
 import LogWorkoutModal from "../components/LogWorkoutModal";
 
 const speechSupported = typeof window !== "undefined" && "speechSynthesis" in window;
@@ -61,7 +61,7 @@ interface HomeProps {
 }
 
 export default function Home({ onEditMeal }: HomeProps) {
-  const { profile, user, updateProfile } = useAuth();
+  const { profile, user, updateProfile, updateProfileArray } = useAuth();
   const [greeting, setGreeting] = useState<string>("Přemýšlím o tvém dni...");
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [waterGlasses, setWaterGlasses] = useState(0);
@@ -156,7 +156,7 @@ export default function Home({ onEditMeal }: HomeProps) {
   const todayIsVacation = isVacationDay(today, profile?.vacationDates);
   const handleToggleVacationToday = () => {
     if (!profile) return;
-    updateProfile({ vacationDates: toggleVacationDate(profile.vacationDates, today) });
+    updateProfileArray("vacationDates", todayIsVacation ? "remove" : "union", [today]);
   };
 
   const handleAddWater = () => {

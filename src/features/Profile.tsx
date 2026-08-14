@@ -28,7 +28,7 @@ import { classifyReportLine, splitBoldSegments } from "../lib/aiReportMarkdown";
 import { computeProfileCheckStatus } from "../lib/profileCheck";
 import { QUIET_HOURS_START, QUIET_HOURS_END } from "../lib/quietHours";
 import { DAY_NAMES_CS } from "../lib/workoutPlan";
-import { addVacationRange, endVacationFromDate } from "../lib/vacationMode";
+import { expandDateRange, datesToEndVacation } from "../lib/vacationMode";
 import { db, type MealItem } from "../db/db";
 import pkg from "../../package.json";
 
@@ -53,7 +53,7 @@ const CUSTOM_MACRO_CARB_RESERVE_KCAL = 40; // ~10 g sacharidů
 
 export default function Profile() {
   const { theme, setTheme } = useTheme();
-  const { profile, user, logout, updateProfile } = useAuth();
+  const { profile, user, logout, updateProfile, updateProfileArray } = useAuth();
 
   // Stavy pro editaci
   const [editing, setEditing] = useState<string | null>(null);
@@ -103,12 +103,13 @@ export default function Profile() {
     updateProfile({ [field]: (current + delta + 24) % 24 });
   };
 
-  const plannedWorkoutDays = profile?.plannedWorkoutDays ?? [];
+  // N15 (AUDIT_2026-08-14.md) — arrayUnion() přidává na konec pole podle pořadí zápisu, ne
+  // podle hodnoty (na rozdíl od dřívějšího `.sort()` po každém read-modify-write), takže appka
+  // řadí až tady při čtení, ne při zápisu — souhrnný řádek níž by jinak po "Pátek pak Pondělí"
+  // ukázal "Pátek, Pondělí" místo "Pondělí, Pátek".
+  const plannedWorkoutDays = [...(profile?.plannedWorkoutDays ?? [])].sort((a, b) => a - b);
   const toggleWorkoutPlanDay = (day: number) => {
-    const next = plannedWorkoutDays.includes(day)
-      ? plannedWorkoutDays.filter((d) => d !== day)
-      : [...plannedWorkoutDays, day].sort();
-    updateProfile({ plannedWorkoutDays: next });
+    updateProfileArray("plannedWorkoutDays", plannedWorkoutDays.includes(day) ? "remove" : "union", [day]);
   };
 
   // Dovolenkový režim (FEATURE_IDEAS.md sekce 3) — sdílí `profile.vacationDates` s jednorázovým
@@ -128,13 +129,13 @@ export default function Profile() {
 
   const handleSetVacationRange = () => {
     if (!vacationStart || !vacationEnd) return;
-    updateProfile({ vacationDates: addVacationRange(profile?.vacationDates, vacationStart, vacationEnd) });
+    updateProfileArray("vacationDates", "union", expandDateRange(vacationStart, vacationEnd));
     setVacationStart("");
     setVacationEnd("");
   };
 
   const handleEndVacation = () => {
-    updateProfile({ vacationDates: endVacationFromDate(profile?.vacationDates, todayISO) });
+    updateProfileArray("vacationDates", "remove", datesToEndVacation(profile?.vacationDates, todayISO));
   };
 
   const activityOptions: { id: UserProfile['activityLevel']; label: string; desc: string }[] = [

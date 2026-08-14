@@ -7,6 +7,11 @@ export interface AuthContextType {
   profile: UserProfile | null;
   loading: boolean;
   updateProfile: (data: Partial<UserProfile>) => Promise<void>;
+  updateProfileArray: (
+    field: "vacationDates" | "plannedWorkoutDays",
+    op: "union" | "remove",
+    values: (string | number)[]
+  ) => Promise<void>;
   logout: () => Promise<void>;
 }
 
