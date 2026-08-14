@@ -67,6 +67,7 @@ export default function Profile() {
   const [pdfLowDataConfirm, setPdfLowDataConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteHistoryError, setDeleteHistoryError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -422,12 +423,28 @@ export default function Profile() {
       return;
     }
     setIsDeleting(true);
+    setDeleteHistoryError(null);
+    // N5 (AUDIT_2026-08-14.md) — lokální smazání je vždy rychlé, appka na něm spinner uzavře
+    // hned. Cloud smazání appka NEčeká uvnitř stejného try/finally (writeBatch().commit() má
+    // stejnou offline sémantiku jako Firestore setDoc — offline by nikdy nezreject ani
+    // neresolvnul, appka by zůstala navždy "mazat", stejná třída chyby jako N4). Offline se
+    // smazaná dávka v cloudu jen zafrontuje a doběhne sama po připojení (appka nic nehlásí).
+    // Cokoliv appka OPRAVDU odchytí (rejection, ne jen čekání) je skutečné selhání — appka ho
+    // teď na rozdíl od dřívějška propaguje (viz clearMealsBackup) a viditelně to řekne, místo
+    // aby tiše smazala jen lokálně a nechala si to "vzkřísit" při příštím resyncu.
     try {
       await db.meals.clear();
-      if (user) await clearMealsBackup(user.uid);
       setConfirmDelete(false);
     } finally {
       setIsDeleting(false);
+    }
+    if (user) {
+      try {
+        await clearMealsBackup(user.uid);
+      } catch (error) {
+        console.error("Smazání cloud zálohy jídel selhalo:", error);
+        setDeleteHistoryError("Lokální historie je smazaná, ale smazání v cloudu se nepovedlo. Zkus to prosím znovu.");
+      }
     }
   };
 
@@ -1249,6 +1266,12 @@ export default function Profile() {
                 {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                 <span className="text-sm font-bold">{confirmDelete ? 'Opravdu smazat? Klikni znovu' : 'Smazat veškerou historii'}</span>
               </button>
+              {deleteHistoryError && (
+                <div className="mt-2 flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{deleteHistoryError}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

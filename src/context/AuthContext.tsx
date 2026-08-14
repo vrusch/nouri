@@ -90,7 +90,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateProfile = async (data: Partial<UserProfile>) => {
     if (!user) return;
 
-    const newProfile = { ...profile, ...data } as UserProfile;
     // Appka umí i smazat nepovinné pole zpět na "spočítej si to sama" (undefined v data) —
     // Firestore setDoc s merge:true samotné undefined ve writu odmítne (SDK to nepovoluje),
     // takže appka pro takové klíče pošle explicitní deleteField() a zároveň je vyhodí i z
@@ -99,12 +98,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     (Object.keys(data) as (keyof UserProfile)[]).forEach((key) => {
       if (data[key] === undefined) {
         firestorePayload[key] = deleteField();
-        delete (newProfile as unknown as Record<string, unknown>)[key];
       }
     });
 
-    await setDoc(doc(db, "users", user.uid), firestorePayload, { merge: true });
-    setProfile(newProfile);
+    // N3/N12 (AUDIT_2026-08-14.md) — funkcionální update uzavírá nad `prev`, ne nad proměnnou
+    // `profile` zvenčí, ať dvě rychle po sobě jdoucí volání (např. dva přepínače v Cyklu)
+    // jedno druhé lokálně nepřepíší. A appka na `setDoc` dál nečeká: Firestore offline
+    // perzistence resolvuje write Promise až po potvrzení od backendu, takže `await
+    // updateProfile(...)` by offline viselo navždy a appka by se nikdy nedostala k tomu, co
+    // po něm následuje (typicky zavření editačního panelu) — appka teď zapíše lokálně hned
+    // a zápis do Firestore doběhne na pozadí, chybu jen zaloguje.
+    setProfile((prev) => {
+      const next = { ...prev, ...data } as UserProfile;
+      (Object.keys(data) as (keyof UserProfile)[]).forEach((key) => {
+        if (data[key] === undefined) {
+          delete (next as unknown as Record<string, unknown>)[key];
+        }
+      });
+      return next;
+    });
+
+    setDoc(doc(db, "users", user.uid), firestorePayload, { merge: true }).catch((error) => {
+      console.error("updateProfile: zápis do Firestore selhal na pozadí", error);
+    });
   };
 
   const logout = async () => {

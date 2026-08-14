@@ -36,16 +36,28 @@ export default function MyaChatModal({ onClose }: MyaChatModalProps) {
 
     setInput("");
     setSending(true);
-    await saveChatMessage(user.uid, "user", trimmed);
+    // N4 (AUDIT_2026-08-14.md) — appka na saveChatMessage nečeká, stejný fire-and-forget vzor
+    // jako backupMeal/backupWorkout (AddMealModal.tsx, LogWorkoutModal.tsx): Firestore offline
+    // write Promise nikdy nezreject ani neresolvne, dokud appka není zpět online, takže `await`
+    // by tu appku offline zaseklo navždy v "odesílání" (try/finally samo o sobě nepomůže — finally
+    // se spustí, až execution try blok opustí, a na neresolvnutém awaitu uvnitř k tomu nikdy
+    // nedojde). Lokální zobrazení jede přes subscribeChatMessages (onSnapshot vidí lokální
+    // cache okamžitě, i před potvrzením od backendu), takže odeslaná zpráva se v UI objeví hned.
+    saveChatMessage(user.uid, "user", trimmed);
 
-    // Historie se skládá lokálně (messages + právě odeslaná zpráva), ne z živého snapshotu —
-    // ten by v tuhle chvíli ještě nemusel obsahovat zprávu, kterou appka teprve zapsala.
-    const history = [...messages, { role: "user" as const, content: trimmed }]
-      .slice(-MAX_CHAT_HISTORY)
-      .map(({ role, content }) => ({ role, content }));
-    const reply = await MyaAI.chatWithMya(profile, history);
-    await saveChatMessage(user.uid, "assistant", reply);
-    setSending(false);
+    try {
+      // Historie se skládá lokálně (messages + právě odeslaná zpráva), ne z živého snapshotu —
+      // ten by v tuhle chvíli ještě nemusel obsahovat zprávu, kterou appka teprve zapsala.
+      const history = [...messages, { role: "user" as const, content: trimmed }]
+        .slice(-MAX_CHAT_HISTORY)
+        .map(({ role, content }) => ({ role, content }));
+      // chatWithMya nikdy nezreject appce zpátky (viz ai.ts) — i offline appka doběhne rychle
+      // s Czech fallback textem ("Mya právě neodpovídá..."), takže finally spolehlivě proběhne.
+      const reply = await MyaAI.chatWithMya(profile, history);
+      saveChatMessage(user.uid, "assistant", reply);
+    } finally {
+      setSending(false);
+    }
   };
 
   const handleClear = async () => {

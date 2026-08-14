@@ -107,19 +107,19 @@ export async function bulkBackupMeals(uid: string, meals: MealItem[]): Promise<v
   }
 }
 
+// N5 (AUDIT_2026-08-14.md) — chyba se dřív jen logovala a nikdy nepropagovala volajícímu, takže
+// Profile.tsx tiše smazal lokální Dexie i při skutečném selhání cloudu ("vzkříšení" dat při
+// příštím resyncu). Appka teď chybu nechá probublat (stejný vzor jako deleteProgressPhoto) —
+// volající rozhodne, jak ji zobrazit.
 export async function clearMealsBackup(uid: string): Promise<void> {
-  try {
-    const snap = await getDocs(mealsCollection(uid));
-    if (snap.empty) return;
-    const refs = snap.docs.map((d) => d.ref);
-    const chunkSize = 400; // limit Firestore batch je 500 operací
-    for (let i = 0; i < refs.length; i += chunkSize) {
-      const batch = writeBatch(firestoreDb);
-      refs.slice(i, i + chunkSize).forEach((ref) => batch.delete(ref));
-      await batch.commit();
-    }
-  } catch (error) {
-    console.error("Smazání cloud zálohy jídel selhalo:", error);
+  const snap = await getDocs(mealsCollection(uid));
+  if (snap.empty) return;
+  const refs = snap.docs.map((d) => d.ref);
+  const chunkSize = 400; // limit Firestore batch je 500 operací
+  for (let i = 0; i < refs.length; i += chunkSize) {
+    const batch = writeBatch(firestoreDb);
+    refs.slice(i, i + chunkSize).forEach((ref) => batch.delete(ref));
+    await batch.commit();
   }
 }
 
@@ -649,7 +649,11 @@ export function subscribeChatMessages(
 
 export async function saveChatMessage(uid: string, role: "user" | "assistant", content: string): Promise<void> {
   const entry: Omit<ChatMessageEntry, "id"> = { role, content, createdAt: new Date().toISOString() };
-  await setDoc(doc(chatMessagesCollection(uid)), entry);
+  try {
+    await setDoc(doc(chatMessagesCollection(uid)), entry);
+  } catch (error) {
+    console.error("saveChatMessage: zápis zprávy do Firestore selhal:", error);
+  }
 }
 
 // Smazání celé historie chatu (vlastní tlačítko v MyaChatModal, ne v Profilu — na rozdíl
