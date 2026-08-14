@@ -105,6 +105,14 @@ export default function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showReminder]);
 
+  // N11 (AUDIT_2026-08-14.md) — reminderDays žije v ref, ne v deps efektu níž: subscribeWeightLogs
+  // callback běží dlouho po založení (žije po celou dobu odběru), takže by bez refu appka mluvila
+  // se zastaralou hodnotou, dokud by se efekt znovu nespustil z jiného důvodu.
+  const reminderDaysRef = useRef(reminderDays);
+  useEffect(() => {
+    reminderDaysRef.current = reminderDays;
+  }, [reminderDays]);
+
   useEffect(() => {
     if (!user || !profile?.setupComplete) return;
     const uid = user.uid;
@@ -123,7 +131,7 @@ export default function App() {
       unsubscribeWorkouts = subscribeWorkouts(uid);
       unsubscribeWeights = subscribeWeightLogs(uid, (entries) => {
         const latest = entries.length > 0 ? entries[entries.length - 1] : null;
-        const status = computeWeighInStatus(latest, reminderDays);
+        const status = computeWeighInStatus(latest, reminderDaysRef.current);
         setDaysSinceWeighIn(status.daysSinceWeighIn);
         setWeighInOverdue(status.weighInOverdue);
         setWeighInStatusLoaded(true);
@@ -136,7 +144,14 @@ export default function App() {
       unsubscribeWorkouts?.();
       unsubscribeWeights?.();
     };
-  }, [user, profile?.setupComplete, profile?.weight, reminderDays]);
+    // profile?.weight/reminderDays záměrně mimo deps (N11, AUDIT_2026-08-14.md) — appka dřív
+    // strhávala a znovu zakládala všechny tři listenery při KAŽDÉ změně váhy nebo připomínky
+    // vážení; fresh onSnapshot nahlásí VŠECHNY dokumenty jako "added", takže appka zbytečně
+    // znovu zapsala celou historii jídel/tréninků do Dexie. profile.weight appka čte jen
+    // jednou při startu odběru (seedWeightLogIfEmpty je no-op, jakmile váhová historie není
+    // prázdná), reminderDays přes ref výš.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, profile?.setupComplete]);
 
   // PWA zástupce "Přidat jídlo" nastaví addMealOpen z URL parametru už v lazy initu useState
   // výš, dřív než appka stihne zjistit, jestli je uživatel vůbec přihlášený/má dokončený

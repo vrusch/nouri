@@ -26,4 +26,13 @@ describe("isQuietHours", () => {
     expect(isQuietHours(8, 9, 17)).toBe(false);
     expect(isQuietHours(18, 9, 17)).toBe(false);
   });
+
+  // REGRESE (N9, AUDIT_2026-08-14.md): start === end dřív spadl do větve "přes půlnoc"
+  // (hour >= start || hour < end), která je pro libovolnou hodinu vždy true — appka by tak
+  // postupným klikáním v Profilu ztišila pasivní upozornění navždy, beze stopy.
+  it("start === end znamená žádné tiché hodiny, ne 24h", () => {
+    expect(isQuietHours(0, 12, 12)).toBe(false);
+    expect(isQuietHours(12, 12, 12)).toBe(false);
+    expect(isQuietHours(23, 12, 12)).toBe(false);
+  });
 });

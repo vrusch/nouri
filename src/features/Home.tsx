@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type MealItem, type WorkoutItem } from "../db/db";
 import { useAuth } from "../context/useAuth";
@@ -65,6 +65,25 @@ export default function Home({ onEditMeal }: HomeProps) {
   const [greeting, setGreeting] = useState<string>("Přemýšlím o tvém dni...");
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [waterGlasses, setWaterGlasses] = useState(0);
+  // N14 (AUDIT_2026-08-14.md) — adjustWaterGlasses je atomický Firestore increment(), ale
+  // waterGlasses <= 0 guard čte React stav naplněný asynchronně přes subscribeWaterLog. Rychlý
+  // dvojklik na "-" při jedné sklenici tak může poslat increment(-1) dvakrát, než appka dostane
+  // zpátky aktuální hodnotu → uložené -1, UI ukáže zápornou vodu. Firestore transakce (přesný
+  // server-side Math.max(0,...)) appka záměrně NEpoužívá — transakce na rozdíl od setDoc
+  // s increment() vyžaduje aktivní spojení a v offline appce by rovnou selhala (appka by tak
+  // ztratila offline zápis vody, stejnou třídu regrese, jakou právě opravila N3/N4/N5). Gate
+  // musí být ref, ne jen state — dva rychlé tapy dřív, než appka stihne první re-render, by
+  // oba četly stejné (ještě `false`) state z uzávěru stejného renderu a race by přežil beze
+  // změny. State (waterRemoveLocked) appka drží navíc jen kvůli vizuálnímu disabled na tlačítku.
+  const waterRemoveLockedRef = useRef(false);
+  const [waterRemoveLocked, setWaterRemoveLocked] = useState(false);
+  const waterRemoveTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (waterRemoveTimeoutRef.current) clearTimeout(waterRemoveTimeoutRef.current);
+    };
+  }, []);
   const [showTemplateSave, setShowTemplateSave] = useState(false);
   const [templateNameInput, setTemplateNameInput] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
@@ -146,8 +165,14 @@ export default function Home({ onEditMeal }: HomeProps) {
   };
 
   const handleRemoveWater = () => {
-    if (!user || waterGlasses <= 0) return;
+    if (!user || waterGlasses <= 0 || waterRemoveLockedRef.current) return;
+    waterRemoveLockedRef.current = true;
+    setWaterRemoveLocked(true);
     adjustWaterGlasses(user.uid, today, -1);
+    waterRemoveTimeoutRef.current = setTimeout(() => {
+      waterRemoveLockedRef.current = false;
+      setWaterRemoveLocked(false);
+    }, 600);
   };
 
   const handleDeleteWorkout = async (workout: WorkoutItem) => {
@@ -544,7 +569,7 @@ export default function Home({ onEditMeal }: HomeProps) {
         <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={handleRemoveWater}
-            disabled={waterGlasses <= 0}
+            disabled={waterGlasses <= 0 || waterRemoveLocked}
             aria-label="Odebrat sklenici"
             className="w-8 h-8 rounded-full bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-300 font-bold disabled:opacity-30 active:scale-90 transition-all"
           >

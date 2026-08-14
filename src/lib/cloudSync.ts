@@ -137,7 +137,14 @@ export function subscribeMeals(uid: string, onError?: (error: unknown) => void):
         if (!meal.syncId) return;
 
         if (change.type === "removed") {
-          dexieDb.meals.where("syncId").equals(meal.syncId).delete();
+          dexieDb.meals
+            .where("syncId")
+            .equals(meal.syncId)
+            .delete()
+            .catch((error) => {
+              console.error("Lokální smazání jídla ze synchronizace selhalo:", error);
+              onError?.(error);
+            });
           return;
         }
 
@@ -153,6 +160,12 @@ export function subscribeMeals(uid: string, onError?: (error: unknown) => void):
             } else {
               dexieDb.meals.add(meal);
             }
+          })
+          // N13 (AUDIT_2026-08-14.md) — bez catch appka měla nezachycený reject při Dexie
+          // transakční chybě (typicky dvě zařízení upravující stejné jídlo těsně po sobě).
+          .catch((error) => {
+            console.error("Lokální zápis jídla ze synchronizace selhal:", error);
+            onError?.(error);
           });
       });
     },
@@ -192,7 +205,14 @@ export function subscribeWorkouts(uid: string, onError?: (error: unknown) => voi
         if (!workout.syncId) return;
 
         if (change.type === "removed") {
-          dexieDb.workouts.where("syncId").equals(workout.syncId).delete();
+          dexieDb.workouts
+            .where("syncId")
+            .equals(workout.syncId)
+            .delete()
+            .catch((error) => {
+              console.error("Lokální smazání tréninku ze synchronizace selhalo:", error);
+              onError?.(error);
+            });
           return;
         }
 
@@ -206,6 +226,11 @@ export function subscribeWorkouts(uid: string, onError?: (error: unknown) => voi
             } else {
               dexieDb.workouts.add(workout);
             }
+          })
+          // N13 (AUDIT_2026-08-14.md) — stejná chyba jako subscribeMeals výš.
+          .catch((error) => {
+            console.error("Lokální zápis tréninku ze synchronizace selhal:", error);
+            onError?.(error);
           });
       });
     },
