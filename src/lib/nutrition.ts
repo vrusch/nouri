@@ -87,11 +87,12 @@ export function calculateNutrition(data: {
   // Tuky: cca 25-30 % celkového příjmu
   const fatGrams = data.customFatGrams ?? Math.round((targetCalories * 0.25) / 9);
 
-  // Sacharidy: zbytek kalorií
+  // Sacharidy: zbytek kalorií — ořezáno na 0 dolů, protože vlastní bílkoviny/tuky (viz výš)
+  // mohou samy o sobě přesáhnout cílové kalorie a dát záporný zbytek (N1, AUDIT_2026-08-14.md).
   const proteinKcal = proteinGrams * 4;
   const fatKcal = fatGrams * 9;
   const carbKcal = targetCalories - proteinKcal - fatKcal;
-  const carbGrams = Math.round(carbKcal / 4);
+  const carbGrams = Math.max(0, Math.round(carbKcal / 4));
 
   return {
     bmr: Math.round(bmr),

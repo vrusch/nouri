@@ -60,7 +60,7 @@ export function calculateNutrition(data: {
   const proteinKcal = proteinGrams * 4;
   const fatKcal = fatGrams * 9;
   const carbKcal = targetCalories - proteinKcal - fatKcal;
-  const carbGrams = Math.round(carbKcal / 4);
+  const carbGrams = Math.max(0, Math.round(carbKcal / 4));
 
   return {
     bmr: Math.round(bmr),

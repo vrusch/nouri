@@ -169,6 +169,17 @@ describe("calculateNutrition", () => {
       // Bonus jde celý do sacharidů, přesně jak popisuje CYCLE_TRACKING_PROPOSAL.md.
       expect(withBonus.macros.carbs).toBeGreaterThan(withoutBonus.macros.carbs);
     });
+
+    // REGRESE: N1 (AUDIT_2026-08-14.md) — bílkoviny+tuky mohly samy přesáhnout cílové kalorie
+    // a dát záporný zbytek sacharidů, který se propagoval do PDF reportu pro lékaře a AI promptů.
+    it("záporný zbytek sacharidů se ořízne na 0, nikdy nejde do minusu", () => {
+      // BMR pojistka drží targetCalories na ~1415 kcal (base: 70 kg, lose, activityLevel 1.2);
+      // 200g bílkovin (800 kcal) + 90g tuků (810 kcal) = 1610 kcal, přes cíl.
+      const result = calculateNutrition({ ...base, customProteinGrams: 200, customFatGrams: 90 });
+      expect(result.macros.protein).toBe(200);
+      expect(result.macros.fat).toBe(90);
+      expect(result.macros.carbs).toBe(0);
+    });
   });
 });
 

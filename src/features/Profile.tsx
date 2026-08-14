@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, Droplet, Beef, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, Droplet, Beef, AlertCircle, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -46,6 +46,10 @@ function renderBoldSegments(text: string) {
 // poradci/lékaři, kteří vlastní makra typicky předepisují), ne medicínský strop.
 const MAX_CUSTOM_PROTEIN_G = 500;
 const MAX_CUSTOM_FAT_G = 500;
+
+// N1 (AUDIT_2026-08-14.md) — rezerva, ať vlastní bílkoviny/tuky nesklouznou uložením přesně
+// na hranici cíle (0 g sacharidů je platný, ale extrémní edge case, appka radši varuje dřív).
+const CUSTOM_MACRO_CARB_RESERVE_KCAL = 40; // ~10 g sacharidů
 
 export default function Profile() {
   const { theme, setTheme } = useTheme();
@@ -145,6 +149,7 @@ export default function Profile() {
   // pravdy pro kalorie. Prázdné pole = appka se vrátí k automatickému výpočtu daného makra.
   const [customProteinInput, setCustomProteinInput] = useState("");
   const [customFatInput, setCustomFatInput] = useState("");
+  const [customMacroError, setCustomMacroError] = useState<string | null>(null);
   const hasCustomMacros = profile?.customProteinGrams !== undefined || profile?.customFatGrams !== undefined;
 
   const handleToggleCustomMacros = () => {
@@ -154,6 +159,7 @@ export default function Profile() {
     }
     setCustomProteinInput(profile?.customProteinGrams !== undefined ? String(profile.customProteinGrams) : '');
     setCustomFatInput(profile?.customFatGrams !== undefined ? String(profile.customFatGrams) : '');
+    setCustomMacroError(null);
     setEditing('customMacros');
   };
 
@@ -165,11 +171,34 @@ export default function Profile() {
     if (protein !== undefined && (!Number.isFinite(protein) || protein < 0 || protein > MAX_CUSTOM_PROTEIN_G)) return;
     if (fat !== undefined && (!Number.isFinite(fat) || fat < 0 || fat > MAX_CUSTOM_FAT_G)) return;
 
+    // N1 (AUDIT_2026-08-14.md) — bílkoviny + tuky můžou samy přesáhnout cílové kalorie a appka
+    // by pak sacharidy tiše ořezala na 0 (calculateNutrition). Radši to zachytit tady a ukázat
+    // viditelné varování, než uložit hodnoty, které appce rozbijí zbytek makrového rozpočtu.
+    if (profile) {
+      const candidate = calculateNutrition({
+        gender: profile.gender,
+        weight: profile.weight,
+        height: profile.height,
+        birthDate: profile.birthDate,
+        activityLevel: profile.activityLevel,
+        goal: profile.goal,
+        calibratedTDEE: profile.calibratedTDEE,
+        customProteinGrams: protein,
+        customFatGrams: fat,
+      });
+      if (candidate.macros.protein * 4 + candidate.macros.fat * 9 > candidate.targetCalories - CUSTOM_MACRO_CARB_RESERVE_KCAL) {
+        setCustomMacroError("Bílkoviny a tuky dohromady přesahují tvůj kalorický cíl — na sacharidy by nezbylo nic. Sniž některou z hodnot.");
+        return;
+      }
+    }
+
+    setCustomMacroError(null);
     await updateProfile({ customProteinGrams: protein, customFatGrams: fat });
     setEditing(null);
   };
 
   const handleResetCustomMacros = async () => {
+    setCustomMacroError(null);
     await updateProfile({ customProteinGrams: undefined, customFatGrams: undefined });
     setEditing(null);
   };
@@ -653,7 +682,7 @@ export default function Profile() {
                     inputMode="decimal"
                     placeholder="automaticky"
                     value={customProteinInput}
-                    onChange={(e) => setCustomProteinInput(e.target.value)}
+                    onChange={(e) => { setCustomProteinInput(e.target.value); setCustomMacroError(null); }}
                     className="w-full mt-1 bg-white dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
                   />
                 </div>
@@ -664,11 +693,17 @@ export default function Profile() {
                     inputMode="decimal"
                     placeholder="automaticky"
                     value={customFatInput}
-                    onChange={(e) => setCustomFatInput(e.target.value)}
+                    onChange={(e) => { setCustomFatInput(e.target.value); setCustomMacroError(null); }}
                     className="w-full mt-1 bg-white dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
                   />
                 </div>
               </div>
+              {customMacroError && (
+                <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{customMacroError}</span>
+                </div>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={handleSaveCustomMacros}
