@@ -67,6 +67,37 @@ function currentTime(): string {
   return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 }
 
+// N8 (AUDIT_2026-08-14.md) — sdílená mezi krokem "describe" a "form", ať appka nemusí ten
+// samý přepínač duplikovat na dvou místech (dřív existoval jen v "describe", takže fotoflow
+// a edit mód neměly žádnou možnost roughEstimate nastavit/změnit).
+function EatingOutToggle({ checked, onToggle }: { checked: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`w-full flex items-center gap-3 p-3.5 rounded-2xl border-2 transition-all text-left ${
+        checked
+          ? "border-rose-600 bg-rose-50 dark:bg-rose-900/20"
+          : "border-transparent bg-slate-50 dark:bg-slate-800"
+      }`}
+    >
+      <span
+        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
+          checked ? "border-rose-600 bg-rose-600" : "border-slate-300 dark:border-slate-600"
+        }`}
+      >
+        {checked && <span className="w-2 h-2 rounded-full bg-white" />}
+      </span>
+      <span>
+        <span className="block text-sm font-bold text-slate-800 dark:text-white">Jím venku</span>
+        <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+          Hrubý odhad stačí, přesná makra nejsou potřeba
+        </span>
+      </span>
+    </button>
+  );
+}
+
 export default function AddMealModal({ onClose, editMeal, initialAction }: AddMealModalProps) {
   const { profile, user } = useAuth();
   const isEditing = editMeal !== undefined;
@@ -80,12 +111,15 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
   const [analyzingMessage, setAnalyzingMessage] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [eatingOut, setEatingOut] = useState(false);
+  // N8 (AUDIT_2026-08-14.md) — inicializace z editMeal, ať editace jídla nezapomene, že bylo
+  // označené jako hrubý odhad.
+  const [eatingOut, setEatingOut] = useState(editMeal?.roughEstimate ?? false);
   const [hintText, setHintText] = useState("");
   const [lastConfidence, setLastConfidence] = useState<Confidence | null>(null);
   const [templates, setTemplates] = useState<MealTemplateEntry[]>([]);
   const [applyingTemplateId, setApplyingTemplateId] = useState<string | null>(null);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
+  const [confirmDeleteTemplateId, setConfirmDeleteTemplateId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -114,11 +148,25 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
   const hasIngredients = ingredients.length > 0;
   const ingredientsTotals = computeIngredientsTotals(ingredients);
 
+  // N7 (AUDIT_2026-08-14.md) — sdílená pojistka proti nechtěnému placenému přepisu: kdykoliv
+  // appka přeruší nahrávání jinak než jeho normálním doběhnutím, `onstop` musí být odpojený
+  // PŘED `stop()`, jinak i zahozená nahrávka spustí handleRecordingStopped (a tedy placené
+  // MyaVoice.transcribeAudio). Používá se v handleBack, handleClose i unmount cleanupu níž —
+  // dřív měl tuhle ochranu jen handleBack, zavření modálu (X/backdrop) i odchod jinak než přes
+  // ně (odhlášení, navigace) ji postrádaly.
+  const stopRecordingWithoutTranscription = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.onstop = null;
+      mediaRecorderRef.current.stop();
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+  };
+
   // Jistota proti mikrofonu, který zůstane "otevřený" (indikátor v prohlížeči), když
   // se modál zavře jinak než přes handleClose/handleBack (např. odhlášení, navigace).
   useEffect(() => {
     return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
+      stopRecordingWithoutTranscription();
     };
   }, []);
 
@@ -298,7 +346,11 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
     setType(guessMealType());
     setTime(currentTime());
     setNotice(null);
-    setEatingOut(false);
+    // N8 (AUDIT_2026-08-14.md) — eatingOut se tu záměrně NEresetuje. Tahle funkce je fallback
+    // z kroku "describe" ("Radši zapsat čísla ručně") — uživatelka tam mohla "Jím venku" už
+    // zapnout, appka by jí to tichým resetem ztratila. Z "choose" kroku (jediná další cesta sem)
+    // je eatingOut vždy už false (handleBack/initial state to zajišťují), takže reset tam není
+    // potřeba.
     setLastConfidence(null);
     setHintText("");
     resetIngredients();
@@ -356,6 +408,14 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
 
   const handleDeleteTemplate = async (id: string) => {
     if (!user) return;
+    // N6 (AUDIT_2026-08-14.md) — stejný dvojklik/timeout vzor jako handleDeleteMeal, šablony
+    // byly jedinou destruktivní akcí v appce bez ochrany proti nechtěnému jednomu ťuknutí.
+    if (confirmDeleteTemplateId !== id) {
+      setConfirmDeleteTemplateId(id);
+      setTimeout(() => setConfirmDeleteTemplateId((current) => (current === id ? null : current)), 4000);
+      return;
+    }
+    setConfirmDeleteTemplateId(null);
     setDeletingTemplateId(id);
     try {
       await deleteMealTemplate(user.uid, id);
@@ -365,11 +425,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
   };
 
   const handleBack = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.onstop = null; // zpět uprostřed nahrávání nesmí spustit přepis
-      mediaRecorderRef.current.stop();
-    }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    stopRecordingWithoutTranscription();
     setStep("choose");
     setPhotoDataUrl(null);
     setDescription("");
@@ -381,8 +437,26 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
   };
 
   const handleClose = () => {
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    stopRecordingWithoutTranscription();
     onClose();
+  };
+
+  // N8 (AUDIT_2026-08-14.md) — přepnutí "Jím venku" přímo na kroku "form" (na rozdíl od kroku
+  // "describe", kde se přepíná PŘED analýzou) musí přepsat i už zobrazenou zprávu o jistotě
+  // odhadu, jinak by mohla zůstat nekoherentní (např. "zkontroluj hodnoty" vedle zaškrtnutého
+  // "Jím venku", který přesnost záměrně nevyžaduje) — stejná logika jako v resetFormFromVision.
+  const handleToggleEatingOutInForm = () => {
+    setEatingOut((prev) => {
+      const next = !prev;
+      if (next) {
+        setNotice("Hrubý odhad pro jídlo venku — makra můžou být nepřesná, to je v pořádku.");
+      } else if (lastConfidence === "low") {
+        setNotice("Mya si nebyla úplně jistá odhadem — zkontroluj prosím hodnoty.");
+      } else {
+        setNotice(null);
+      }
+      return next;
+    });
   };
 
   const openAddIngredientForm = () => {
@@ -448,6 +522,9 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
           protein: hasIngredients ? ingredientsTotals.protein : protein ? Math.round(Number(protein)) : undefined,
           fat: hasIngredients ? ingredientsTotals.fat : fat ? Math.round(Number(fat)) : undefined,
           carbs: hasIngredients ? ingredientsTotals.carbs : carbs ? Math.round(Number(carbs)) : undefined,
+          // N8 (AUDIT_2026-08-14.md) — dřív handleSave pro edit roughEstimate vůbec neposílal,
+          // takže appka nemohla flag u upravovaného jídla ani nastavit, ani smazat.
+          roughEstimate: eatingOut || undefined,
         };
 
         if (editMeal.id !== undefined) await db.meals.update(editMeal.id, updatedFields);
@@ -658,28 +735,29 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
               )}
               {templates.map((t) => {
                 const totalKcal = t.items.reduce((sum, i) => sum + i.value, 0);
+                const armed = confirmDeleteTemplateId === t.id;
                 return (
                   <div
                     key={t.id}
-                    className="w-full flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl"
+                    className={`w-full flex items-center gap-3 p-4 rounded-2xl transition-colors ${armed ? "bg-red-50 dark:bg-red-900/20" : "bg-slate-50 dark:bg-slate-800/50"}`}
                   >
                     <button
                       onClick={() => handleApplyTemplate(t)}
-                      disabled={applyingTemplateId !== null}
+                      disabled={applyingTemplateId !== null || armed}
                       className="flex-1 text-left disabled:opacity-50 flex items-center gap-3"
                     >
                       {applyingTemplateId === t.id && <Loader2 className="w-4 h-4 text-rose-500 animate-spin shrink-0" />}
                       <span>
                         <span className="block font-bold text-slate-800 dark:text-white">{t.name}</span>
-                        <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                          {formatMealsCs(t.items.length)} · {totalKcal} kcal
+                        <span className={`block text-xs mt-0.5 ${armed ? "text-red-500 font-bold" : "text-slate-500 dark:text-slate-400"}`}>
+                          {armed ? "Opravdu smazat? Klikni znovu" : `${formatMealsCs(t.items.length)} · ${totalKcal} kcal`}
                         </span>
                       </span>
                     </button>
                     <button
                       onClick={() => handleDeleteTemplate(t.id)}
                       disabled={deletingTemplateId !== null}
-                      className="p-2 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-50 shrink-0"
+                      className={`p-2 transition-colors disabled:opacity-50 shrink-0 ${armed ? "text-red-500" : "text-slate-400 hover:text-red-500"}`}
                     >
                       {deletingTemplateId === t.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                     </button>
@@ -721,29 +799,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
                 />
               </div>
 
-              <button
-                type="button"
-                onClick={() => setEatingOut((v) => !v)}
-                className={`w-full flex items-center gap-3 p-3.5 rounded-2xl border-2 transition-all text-left ${
-                  eatingOut
-                    ? "border-rose-600 bg-rose-50 dark:bg-rose-900/20"
-                    : "border-transparent bg-slate-50 dark:bg-slate-800"
-                }`}
-              >
-                <span
-                  className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-all ${
-                    eatingOut ? "border-rose-600 bg-rose-600" : "border-slate-300 dark:border-slate-600"
-                  }`}
-                >
-                  {eatingOut && <span className="w-2 h-2 rounded-full bg-white" />}
-                </span>
-                <span>
-                  <span className="block text-sm font-bold text-slate-800 dark:text-white">Jím venku</span>
-                  <span className="block text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Hrubý odhad stačí, přesná makra nejsou potřeba
-                  </span>
-                </span>
-              </button>
+              <EatingOutToggle checked={eatingOut} onToggle={() => setEatingOut((v) => !v)} />
 
               <button
                 onClick={handleAnalyzeText}
@@ -993,6 +1049,8 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
                   className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 font-semibold outline-rose-500 dark:text-white transition-all"
                 />
               </div>
+
+              <EatingOutToggle checked={eatingOut} onToggle={handleToggleEatingOutInForm} />
 
               <button
                 onClick={handleSave}

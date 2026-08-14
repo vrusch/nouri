@@ -503,6 +503,20 @@ function SavedRecipesView({
   onAddToShoppingList: (recipe: RecipeResult) => Promise<void>;
   onDelete: (id: string) => void;
 }) {
+  // N6 (AUDIT_2026-08-14.md) — stejný dvojklik/timeout vzor jako handleDeleteMeal
+  // (AddMealModal.tsx), uložené recepty byly jednou ze dvou destruktivních akcí bez ochrany.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const handleDeleteClick = (id: string) => {
+    if (confirmDeleteId !== id) {
+      setConfirmDeleteId(id);
+      setTimeout(() => setConfirmDeleteId((current) => (current === id ? null : current)), 4000);
+      return;
+    }
+    setConfirmDeleteId(null);
+    onDelete(id);
+  };
+
   if (recipes.length === 0) {
     return (
       <EmptyState
@@ -551,11 +565,15 @@ function SavedRecipesView({
                     Do seznamu
                   </button>
                   <button
-                    onClick={() => onDelete(entry.id)}
-                    className="flex-1 flex items-center justify-center gap-2 bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 py-3 rounded-2xl font-bold active:scale-[0.98] transition-all"
+                    onClick={() => handleDeleteClick(entry.id)}
+                    className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl font-bold active:scale-[0.98] transition-all ${
+                      confirmDeleteId === entry.id
+                        ? "bg-red-50 dark:bg-red-900/20 text-red-500"
+                        : "bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                    }`}
                   >
                     <Trash2 className="w-4 h-4" />
-                    Smazat
+                    {confirmDeleteId === entry.id ? "Opravdu smazat?" : "Smazat"}
                   </button>
                 </div>
               </div>
