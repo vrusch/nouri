@@ -7,6 +7,7 @@ import { MyaAI } from "../lib/ai";
 import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight } from "../lib/nutrition";
 import { getCyclePhase, DEFAULT_CYCLE_LENGTH_DAYS, LUTEAL_CALORIE_BONUS } from "../lib/cyclePhase";
 import { computeLoggingStreak } from "../lib/streak";
+import { getLocalDateISO } from "../lib/date";
 import { pickDailyCustomReminder } from "../lib/customReminders";
 import { WATER_TARGET_GLASSES, getWaterProgressPercent } from "../lib/water";
 import { formatGlassesCs, formatWorkoutsCs } from "../lib/format";
@@ -62,7 +63,7 @@ export default function Home({ onEditMeal }: HomeProps) {
   const [templateNameInput, setTemplateNameInput] = useState("");
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [showLogWorkout, setShowLogWorkout] = useState(false);
-  const today = new Date().toISOString().split('T')[0];
+  const today = getLocalDateISO();
 
   // Cyklus (REFERENCE/CYCLE_TRACKING_PROPOSAL.md, Úroveň 2) — appka data odebírá jen když je
   // sledování zapnuté, stejné pravidlo jako ve Stats.tsx.

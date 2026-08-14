@@ -3,6 +3,7 @@ import { X, ChevronLeft, Loader2, AlertCircle } from "lucide-react";
 import { db, type WorkoutItem } from "../db/db";
 import { MyaWorkout } from "../lib/workout";
 import { backupWorkout } from "../lib/cloudSync";
+import { getLocalDateISO } from "../lib/date";
 import { useAuth } from "../context/useAuth";
 
 interface LogWorkoutModalProps {
@@ -62,7 +63,7 @@ export default function LogWorkoutModal({ onClose }: LogWorkoutModalProps) {
         name: name.trim(),
         caloriesBurned: Math.round(caloriesNum),
         time: currentTime(),
-        date: new Date().toISOString().split("T")[0],
+        date: getLocalDateISO(),
         syncId: crypto.randomUUID(),
       };
       if (durationMinutes) workout.durationMinutes = Math.round(Number(durationMinutes));

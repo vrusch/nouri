@@ -1,3 +1,5 @@
+import { getLocalDateISO } from "./date";
+
 const TARGET_DAYS_AGO = 30;
 // Tolerance kolem 30 dní — appka hledá záznam nejbližší přesně měsíci zpátky, ale dál než
 // týden od cíle radši nic neukáže, ať "před měsícem" nikdy neoznačí záznam starý 3 týdny.
@@ -19,7 +21,7 @@ export interface MonthRetrospective {
  */
 export function computeMonthRetrospective(
   weightLogs: { date: string; weight: number }[],
-  todayISO: string = new Date().toISOString().split("T")[0]
+  todayISO: string = getLocalDateISO()
 ): MonthRetrospective | null {
   if (weightLogs.length < 2) return null;
 

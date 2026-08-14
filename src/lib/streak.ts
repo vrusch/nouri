@@ -1,3 +1,5 @@
+import { getLocalDateISO } from "./date";
+
 function addDaysISO(dateISO: string, delta: number): string {
   const d = new Date(`${dateISO}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + delta);
@@ -14,7 +16,7 @@ function addDaysISO(dateISO: string, delta: number): string {
  */
 export function computeLoggingStreak(
   mealDates: string[],
-  todayISO: string = new Date().toISOString().split("T")[0],
+  todayISO: string = getLocalDateISO(),
   excludedDates: string[] = []
 ): number {
   const dates = new Set(mealDates);

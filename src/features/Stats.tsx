@@ -32,6 +32,7 @@ import { isVacationDay } from "../lib/vacationMode";
 import { computeMeasurementTrend, MEASUREMENT_FIELDS, MEASUREMENT_LABELS_CS } from "../lib/bodyMeasurements";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { daysSince } from "../lib/weighIn";
+import { getLocalDateISO } from "../lib/date";
 import { getCyclePhase, computeAvgCycleLength, PHASE_LABELS_CS, PHASE_NOTES_CS, DEFAULT_CYCLE_LENGTH_DAYS } from "../lib/cyclePhase";
 import { isQuietHours } from "../lib/quietHours";
 import { MyaAI } from "../lib/ai";
@@ -81,7 +82,7 @@ function lastNDates(n: number, offsetDays: number = 0): string[] {
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i - offsetDays);
-    dates.push(d.toISOString().split("T")[0]);
+    dates.push(getLocalDateISO(d));
   }
   return dates;
 }
@@ -387,7 +388,7 @@ export default function Stats() {
   }, [showMacroPatternCard, lowProteinPattern?.avgProtein, lowProteinPattern?.reliableDaysConsidered, nutrition?.macros.protein, profile?.goal]);
 
   const handleDismissMacroPattern = () => {
-    updateProfile({ lastMacroPatternDismissedAt: new Date().toISOString().split("T")[0] });
+    updateProfile({ lastMacroPatternDismissedAt: getLocalDateISO() });
     setMacroSuggestion(null);
   };
 
@@ -410,12 +411,12 @@ export default function Stats() {
   }, [showLowCaloriePatternCard, lowCaloriePattern?.avgCalories, lowCaloriePattern?.reliableDaysConsidered, targetCalories, profile?.goal]);
 
   const handleDismissLowCaloriePattern = () => {
-    updateProfile({ lastLowCalorieDismissedAt: new Date().toISOString().split("T")[0] });
+    updateProfile({ lastLowCalorieDismissedAt: getLocalDateISO() });
     setCalorieCheckInMessage(null);
   };
 
   const handleDismissCalibration = () => {
-    updateProfile({ lastCalibrationDismissedAt: new Date().toISOString().split("T")[0] });
+    updateProfile({ lastCalibrationDismissedAt: getLocalDateISO() });
   };
 
   const [goalReachedMessage, setGoalReachedMessage] = useState<string | null>(null);

@@ -33,6 +33,7 @@ import {
   type ShoppingListEntry,
 } from "../lib/cloudSync";
 import { buildShoppingListItems, countUnbought } from "../lib/shoppingList";
+import { getLocalDateISO } from "../lib/date";
 import EmptyState from "../components/EmptyState";
 import ShoppingListView from "../components/ShoppingListView";
 
@@ -62,7 +63,7 @@ export default function Recipes() {
   const [expandedSavedId, setExpandedSavedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = getLocalDateISO();
   const todaysMeals = useLiveQuery(() => db.meals.where("date").equals(today).toArray()) || [];
 
   useEffect(() => {

@@ -9,6 +9,7 @@ import { MyaAI } from "../lib/ai";
 import { backupMeal, deleteMeal, subscribeMealTemplates, deleteMealTemplate, type MealTemplateEntry } from "../lib/cloudSync";
 import { calculateNutrition } from "../lib/nutrition";
 import { computeIngredientsTotals } from "../lib/mealComponents";
+import { getLocalDateISO } from "../lib/date";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { useAuth } from "../context/useAuth";
 import { getRecentUniqueMeals, type RecentMealSummary } from "../lib/recentMeals";
@@ -326,7 +327,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
   const handleApplyTemplate = async (template: MealTemplateEntry) => {
     setApplyingTemplateId(template.id);
     try {
-      const today = new Date().toISOString().split("T")[0];
+      const today = getLocalDateISO();
       const newMeals: MealItem[] = template.items.map((item) => {
         const newMeal: MealItem = {
           name: item.name,
@@ -464,7 +465,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction }: AddMe
         name: name.trim(),
         value: Math.round(caloriesNum),
         time,
-        date: new Date().toISOString().split("T")[0],
+        date: getLocalDateISO(),
         type,
         source,
         syncId: crypto.randomUUID(),

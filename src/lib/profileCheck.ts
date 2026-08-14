@@ -1,4 +1,5 @@
 import { daysSince } from "./weighIn";
+import { getLocalDateISO } from "./date";
 
 // Jak často appka nabídne "pořád ti sedí profil?" — viz FEATURE_IDEAS.md sekce 8.
 export const PROFILE_CHECK_INTERVAL_DAYS = 21;
@@ -16,7 +17,7 @@ export interface ProfileCheckStatus {
  */
 export function computeProfileCheckStatus(
   lastCheckISO: string | null | undefined,
-  todayISO: string = new Date().toISOString().split("T")[0]
+  todayISO: string = getLocalDateISO()
 ): ProfileCheckStatus {
   if (!lastCheckISO) return { daysSinceCheck: null, checkOverdue: true };
   const daysSinceCheck = daysSince(lastCheckISO, todayISO);

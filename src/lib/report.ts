@@ -1,5 +1,6 @@
 import { MEASUREMENT_FIELDS, computeMeasurementTrend, type MeasurementField, type MeasurementTrend } from "./bodyMeasurements";
 import { type WeightLogEntry, type BodyMeasurementEntry } from "./cloudSync";
+import { getLocalDateISO } from "./date";
 
 export interface ReportMealInput {
   date: string;
@@ -43,7 +44,7 @@ export function buildMonthlyReportData(
   meals: ReportMealInput[],
   weightLogs: WeightLogEntry[],
   measurements: BodyMeasurementEntry[],
-  todayISO: string = new Date().toISOString().split("T")[0],
+  todayISO: string = getLocalDateISO(),
   periodDays: number = REPORT_PERIOD_DAYS
 ): MonthlyReportData {
   const periodEnd = todayISO;

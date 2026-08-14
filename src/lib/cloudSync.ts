@@ -14,6 +14,7 @@ import {
 import { ref, uploadString, getDownloadURL, deleteObject } from "firebase/storage";
 import { db as firestoreDb, storage } from "./firebase";
 import { db as dexieDb, type MealItem, type WorkoutItem } from "../db/db";
+import { getLocalDateISO } from "./date";
 import type { ShoppingListItemDraft } from "./shoppingList";
 import type { RecipeResult } from "./recipes";
 
@@ -269,7 +270,7 @@ export async function seedWeightLogIfEmpty(uid: string, currentWeight: number): 
   try {
     const snap = await getDocs(weightLogsCollection(uid));
     if (!snap.empty) return;
-    const today = new Date().toISOString().split("T")[0];
+    const today = getLocalDateISO();
     await logWeight(uid, currentWeight, today, "seed");
   } catch (error) {
     console.error("Založení výchozí váhové historie selhalo:", error);

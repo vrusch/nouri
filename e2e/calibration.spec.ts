@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { calculateNutrition, calibrateTarget } from "../src/lib/nutrition";
+import { getLocalDateISO } from "../src/lib/date";
 
 /**
  * E2E test pro adaptivní kalibraci kalorického cíle (Stats.tsx).
@@ -47,6 +48,7 @@ async function seedHistoricalData(page: Page) {
       const { auth } = await import("/src/lib/firebase.ts");
       const { logWeight } = await import("/src/lib/cloudSync.ts");
       const { db } = await import("/src/db/db.ts");
+      const { getLocalDateISO } = await import("/src/lib/date.ts");
 
       const uid = auth.currentUser!.uid;
 
@@ -56,7 +58,7 @@ async function seedHistoricalData(page: Page) {
         return d.toISOString().split("T")[0];
       }
 
-      const today = new Date().toISOString().split("T")[0];
+      const today = getLocalDateISO();
       const start = addDaysInPage(today, -span);
 
       // Reálné vážení (source: "manual") — appka odvodí kalibraci jen z těchto dvou bodů.
@@ -128,7 +130,7 @@ test("kalibrace cíle: našeje historii, ověří návrh a jeho zápis", async (
   // Očekávané hodnoty počítáme stejnou funkcí, co používá appka — žádná zakódovaná
   // magická čísla, test zůstane platný i když se formulka/prahy v budoucnu změní.
   const expectedNutrition = calculateNutrition(PROFILE);
-  const today = new Date().toISOString().split("T")[0];
+  const today = getLocalDateISO();
   const startDate = addDays(today, -WEIGHT_SPAN_DAYS);
   const expectedCalibration = calibrateTarget(
     [

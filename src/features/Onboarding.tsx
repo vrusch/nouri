@@ -5,6 +5,7 @@ import { auth, googleProvider } from "../lib/firebase";
 import { useAuth } from "../context/useAuth";
 import { type UserProfile } from "../context/AuthContext";
 import { calculateAge } from "../lib/nutrition";
+import { getLocalDateISO } from "../lib/date";
 import { LogoHorizontal } from "../components/Logo";
 import { Ruler, Weight, ChevronRight, LogIn, Mail, Lock, User as UserIcon, Zap, Calendar, Flag } from "lucide-react";
 
@@ -73,7 +74,7 @@ export default function Onboarding() {
       await updateProfile({
         ...formData,
         setupComplete: true,
-        lastProfileCheckAt: new Date().toISOString().split("T")[0],
+        lastProfileCheckAt: getLocalDateISO(),
       });
     }
   };
@@ -242,7 +243,7 @@ export default function Onboarding() {
                 type="date"
                 placeholder="Datum narození"
                 value={formData.birthDate ?? ""}
-                max={new Date().toISOString().split("T")[0]}
+                max={getLocalDateISO()}
                 onChange={(e) => setFormData({ ...formData, birthDate: e.target.value || undefined })}
                 className="text-right font-bold text-lg bg-transparent outline-none dark:text-white"
               />

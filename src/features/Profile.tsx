@@ -6,6 +6,7 @@ import { useAuth } from "../context/useAuth";
 import { type UserProfile } from "../context/AuthContext";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition } from "../lib/nutrition";
+import { getLocalDateISO } from "../lib/date";
 import {
   logWeight,
   clearMealsBackup,
@@ -111,7 +112,7 @@ export default function Profile() {
   // (dnešek nebo pozdějších) datumů v poli, ať appka nemá dva zdroje pravdy.
   const [vacationStart, setVacationStart] = useState("");
   const [vacationEnd, setVacationEnd] = useState("");
-  const todayISO = new Date().toISOString().split("T")[0];
+  const todayISO = getLocalDateISO();
   const upcomingVacationDates = (profile?.vacationDates ?? []).filter((d) => d >= todayISO).sort();
   const formatDateCs = (iso: string) =>
     new Date(`${iso}T00:00:00`).toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" });
@@ -183,7 +184,7 @@ export default function Profile() {
     const weightChanged = field === 'weight' && val !== profile?.weight;
     await updateProfile({ [field]: val });
     if (weightChanged && user && typeof val === 'number') {
-      logWeight(user.uid, val, new Date().toISOString().split('T')[0]);
+      logWeight(user.uid, val, getLocalDateISO());
     }
     setEditing(null);
   };
@@ -226,7 +227,7 @@ export default function Profile() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `nouri-jidla-${new Date().toISOString().split('T')[0]}.csv`;
+      a.download = `nouri-jidla-${getLocalDateISO()}.csv`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
@@ -306,7 +307,7 @@ export default function Profile() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `nouri-zaloha-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `nouri-zaloha-${getLocalDateISO()}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
@@ -364,7 +365,7 @@ export default function Profile() {
   };
 
   const handleConfirmProfileCheck = () => {
-    updateProfile({ lastProfileCheckAt: new Date().toISOString().split('T')[0] });
+    updateProfile({ lastProfileCheckAt: getLocalDateISO() });
   };
 
   const handleAddReminder = async () => {

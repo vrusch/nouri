@@ -1,6 +1,7 @@
 import { type WeightLogEntry } from "./cloudSync";
+import { getLocalDateISO } from "./date";
 
-export function daysSince(dateISO: string, todayISO: string = new Date().toISOString().split("T")[0]): number {
+export function daysSince(dateISO: string, todayISO: string = getLocalDateISO()): number {
   const msPerDay = 86400000;
   const diff = Date.parse(`${todayISO}T00:00:00Z`) - Date.parse(`${dateISO}T00:00:00Z`);
   return Math.round(diff / msPerDay);
@@ -19,7 +20,7 @@ export interface WeighInStatus {
 export function computeWeighInStatus(
   latest: WeightLogEntry | null,
   reminderDays: number,
-  todayISO: string = new Date().toISOString().split("T")[0]
+  todayISO: string = getLocalDateISO()
 ): WeighInStatus {
   const lastRealWeighIn = latest && latest.source === "manual" ? latest : null;
   const daysSinceWeighIn = lastRealWeighIn ? daysSince(lastRealWeighIn.date, todayISO) : null;

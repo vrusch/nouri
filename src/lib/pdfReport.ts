@@ -1,6 +1,7 @@
 import type { UserProfile } from "../context/AuthContext";
 import { calculateAge, type NutritionResults } from "./nutrition";
 import { MEASUREMENT_LABELS_CS, type MeasurementField } from "./bodyMeasurements";
+import { getLocalDateISO } from "./date";
 import type { MonthlyReportData } from "./report";
 import ptSansRegularUrl from "../assets/fonts/PTSans-Regular.ttf?url";
 import ptSansBoldUrl from "../assets/fonts/PTSans-Bold.ttf?url";
@@ -111,7 +112,7 @@ export async function downloadMonthlyReportPdf(
   doc.setFont("PTSans", "normal");
   doc.setFontSize(10);
   doc.setTextColor(100, 116, 139);
-  const todayIso = new Date().toISOString().split("T")[0];
+  const todayIso = getLocalDateISO();
   doc.text(
     `Vygenerováno ${formatDateCs(todayIso)} · období ${formatDateCs(data.periodStart)} - ${formatDateCs(data.periodEnd)}`,
     MARGIN_X,

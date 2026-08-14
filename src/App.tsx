@@ -14,6 +14,7 @@ import Onboarding from "./features/Onboarding";
 import { db, type MealItem } from "./db/db";
 import { useAuth } from "./context/useAuth";
 import { seedWeightLogIfEmpty, subscribeMeals, subscribeWeightLogs, subscribeWorkouts } from "./lib/cloudSync";
+import { getLocalDateISO } from "./lib/date";
 import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
 import { computeProfileCheckStatus } from "./lib/profileCheck";
@@ -48,7 +49,7 @@ export default function App() {
   const [shoppingListOpen, setShoppingListOpen] = useState(false);
   const reminderDays = profile?.weighInReminderDays ?? 3;
   const notificationRef = useRef<HTMLDivElement>(null);
-  const today = new Date().toISOString().split("T")[0];
+  const today = getLocalDateISO();
   // Hook musí běžet nepodmíněně na každém renderu, i před přesměrováním na Onboarding níže —
   // proto tady, ne až za `if (!user...)`. Necháváme raw (možné `undefined`, dokud Dexie
   // neodpoví) místo rovnou kolabovat na 0/[] — na studeném cache appka jinak na pár vteřin
