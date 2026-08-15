@@ -199,11 +199,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // increment() u vody — appka proto (stejně jako adjustWaterGlasses/subscribeWaterLog)
   // záměrně NEdělá lokální optimistický merge, spolehá na živý profilový listener výš (N16),
   // který změnu vrátí zpátky prakticky okamžitě z lokální Firestore cache, ještě před
-  // potvrzením ze serveru. customReminders zůstává mimo (viz AUDIT_2026-08-14.md) — appka
-  // maže podle indexu, ne podle hodnoty, a arrayRemove(hodnota) by při duplicitním textu
-  // smazal obě položky najednou, ne jen tu jednu vybranou.
+  // potvrzením ze serveru. customReminders přidán později (N15, dokončeno v samostatné session) —
+  // dřív appka mazala podle indexu, ne podle hodnoty, což s arrayRemove(hodnota) kolidovalo:
+  // dvě stejné afirmace by se smazaly obě najednou, ne jen ta jedna vybraná. Řešení není extra
+  // dedup logika na appce — arrayUnion() sama o sobě na Firestore serveru nepřidá hodnotu,
+  // která v poli už existuje (zdokumentované chování), takže dokud VŠECHNA přidávání jdou přes
+  // tuhle funkci, duplicita v poli nemůže vzniknout a arrayRemove(hodnota) je tím pádem bezpečné.
   const updateProfileArray = async (
-    field: "vacationDates" | "plannedWorkoutDays",
+    field: "vacationDates" | "plannedWorkoutDays" | "customReminders",
     op: "union" | "remove",
     values: (string | number)[]
   ) => {

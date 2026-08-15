@@ -411,17 +411,18 @@ export default function Profile() {
     if (!text) return;
     setIsSavingReminder(true);
     try {
-      const current = profile?.customReminders ?? [];
-      await updateProfile({ customReminders: [...current, text] });
+      // N15 (AUDIT_2026-08-14.md) — arrayUnion (přes updateProfileArray, stejný vzor jako
+      // vacationDates/plannedWorkoutDays) místo read-modify-write; appka se spoléhá na živý
+      // profilový listener (N16), že novou hodnotu vrátí zpátky, ne na lokální optimistický merge.
+      await updateProfileArray("customReminders", "union", [text]);
       setNewReminderText("");
     } finally {
       setIsSavingReminder(false);
     }
   };
 
-  const handleDeleteReminder = (index: number) => {
-    const current = profile?.customReminders ?? [];
-    updateProfile({ customReminders: current.filter((_, i) => i !== index) });
+  const handleDeleteReminder = (text: string) => {
+    updateProfileArray("customReminders", "remove", [text]);
   };
 
   const handleDeleteHistory = async () => {
@@ -1124,7 +1125,7 @@ export default function Profile() {
               <MessageCircleHeart className={`w-4 h-4 shrink-0 ${accentText}`} />
               <span className="flex-1 text-sm text-slate-700 dark:text-slate-200">{text}</span>
               <button
-                onClick={() => handleDeleteReminder(i)}
+                onClick={() => handleDeleteReminder(text)}
                 className="text-slate-400 hover:text-red-500 transition-colors shrink-0"
               >
                 <Trash2 className="w-3.5 h-3.5" />

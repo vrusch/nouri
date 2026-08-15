@@ -41,10 +41,14 @@ function buildNutritionFromProfile(profile: UserProfileInput) {
   });
 }
 
-// N19 — obrana proti runaway smyčce (chybný retry v klientovi apod.) na nejdražších AI voláních
-// (gpt-4o vision, Whisper). Gatuje jen tři konkrétní funkce, ne všech 14 — viz sekce 6 rozhodnutí.
+// N19 — obrana proti runaway smyčce (chybný retry v klientovi apod.). Dva tiery: EXPENSIVE pro
+// gpt-4o vision/Whisper (3 funkce, nejdražší), STANDARD pro zbylých 11 — gpt-4o-mini s malým
+// max_tokens, řádově levnější za volání, takže appka snese vyšší limit bez zbytečného škrcení
+// legitimního použití (např. delší konverzace v chatu, víc jídel zapsaných rychle po sobě).
 const EXPENSIVE_AI_CALL_MAX = 20;
 const EXPENSIVE_AI_CALL_WINDOW_MS = 15 * 60 * 1000;
+const STANDARD_AI_CALL_MAX = 60;
+const STANDARD_AI_CALL_WINDOW_MS = 15 * 60 * 1000;
 
 const DEFAULT_MAX_PROMPT_TEXT_LENGTH = 300;
 
@@ -76,6 +80,7 @@ export const generateWelcomeReport = onCall(
     requireAuth(request);
     const profile = request.data?.profile as UserProfileInput | undefined;
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
+    await enforceRateLimit(request.auth!.uid, "generateWelcomeReport", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
     const results = buildNutritionFromProfile(profile);
@@ -154,6 +159,7 @@ export const getDailyGreeting = onCall(
     const mood = Number.isInteger(rawMood) && rawMood >= 1 && rawMood <= 5 ? rawMood : undefined;
     const moodNote = typeof request.data?.moodNote === "string" ? request.data.moodNote.trim().slice(0, 300) : undefined;
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
+    await enforceRateLimit(request.auth!.uid, "getDailyGreeting", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
     // Živě přepočteno z profilu, ne z uloženého profile.targetCalories — to může být
@@ -298,6 +304,7 @@ export const analyzeFoodText = onCall(
     if (!description) {
       throw new HttpsError("invalid-argument", "Chybí popis jídla.");
     }
+    await enforceRateLimit(request.auth!.uid, "analyzeFoodText", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti slovně popíše, co snědl (bez fotky).
 Tvým úkolem je z popisu odhadnout jídlo a jeho nutriční hodnoty pro popsanou porci. Pokud popis neuvádí množství, odhadni typickou porci pro dospělého člověka.
@@ -358,6 +365,7 @@ export const analyzeWorkout = onCall(
     if (!description) {
       throw new HttpsError("invalid-argument", "Chybí popis tréninku.");
     }
+    await enforceRateLimit(request.auth!.uid, "analyzeWorkout", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     const systemPrompt = `Jsi Mya, AI fitness asistentka aplikace Nouri. Uživatel ti slovně popíše trénink, který právě dokončil
 (např. "30 min běh", "hodina jógy", "posilovna nohy"). Tvým úkolem je odhadnout, kolik kalorií trénink spálil, pro
@@ -443,6 +451,7 @@ export const getMealFeedback = onCall(
     ) {
       throw new HttpsError("invalid-argument", "Chybí platná data o jídle.");
     }
+    await enforceRateLimit(request.auth!.uid, "getMealFeedback", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     const remaining = input.targetCalories - input.consumedTodayCalories;
     const mealTypeLabel = MEAL_TYPE_LABELS[input.mealType] ?? "jídlo";
@@ -533,6 +542,7 @@ export const generateRecipe = onCall(
     if (!input || !Number.isFinite(input.remainingCalories) || input.remainingCalories <= 0) {
       throw new HttpsError("invalid-argument", "Chybí platný zbývající kalorický rozpočet.");
     }
+    await enforceRateLimit(request.auth!.uid, "generateRecipe", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
     const preferences = sanitizePromptText(input.preferences, 300);
@@ -606,6 +616,7 @@ export const suggestMacroFix = onCall(
     if (!input || !Number.isFinite(input.avgProtein) || !Number.isFinite(input.targetProtein)) {
       throw new HttpsError("invalid-argument", "Chybí platná data o příjmu bílkovin.");
     }
+    await enforceRateLimit(request.auth!.uid, "suggestMacroFix", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
     const fallback = `Posledních pár dní ti chybí bílkoviny k cíli (${input.targetProtein}g/den) — zkus přidat větší porci masa, tvarohu nebo luštěnin k jednomu z jídel.`;
@@ -659,6 +670,7 @@ export const checkLowCalorieIntake = onCall(
     if (!input || !Number.isFinite(input.avgCalories) || !Number.isFinite(input.targetCalories)) {
       throw new HttpsError("invalid-argument", "Chybí platná data o kalorickém příjmu.");
     }
+    await enforceRateLimit(request.auth!.uid, "checkLowCalorieIntake", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     const fallback = `Posledních pár dní jíš výrazně méně, než je tvůj cíl (${input.targetCalories} kcal/den) — je u tebe všechno v pořádku?`;
 
@@ -716,6 +728,7 @@ export const getWeeklySummary = onCall(
     if (!input || !Number.isFinite(input.avgCalories) || !Number.isFinite(input.targetCalories)) {
       throw new HttpsError("invalid-argument", "Chybí platná týdenní data.");
     }
+    await enforceRateLimit(request.auth!.uid, "getWeeklySummary", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     const fallback = `Tenhle týden jsi v průměru měla ${input.avgCalories} kcal/den z cíle ${input.targetCalories} kcal (zapsáno ${input.daysLogged}/7 dní).`;
 
@@ -797,6 +810,7 @@ export const chatWithMya = onCall(
       }
       messages.push({ role, content: content.trim() });
     }
+    await enforceRateLimit(request.auth!.uid, "chatWithMya", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     // Živě přepočteno z profilu, ne z profile.targetCalories (stejný důvod jako u getDailyGreeting).
     const nutrition = buildNutritionFromProfile(profile);
@@ -928,6 +942,7 @@ export const congratulateGoalReached = onCall(
     if (!input || !Number.isFinite(input.targetWeight) || !Number.isFinite(input.currentWeight)) {
       throw new HttpsError("invalid-argument", "Chybí platná data o váze.");
     }
+    await enforceRateLimit(request.auth!.uid, "congratulateGoalReached", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     const fallback = `Gratuluji, dosáhla jsi cílové váhy ${input.targetWeight} kg! Co kdybychom teď přepnuly na Udržování, ať se tam udržíš?`;
 

@@ -6,6 +6,23 @@ import { VitePWA } from "vite-plugin-pwa";
 console.log("Loading Vite configuration...");
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        // N28 (AUDIT_2026-08-14.md) — Firebase SDK appka odhaduje jako většinu zbývající váhy
+        // hlavního chunku po lazy-loadingu tabů/modálů. Všechny firebase/@firebase balíčky musí
+        // skončit v JEDNOM sdíleném chunku, ne rozdělené po jednotlivých submodulech (app/auth/
+        // firestore/...) — modulární Firebase SDK má vlastní interní registraci komponent mezi
+        // submoduly při načtení, kterou by rozdělení do víc chunků mohlo rozbít v závislosti na
+        // pořadí, v jakém prohlížeč chunky vykoná.
+        manualChunks(id) {
+          if (id.includes("node_modules/firebase") || id.includes("node_modules/@firebase")) {
+            return "firebase";
+          }
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(), // <-- Přidán plugin pro Tailwind

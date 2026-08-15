@@ -62,4 +62,34 @@ db.version(3).stores({
   workouts: '++id, name, date, syncId'
 });
 
+// N13 (AUDIT_2026-08-14.md) — příprava na unikátní syncId index v5 níž. Dvoukrokový postup
+// (dedup PŘED unikátním indexem, ne v jednom kroku) je bezpečnostní pojistka: kdyby appka
+// obojí udělala najednou a u někoho v lokální DB náhodou existovala duplicita syncId (jediný
+// způsob, jak by mohla vzniknout, je přesně ten vzácný race popsaný v N13 — dvě zařízení/taby
+// upravující stejné jídlo/trénink těsně po sobě), IndexedDB by stavbu unikátního indexu nad
+// existujícími duplicitními daty odmítla a appka by pro toho uživatele přestala nastartovat.
+db.version(4).stores({}).upgrade(async (tx) => {
+  for (const tableName of ["meals", "workouts"] as const) {
+    const seen = new Set<string>();
+    const rows = await tx.table(tableName).toArray();
+    for (const row of rows) {
+      if (!row.syncId) continue;
+      if (seen.has(row.syncId)) {
+        await tx.table(tableName).delete(row.id);
+      } else {
+        seen.add(row.syncId);
+      }
+    }
+  }
+});
+
+// Unikátní syncId (& prefix) — appka dřív jen indexovala, nevynucovala. subscribeMeals/
+// subscribeWorkouts dělaly check-then-act (`.where("syncId").equals(...).first()` → put/add)
+// bez ochrany proti dvěma překrývajícím se voláním pro stejný syncId; unikátní index teď
+// takový zápis na úrovni Dexie odmítne, místo aby appka tiše založila duplicitní řádek.
+db.version(5).stores({
+  meals: '++id, name, date, type, &syncId',
+  workouts: '++id, name, date, &syncId'
+});
+
 export { db };

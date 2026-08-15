@@ -23,7 +23,7 @@ import { computeWorkoutPlanStatus } from "./lib/workoutPlan";
 import { computeMealReminderStatus } from "./lib/mealReminder";
 import { isQuietHours } from "./lib/quietHours";
 import { isVacationDay } from "./lib/vacationMode";
-import { Bell, Search, Dumbbell, MessageCircle, ClipboardList, UtensilsCrossed, TreePalm } from "lucide-react";
+import { Bell, Search, Dumbbell, MessageCircle, ClipboardList, UtensilsCrossed, TreePalm, AlertCircle, X } from "lucide-react";
 
 // N28 (AUDIT_2026-08-14.md) — appka dřív staticky importovala všechny 4 taby i všechny 4 modaly,
 // takže hlavní JS chunk (952,8 KB, gzip 292,4 KB) nesl i kód pro Recipes/Profile/Stats a modaly,
@@ -73,6 +73,10 @@ export default function App() {
   const [weighInOverdue, setWeighInOverdue] = useState(true);
   const [weighInStatusLoaded, setWeighInStatusLoaded] = useState(false);
   const [daysSinceWeighIn, setDaysSinceWeighIn] = useState<number | null>(null);
+  // N13 (AUDIT_2026-08-14.md) — subscribeMeals/subscribeWorkouts měly onError parametr už dřív,
+  // ale App.tsx ho nepředávalo, takže chyba synchronizace skončila jen v console.error, na
+  // telefonu reálně ztracená. Appka teď chybu ukáže, ne jen zaloguje.
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [showReminder, setShowReminder] = useState(false);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [myaChatOpen, setMyaChatOpen] = useState(false);
@@ -148,8 +152,9 @@ export default function App() {
 
       // Živé listenery místo jednorázového čtení — appka se drží v syncu i s dalšími
       // zařízeními/taby, dokud běží (Fáze 5 synchronizace, viz REFERENCE/done/IMPLEMENTATION_PLAN.md).
-      unsubscribeMeals = subscribeMeals(uid);
-      unsubscribeWorkouts = subscribeWorkouts(uid);
+      const onSyncError = () => setSyncError("Synchronizace dat se zadrhla — appku zkus obnovit.");
+      unsubscribeMeals = subscribeMeals(uid, onSyncError);
+      unsubscribeWorkouts = subscribeWorkouts(uid, onSyncError);
       unsubscribeWeights = subscribeWeightLogs(uid, (entries) => {
         const latest = entries.length > 0 ? entries[entries.length - 1] : null;
         const status = computeWeighInStatus(latest, reminderDaysRef.current);
@@ -379,6 +384,16 @@ export default function App() {
             </div>
           </div>
         </header>
+
+        {syncError && (
+          <div className="mx-6 mt-3 shrink-0 flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span className="flex-1">{syncError}</span>
+            <button onClick={() => setSyncError(null)} aria-label="Zavřít" className="shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* --- OBSAH --- */}
         <main className="flex-1 overflow-y-auto px-6 hide-scrollbar">

@@ -8,7 +8,7 @@ export interface AuthContextType {
   loading: boolean;
   updateProfile: (data: Partial<UserProfile>) => Promise<void>;
   updateProfileArray: (
-    field: "vacationDates" | "plannedWorkoutDays",
+    field: "vacationDates" | "plannedWorkoutDays" | "customReminders",
     op: "union" | "remove",
     values: (string | number)[]
   ) => Promise<void>;

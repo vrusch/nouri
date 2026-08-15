@@ -19,5 +19,10 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // N29 (AUDIT_2026-08-14.md) — recommended config má tohle jen jako "warn", takže
+      // špatná/chybějící závislost (stale closure bug) projde `npm run lint` beze zmínky.
+      'react-hooks/exhaustive-deps': 'error',
+    },
   },
 ])
