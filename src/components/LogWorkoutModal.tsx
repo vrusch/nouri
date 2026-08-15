@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X, ChevronLeft, Loader2, AlertCircle } from "lucide-react";
 import { db, type WorkoutItem } from "../db/db";
 import { MyaWorkout } from "../lib/workout";
@@ -27,6 +27,16 @@ export default function LogWorkoutModal({ onClose }: LogWorkoutModalProps) {
   const [name, setName] = useState("");
   const [caloriesBurned, setCaloriesBurned] = useState("");
   const [durationMinutes, setDurationMinutes] = useState("");
+
+  // N44 (AUDIT_2026-08-14.md) — modály v appce dřív zavíral jen klik na X/backdrop, na rozdíl
+  // od BottomNav.tsx's FAB menu, který na Escape reaguje.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   const handleAnalyze = async () => {
     if (!description.trim()) return;

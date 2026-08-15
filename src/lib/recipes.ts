@@ -24,8 +24,18 @@ export interface GenerateRecipeInput {
   availableIngredients?: string;
 }
 
-export interface GenerateRecipeFromFridgeInput extends GenerateRecipeInput {
+// N39 (AUDIT_2026-08-14.md) — dřív `extends GenerateRecipeInput`, což slibovalo i
+// availableIngredients — server (FridgeRecipeInput ve functions/src/index.ts) tohle pole
+// nikdy nečetl (fotka lednice je přesně proto, aby appka suroviny nemusela vypisovat ručně)
+// a appka ho ani neposílala, jen typ tvrdil, že by mohlo.
+export interface GenerateRecipeFromFridgeInput {
   imageDataUrl: string;
+  remainingCalories: number;
+  remainingProtein: number;
+  remainingFat: number;
+  remainingCarbs: number;
+  goal: Goal;
+  preferences?: string;
 }
 
 const generateRecipeFn = httpsCallable<GenerateRecipeInput, RecipeResult | null>(functions, "generateRecipe");

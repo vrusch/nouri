@@ -182,7 +182,11 @@ export function subscribeMeals(uid: string, onError?: (error: unknown) => void):
 export async function backupWorkout(uid: string, workout: WorkoutItem): Promise<void> {
   if (!workout.syncId) return;
   try {
-    await setDoc(doc(workoutsCollection(uid), workout.syncId), workout);
+    // N33 (AUDIT_2026-08-14.md) — stejný filtr jako backupMeal; appka dřív posílala workout
+    // objekt bez filtrování undefined polí (durationMinutes je nepovinné), což by u budoucí
+    // editace tréninku (dnes appka trénink needituje, jen loguje) Firestore zápis odmítlo.
+    const clean = Object.fromEntries(Object.entries(workout).filter(([, v]) => v !== undefined)) as WorkoutItem;
+    await setDoc(doc(workoutsCollection(uid), workout.syncId), clean);
   } catch (error) {
     console.error("Cloud záloha tréninku selhala:", error);
   }
@@ -222,7 +226,9 @@ export function subscribeWorkouts(uid: string, onError?: (error: unknown) => voi
           .first()
           .then((existing) => {
             if (existing?.id !== undefined) {
-              dexieDb.workouts.update(existing.id, workout);
+              // .put (ne .update), stejný důvod jako subscribeMeals — workout je od Firestore
+              // vždy celý dokument, ne dílčí patch.
+              dexieDb.workouts.put({ ...workout, id: existing.id });
             } else {
               dexieDb.workouts.add(workout);
             }

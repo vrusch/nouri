@@ -24,6 +24,16 @@ export default function ShoppingListModal({ onClose }: ShoppingListModalProps) {
     return subscribeShoppingList(user.uid, setItems);
   }, [user]);
 
+  // N44 (AUDIT_2026-08-14.md) — modály v appce dřív zavíral jen klik na X/backdrop, na rozdíl
+  // od BottomNav.tsx's FAB menu, který na Escape reaguje.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   const handleAdd = async () => {
     const trimmed = input.trim();
     if (!trimmed || !user) return;

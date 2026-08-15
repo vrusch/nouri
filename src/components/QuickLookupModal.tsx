@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, Search, Loader2, AlertCircle } from "lucide-react";
 import { MyaVision, type VisionResult } from "../lib/vision";
 
@@ -21,6 +21,16 @@ export default function QuickLookupModal({ onClose }: QuickLookupModalProps) {
   // aktuální — pomalejší "banán" doběhlé PO rychlejším "avokádo" appka tiše zahodí místo
   // přepsání výsledku tím starým.
   const requestIdRef = useRef(0);
+
+  // N44 (AUDIT_2026-08-14.md) — modály v appce dřív zavíral jen klik na X/backdrop, na rozdíl
+  // od BottomNav.tsx's FAB menu, který na Escape reaguje.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   const handleLookup = async () => {
     const trimmed = query.trim();

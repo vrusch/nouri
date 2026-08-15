@@ -134,6 +134,14 @@ export default function Home({ onEditMeal }: HomeProps) {
   const [moodNoteInput, setMoodNoteInput] = useState("");
   const [submittingMood, setSubmittingMood] = useState(false);
 
+  // N45 (AUDIT_2026-08-14.md) — moodAnswered výš je lazy useState, jehož initializer proběhne
+  // jen jednou při prvním mountu. Zůstane-li appka otevřená přes půlnoc, `today` se přepočítá
+  // (řádek výš), ale moodAnswered by beze změny zůstal nastavený podle VČEREJŠÍHO klíče
+  // navždy — appka by "Jak se cítíš?" nezobrazila celý nový den. Re-check na změnu today.
+  useEffect(() => {
+    setMoodAnswered(!!sessionStorage.getItem(`mya_mood_answered_${today}`));
+  }, [today]);
+
   useEffect(() => {
     if (!user) return;
     return subscribeWaterLog(user.uid, today, setWaterGlasses);

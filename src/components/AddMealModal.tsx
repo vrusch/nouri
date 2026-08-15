@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2, ClipboardList, ListPlus } from "lucide-react";
 import { type AddMealAction } from "./BottomNav";
@@ -160,13 +160,16 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   // MyaVoice.transcribeAudio). Používá se v handleBack, handleClose i unmount cleanupu níž —
   // dřív měl tuhle ochranu jen handleBack, zavření modálu (X/backdrop) i odchod jinak než přes
   // ně (odhlášení, navigace) ji postrádaly.
-  const stopRecordingWithoutTranscription = () => {
+  // useCallback s prázdnými deps — čte jen refy (mediaRecorderRef/streamRef), ty jsou mezi
+  // rendery stabilní, takže appka může funkci bezpečně použít jako dependency jinde (handleClose,
+  // Escape-key efekt níž) beze zbytečného re-subscribování na každý render.
+  const stopRecordingWithoutTranscription = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.onstop = null;
       mediaRecorderRef.current.stop();
     }
     streamRef.current?.getTracks().forEach((t) => t.stop());
-  };
+  }, []);
 
   // Jistota proti mikrofonu, který zůstane "otevřený" (indikátor v prohlížeči), když
   // se modál zavře jinak než přes handleClose/handleBack (např. odhlášení, navigace).
@@ -174,7 +177,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     return () => {
       stopRecordingWithoutTranscription();
     };
-  }, []);
+  }, [stopRecordingWithoutTranscription]);
 
   useEffect(() => {
     if (!user) return;
@@ -482,10 +485,22 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     resetIngredients();
   };
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     stopRecordingWithoutTranscription();
     onClose();
-  };
+  }, [stopRecordingWithoutTranscription, onClose]);
+
+  // N44 (AUDIT_2026-08-14.md) — modály v appce dřív zavíral jen klik na X/backdrop, na rozdíl
+  // od BottomNav.tsx's FAB menu, který na Escape reaguje. handleClose (ne raw onClose) — musí
+  // stejně jako klik na X odpojit probíhající nahrávání hlasu (N7), ať Escape uprostřed
+  // nahrávání nespustí placený přepis zvuku, který appka zjevně chtěla zahodit.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleClose]);
 
   // N8 (AUDIT_2026-08-14.md) — přepnutí "Jím venku" přímo na kroku "form" (na rozdíl od kroku
   // "describe", kde se přepíná PŘED analýzou) musí přepsat i už zobrazenou zprávu o jistotě
@@ -530,10 +545,12 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     const valueNum = Number(ingredientValue);
     if (!ingredientName.trim() || !valueNum || valueNum <= 0) return;
 
+    // N42 (AUDIT_2026-08-14.md) — dřív appka kontrolovala jen kalorie <= 0, ne makra; appka
+    // by jinak uložila zápornou ingredienci (a ta by se pak sečetla do celkových maker jídla).
     const draft: MealIngredient = { name: ingredientName.trim(), value: Math.round(valueNum) };
-    if (ingredientProtein) draft.protein = Math.round(Number(ingredientProtein));
-    if (ingredientFat) draft.fat = Math.round(Number(ingredientFat));
-    if (ingredientCarbs) draft.carbs = Math.round(Number(ingredientCarbs));
+    if (ingredientProtein) draft.protein = Math.max(0, Math.round(Number(ingredientProtein)));
+    if (ingredientFat) draft.fat = Math.max(0, Math.round(Number(ingredientFat)));
+    if (ingredientCarbs) draft.carbs = Math.max(0, Math.round(Number(ingredientCarbs)));
 
     setIngredients((prev) => {
       if (editingIngredientIndex !== null) {
@@ -565,9 +582,10 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
           time,
           type,
           ingredients: hasIngredients ? ingredients : undefined,
-          protein: hasIngredients ? ingredientsTotals.protein : protein ? Math.round(Number(protein)) : undefined,
-          fat: hasIngredients ? ingredientsTotals.fat : fat ? Math.round(Number(fat)) : undefined,
-          carbs: hasIngredients ? ingredientsTotals.carbs : carbs ? Math.round(Number(carbs)) : undefined,
+          // N42 (AUDIT_2026-08-14.md) — appka dřív kontrolovala jen kalorie <= 0, ne makra.
+          protein: hasIngredients ? ingredientsTotals.protein : protein ? Math.max(0, Math.round(Number(protein))) : undefined,
+          fat: hasIngredients ? ingredientsTotals.fat : fat ? Math.max(0, Math.round(Number(fat))) : undefined,
+          carbs: hasIngredients ? ingredientsTotals.carbs : carbs ? Math.max(0, Math.round(Number(carbs))) : undefined,
           // N8 (AUDIT_2026-08-14.md) — dřív handleSave pro edit roughEstimate vůbec neposílal,
           // takže appka nemohla flag u upravovaného jídla ani nastavit, ani smazat.
           roughEstimate: eatingOut || undefined,
@@ -599,9 +617,9 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
         if (ingredientsTotals.fat !== undefined) meal.fat = ingredientsTotals.fat;
         if (ingredientsTotals.carbs !== undefined) meal.carbs = ingredientsTotals.carbs;
       } else {
-        if (protein) meal.protein = Math.round(Number(protein));
-        if (fat) meal.fat = Math.round(Number(fat));
-        if (carbs) meal.carbs = Math.round(Number(carbs));
+        if (protein) meal.protein = Math.max(0, Math.round(Number(protein)));
+        if (fat) meal.fat = Math.max(0, Math.round(Number(fat)));
+        if (carbs) meal.carbs = Math.max(0, Math.round(Number(carbs)));
       }
       if (eatingOut) meal.roughEstimate = true;
 

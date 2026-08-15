@@ -1,6 +1,6 @@
 import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import { calculateNutrition, type Gender, type Goal } from "./nutrition.js";
+import { calculateNutrition, calculateAge, type Gender, type Goal } from "./nutrition.js";
 import { callOpenAIChat } from "./openai.js";
 import { enforceRateLimit } from "./rateLimit.js";
 
@@ -85,7 +85,11 @@ export const generateWelcomeReport = onCall(
 
     const results = buildNutritionFromProfile(profile);
 
-    const age = new Date().getFullYear() - new Date(profile.birthDate).getFullYear();
+    // N36 (AUDIT_2026-08-14.md) — dřív naivní rozdíl kalendářních roků bez ohledu na to,
+    // jestli už letos narozeniny byly, na rozdíl od calculateAge() o pár řádků výš uvnitř
+    // buildNutritionFromProfile — Mya mohla v reportu zmínit věk o 1 vyšší, než jaký appka
+    // reálně použila pro výpočet BMR.
+    const age = calculateAge(profile.birthDate);
     const genderCzech = profile.gender === "female" ? "žena" : "muž";
 
     const systemPrompt = `Jsi Mya, empatická a profesionální AI asistentka pro zdravý životní styl aplikace Nouri.
@@ -157,7 +161,11 @@ export const getDailyGreeting = onCall(
     // jen je jednorázově protlačí do tohohle promptu (viz handleSubmitMood v Home.tsx).
     const rawMood = Number(request.data?.mood);
     const mood = Number.isInteger(rawMood) && rawMood >= 1 && rawMood <= 5 ? rawMood : undefined;
-    const moodNote = typeof request.data?.moodNote === "string" ? request.data.moodNote.trim().slice(0, 300) : undefined;
+    // N35 (AUDIT_2026-08-14.md) — dřív ruční .trim().slice(0,300), na rozdíl od zbytku volného
+    // textu v souboru neodstraňovalo řádkové zlomy (\r\n). Reálné riziko nízké (UI pole je
+    // <input type="text">, novou řádku appka nedovolí zadat), ale sdílená funkce je levnější
+    // než vlastní kopii pravidla.
+    const moodNote = sanitizePromptText(request.data?.moodNote, 300);
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
     await enforceRateLimit(request.auth!.uid, "getDailyGreeting", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
@@ -355,8 +363,6 @@ Pokud z popisu nejde rozeznat žádné jídlo, vrať confidence "low", name "Nez
   }
 );
 
-type WorkoutConfidence = "low" | "medium" | "high";
-
 export const analyzeWorkout = onCall(
   { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 30 },
   async (request) => {
@@ -397,7 +403,7 @@ Pokud z popisu nejde rozeznat žádná fyzická aktivita, vrať confidence "low"
       if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
 
       const parsed = JSON.parse(result.content);
-      const confidence: WorkoutConfidence = CONFIDENCE_LEVELS.includes(parsed.confidence) ? parsed.confidence : "low";
+      const confidence: Confidence = CONFIDENCE_LEVELS.includes(parsed.confidence) ? parsed.confidence : "low";
 
       return {
         name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Neznámá aktivita",

@@ -1083,7 +1083,9 @@ export default function Profile() {
                   {profile.lastAiReport.split('\n').map((line, i) => {
                     const classified = classifyReportLine(line);
                     if (classified.kind === 'header') {
-                      return <h4 key={i} className="text-sm font-extrabold text-slate-900 dark:text-white pt-2">{classified.text}</h4>;
+                      // N40 (AUDIT_2026-08-14.md) — dřív jen syrový text, na rozdíl od bullet/
+                      // paragraph větví níž — ### **Nadpis** by se zobrazil s doslovnými **.
+                      return <h4 key={i} className="text-sm font-extrabold text-slate-900 dark:text-white pt-2">{renderBoldSegments(classified.text)}</h4>;
                     }
                     if (classified.kind === 'bullet') {
                       return (
