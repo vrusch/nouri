@@ -2,6 +2,15 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.16.1] - 2026-08-15
+### Opraveno
+- **31 nálezů z kompletního auditu appky** (`REFERENCE/AUDIT_2026-08-14.md`, 48 nalezených celkem) — logické chyby, nekonzistence a optimalizace napříč celou appkou, ne jen v naposledy přidaných featurách.
+- **Datová integrita**: záporné sacharidy u vlastních maker opraveny na 0, luteální kalorický bonus se teď promítá i do AI reportu, offline zápisy (profil/chat/mazání historie) appku už nezmrazí ani nezpůsobí ztrátu dat při návratu připojení, nový unikátní index proti duplicitním záznamům jídel/tréninků v lokální databázi (s bezpečnou dvoukrokovou migrací pro appky s existujícími daty).
+- **Synchronizace napříč zařízeními**: profil, dovolenkové dny, plánované tréninkové dny a vlastní připomínky v Profilu se teď šíří živě mezi otevřenými zařízeními (dřív jen při refreshi); appka zobrazí viditelné upozornění, pokud se synchronizace zadrhne.
+- **UI konzistence**: chybějící potvrzení mazání šablon/receptů, placený přepis hlasu se nespustí při zavření modálu zápisu jídla, klávesa Escape teď zavírá všechny modály appky, guard proti duplicitnímu přidání položky do nákupního seznamu, oprava race podmínky v rychlém hledání.
+- **Cloud Functions**: sdílené helpery pro OpenAI volání, `max_tokens` limit proti zbytečně dlouhým odpovědím, per-uid rate-limiting rozšířen ze 3 na všech 14 funkcí (ochrana proti neúmyslnému vyčerpání rozpočtu).
+- **Build/infra**: hlavní JS chunk zmenšen z 818 KB na 361 KB oddělením Firebase SDK do vlastního chunku, `react-hooks/exhaustive-deps` zpřísněno na chybu, opravena zastaralá Workbox cache pravidla, Vite aktualizován proti bezpečnostním zranitelnostem.
+
 ## [0.16.0] - 2026-08-13
 ### Přidáno
 - **Vlastní makra místo automatického výpočtu**: možnost ručně nastavit bílkoviny a tuky (např. podle výživového poradce/lékaře) místo formulkového výpočtu — appka je respektuje ve všech výpočtech i AI reportech, sacharidy dál dopočítá jako zbytek do cíle. Nastavitelné v Profilu, s možností kdykoliv se vrátit k automatickému výpočtu.
