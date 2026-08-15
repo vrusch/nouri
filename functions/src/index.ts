@@ -1,9 +1,10 @@
 import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { calculateNutrition, type Gender, type Goal } from "./nutrition.js";
+import { callOpenAIChat } from "./openai.js";
+import { enforceRateLimit } from "./rateLimit.js";
 
 const openaiApiKey = defineSecret("OPENAI_API_KEY");
-const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
 interface UserProfileInput {
   name: string;
@@ -23,6 +24,27 @@ function requireAuth(request: CallableRequest) {
     throw new HttpsError("unauthenticated", "Musíš být přihlášená.");
   }
 }
+
+// N17 v REFERENCE/AUDIT_2026-08-14.md — tenhle přesný objekt byl doslovně zkopírovaný na 3
+// místech (generateWelcomeReport, getDailyGreeting, chatWithMya), pokaždé nad stejným profilem.
+function buildNutritionFromProfile(profile: UserProfileInput) {
+  return calculateNutrition({
+    gender: profile.gender,
+    weight: profile.weight,
+    height: profile.height,
+    birthDate: profile.birthDate,
+    activityLevel: profile.activityLevel,
+    goal: profile.goal,
+    calibratedTDEE: profile.calibratedTDEE,
+    customProteinGrams: profile.customProteinGrams,
+    customFatGrams: profile.customFatGrams,
+  });
+}
+
+// N19 — obrana proti runaway smyčce (chybný retry v klientovi apod.) na nejdražších AI voláních
+// (gpt-4o vision, Whisper). Gatuje jen tři konkrétní funkce, ne všech 14 — viz sekce 6 rozhodnutí.
+const EXPENSIVE_AI_CALL_MAX = 20;
+const EXPENSIVE_AI_CALL_WINDOW_MS = 15 * 60 * 1000;
 
 const DEFAULT_MAX_PROMPT_TEXT_LENGTH = 300;
 
@@ -56,17 +78,7 @@ export const generateWelcomeReport = onCall(
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
-    const results = calculateNutrition({
-      gender: profile.gender,
-      weight: profile.weight,
-      height: profile.height,
-      birthDate: profile.birthDate,
-      activityLevel: profile.activityLevel,
-      goal: profile.goal,
-      calibratedTDEE: profile.calibratedTDEE,
-      customProteinGrams: profile.customProteinGrams,
-      customFatGrams: profile.customFatGrams,
-    });
+    const results = buildNutritionFromProfile(profile);
 
     const age = new Date().getFullYear() - new Date(profile.birthDate).getFullYear();
     const genderCzech = profile.gender === "female" ? "žena" : "muž";
@@ -100,31 +112,20 @@ Doporučené bílkoviny: ${results.macros.protein} g
 Prosím o vygenerování reportu ve stylu seniorního nutričního poradce.`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.7,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.7,
+        maxTokens: 900,
       });
 
-      if (response.status === 429) throw new Error("Rate limit exceeded");
+      if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
 
-      const json = (await response.json()) as { choices?: { message: { content: string } }[]; error?: unknown };
-      if (!json.choices) {
-        console.error("OpenAI response missing choices:", response.status, JSON.stringify(json));
-        throw new Error("Invalid AI response");
-      }
-
-      return { text: json.choices[0].message.content, data: results };
+      return { text: result.content, data: results };
     } catch (error) {
       console.error("Mya AI Error (report):", error);
       return {
@@ -157,17 +158,7 @@ export const getDailyGreeting = onCall(
 
     // Živě přepočteno z profilu, ne z uloženého profile.targetCalories — to může být
     // zastaralé (naposledy zapsané při onboardingu nebo posledním "Aktualizovat analýzu").
-    const nutrition = calculateNutrition({
-      gender: profile.gender,
-      weight: profile.weight,
-      height: profile.height,
-      birthDate: profile.birthDate,
-      activityLevel: profile.activityLevel,
-      goal: profile.goal,
-      calibratedTDEE: profile.calibratedTDEE,
-      customProteinGrams: profile.customProteinGrams,
-      customFatGrams: profile.customFatGrams,
-    });
+    const nutrition = buildNutritionFromProfile(profile);
     const targetProtein = nutrition.macros.protein;
     const remaining = nutrition.targetCalories - consumedCalories;
     const proteinRemaining = Math.max(0, targetProtein - consumedProtein);
@@ -196,31 +187,25 @@ Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem 
     const userPrompt = `Uživatel: ${safeName}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g). ${intakeSummary}${moodContext}`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 100,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        maxTokens: 100,
       });
 
-      if (response.status === 429) {
-        return { text: "Dneska ti to sekne! Nezapomeň si zapisovat všechna jídla. ✨" };
+      if (!result.ok) {
+        return {
+          text:
+            result.reason === "rate_limited"
+              ? "Dneska ti to sekne! Nezapomeň si zapisovat všechna jídla. ✨"
+              : "Krásný den! Jak se dnes daří?",
+        };
       }
-
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      if (!json.choices) {
-        console.error("OpenAI response missing choices:", response.status, JSON.stringify(json));
-      }
-      return { text: json.choices?.[0]?.message?.content || "Krásný den! Jak se dnes daří?" };
+      return { text: result.content };
     } catch (error) {
       console.error("Mya AI Error (greeting):", error);
       return { text: `Ahoj ${safeName}! Nezapomeň si dnes zapsat všechna jídla.` };
@@ -243,6 +228,7 @@ export const analyzeFood = onCall(
     if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
       throw new HttpsError("invalid-argument", "Chybí platný obrázek.");
     }
+    await enforceRateLimit(request.auth!.uid, "analyzeFood", EXPENSIVE_AI_CALL_MAX, EXPENSIVE_AI_CALL_WINDOW_MS);
 
     const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti pošle fotku jídla.
 Tvým úkolem je identifikovat jídlo a odhadnout jeho nutriční hodnoty pro porci na fotce.
@@ -261,44 +247,32 @@ Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný ma
 Pokud na fotce není rozpoznatelné jídlo, vrať confidence "low", name "Neznámé jídlo" a nulové hodnoty.`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          messages: [
-            { role: "system", content: systemPrompt },
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: hint
-                    ? `Analyzuj toto jídlo. Doplňující upřesnění od uživatele: ${hint}`
-                    : "Analyzuj toto jídlo.",
-                },
-                { type: "image_url", image_url: { url: imageDataUrl } },
-              ],
-            },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.3,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: hint
+                  ? `Analyzuj toto jídlo. Doplňující upřesnění od uživatele: ${hint}`
+                  : "Analyzuj toto jídlo.",
+              },
+              { type: "image_url", image_url: { url: imageDataUrl } },
+            ],
+          },
+        ],
+        responseFormat: "json_object",
+        temperature: 0.3,
+        maxTokens: 300,
       });
 
-      if (response.status === 429) throw new Error("Rate limit exceeded");
+      if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
 
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content;
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        throw new Error("Invalid AI response");
-      }
-
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(result.content);
 
       return {
         name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Neznámé jídlo",
@@ -342,33 +316,21 @@ Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný ma
 Pokud z popisu nejde rozeznat žádné jídlo, vrať confidence "low", name "Neznámé jídlo" a nulové hodnoty.`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: description },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.3,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: description },
+        ],
+        responseFormat: "json_object",
+        temperature: 0.3,
+        maxTokens: 300,
       });
 
-      if (response.status === 429) throw new Error("Rate limit exceeded");
+      if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
 
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content;
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        throw new Error("Invalid AI response");
-      }
-
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(result.content);
 
       return {
         name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Neznámé jídlo",
@@ -412,33 +374,21 @@ Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný ma
 Pokud z popisu nejde rozeznat žádná fyzická aktivita, vrať confidence "low", name "Neznámá aktivita" a nulové hodnoty.`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: description },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.3,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: description },
+        ],
+        responseFormat: "json_object",
+        temperature: 0.3,
+        maxTokens: 300,
       });
 
-      if (response.status === 429) throw new Error("Rate limit exceeded");
+      if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
 
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content;
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        throw new Error("Invalid AI response");
-      }
-
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(result.content);
       const confidence: WorkoutConfidence = CONFIDENCE_LEVELS.includes(parsed.confidence) ? parsed.confidence : "low";
 
       return {
@@ -504,31 +454,20 @@ věcně a přátelsky — jak tohle jídlo zapadá do zbytku dne. Žádné obecn
 Dnes celkem snědeno: ${input.consumedTodayCalories} kcal z cíle ${input.targetCalories} kcal. Zbývá ${remaining} kcal.`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 60,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        maxTokens: 60,
       });
 
-      if (response.status === 429) {
-        return { text: "Zapsáno! ✨" };
+      if (!result.ok) {
+        return { text: result.reason === "rate_limited" ? "Zapsáno! ✨" : "Zapsáno! 👍" };
       }
-
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      if (!json.choices) {
-        console.error("OpenAI response missing choices:", response.status, JSON.stringify(json));
-      }
-      return { text: json.choices?.[0]?.message?.content || "Zapsáno! 👍" };
+      return { text: result.content };
     } catch (error) {
       console.error("Mya AI Error (meal feedback):", error);
       return { text: "Zapsáno! 👍" };
@@ -628,33 +567,21 @@ Cíl uživatele: ${goalLabel}.${preferences ? `\nPreference/omezení: ${preferen
     }`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.7,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        responseFormat: "json_object",
+        temperature: 0.7,
+        maxTokens: 700,
       });
 
-      if (response.status === 429) throw new Error("Rate limit exceeded");
+      if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
 
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content;
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        throw new Error("Invalid AI response");
-      }
-
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(result.content);
 
       return sanitizeRecipeResult(parsed);
     } catch (error) {
@@ -692,30 +619,19 @@ kárající. Piš česky, neformálně. Vrať jen čistý text zprávy, žádný
 bílkovin denně, cíl je ${input.targetProtein}g. Cíl uživatele: ${goalLabel}.`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 120,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        maxTokens: 120,
       });
 
-      if (response.status === 429) return { text: fallback };
-
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content?.trim();
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        return { text: fallback };
-      }
+      if (!result.ok) return { text: fallback };
+      const content = result.content.trim();
+      if (!content) return { text: fallback };
       return { text: content };
     } catch (error) {
       console.error("Mya Macro Pattern Error:", error);
@@ -756,30 +672,19 @@ stres, nechutenství, cokoliv). Piš česky, neformálně. Vrať jen čistý tex
 denně, cíl je ${input.targetCalories} kcal. Cíl uživatele: ${GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain}.`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 120,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        maxTokens: 120,
       });
 
-      if (response.status === 429) return { text: fallback };
-
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content?.trim();
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        return { text: fallback };
-      }
+      if (!result.ok) return { text: fallback };
+      const content = result.content.trim();
+      if (!content) return { text: fallback };
       return { text: content };
     } catch (error) {
       console.error("Mya Low Calorie Check-in Error:", error);
@@ -825,30 +730,19 @@ Kalorie: průměr ${input.avgCalories} kcal/den z cíle ${input.targetCalories} 
 Bílkoviny: cíl ${input.targetProtein}g/den. Všední dny průměr ${input.weekdayAvgProtein}g (${input.weekdayDaysLogged} zapsaných dní), víkend průměr ${input.weekendAvgProtein}g (${input.weekendDaysLogged} zapsaných dní).`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 160,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        maxTokens: 160,
       });
 
-      if (response.status === 429) return { text: fallback };
-
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content?.trim();
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        return { text: fallback };
-      }
+      if (!result.ok) return { text: fallback };
+      const content = result.content.trim();
+      if (!content) return { text: fallback };
       return { text: content };
     } catch (error) {
       console.error("Mya Weekly Summary Error:", error);
@@ -905,17 +799,7 @@ export const chatWithMya = onCall(
     }
 
     // Živě přepočteno z profilu, ne z profile.targetCalories (stejný důvod jako u getDailyGreeting).
-    const nutrition = calculateNutrition({
-      gender: profile.gender,
-      weight: profile.weight,
-      height: profile.height,
-      birthDate: profile.birthDate,
-      activityLevel: profile.activityLevel,
-      goal: profile.goal,
-      calibratedTDEE: profile.calibratedTDEE,
-      customProteinGrams: profile.customProteinGrams,
-      customFatGrams: profile.customFatGrams,
-    });
+    const nutrition = buildNutritionFromProfile(profile);
     const goalLabel = profile.goal === "lose" ? "hubnutí" : profile.goal === "gain" ? "nabírání svalové hmoty" : "udržování váhy";
 
     const systemPrompt = `Jsi Mya, AI nutriční a fitness asistentka aplikace Nouri. Vedeš volnou konverzaci s uživatelkou/uživatelem appky.
@@ -935,30 +819,21 @@ Pravidla:
     ];
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: apiMessages,
-          max_tokens: 500,
-          temperature: 0.7,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: apiMessages,
+        maxTokens: 500,
+        temperature: 0.7,
       });
 
-      if (response.status === 429) {
-        return { text: "Mya je momentálně přetížená, zkus to prosím za chvíli." };
+      if (!result.ok) {
+        return {
+          text: result.reason === "rate_limited" ? "Mya je momentálně přetížená, zkus to prosím za chvíli." : CHAT_FALLBACK_TEXT,
+        };
       }
-
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content?.trim();
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        return { text: CHAT_FALLBACK_TEXT };
-      }
+      const content = result.content.trim();
+      if (!content) return { text: CHAT_FALLBACK_TEXT };
       return { text: content };
     } catch (error) {
       console.error("Mya Chat Error:", error);
@@ -986,6 +861,7 @@ export const transcribeAudio = onCall(
     if (!audioDataUrl || !audioDataUrl.startsWith("data:audio/")) {
       throw new HttpsError("invalid-argument", "Chybí platná nahrávka.");
     }
+    await enforceRateLimit(request.auth!.uid, "transcribeAudio", EXPENSIVE_AI_CALL_MAX, EXPENSIVE_AI_CALL_WINDOW_MS);
 
     try {
       const [header, base64Data] = audioDataUrl.split(",");
@@ -1065,30 +941,19 @@ Vrať jen čistý text zprávy, žádný markdown ani uvozovky okolo.`;
     const userPrompt = `Uživatelka měla cíl ${goalLabel} na váhu ${input.targetWeight} kg a právě dosáhla ${input.currentWeight} kg.`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          max_tokens: 120,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        maxTokens: 120,
       });
 
-      if (response.status === 429) return { text: fallback };
-
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content?.trim();
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        return { text: fallback };
-      }
+      if (!result.ok) return { text: fallback };
+      const content = result.content.trim();
+      if (!content) return { text: fallback };
       return { text: content };
     } catch (error) {
       console.error("Mya Goal Reached Congrats Error:", error);
@@ -1108,6 +973,7 @@ export const generateRecipeFromFridge = onCall(
     if (!Number.isFinite(input.remainingCalories) || input.remainingCalories <= 0) {
       throw new HttpsError("invalid-argument", "Chybí platný zbývající kalorický rozpočet.");
     }
+    await enforceRateLimit(request.auth!.uid, "generateRecipeFromFridge", EXPENSIVE_AI_CALL_MAX, EXPENSIVE_AI_CALL_WINDOW_MS);
 
     const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
     const preferences = sanitizePromptText(input.preferences, 300);
@@ -1141,39 +1007,27 @@ Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný ma
 Cíl uživatele: ${goalLabel}.${preferences ? `\nPreference/omezení: ${preferences}.` : ""}`;
 
     try {
-      const response = await fetch(OPENAI_API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiApiKey.value()}`,
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          messages: [
-            { role: "system", content: systemPrompt },
-            {
-              role: "user",
-              content: [
-                { type: "text", text: userPrompt },
-                { type: "image_url", image_url: { url: input.imageDataUrl } },
-              ],
-            },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.7,
-        }),
+      const result = await callOpenAIChat({
+        apiKey: openaiApiKey.value(),
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: systemPrompt },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: userPrompt },
+              { type: "image_url", image_url: { url: input.imageDataUrl } },
+            ],
+          },
+        ],
+        responseFormat: "json_object",
+        temperature: 0.7,
+        maxTokens: 700,
       });
 
-      if (response.status === 429) throw new Error("Rate limit exceeded");
+      if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
 
-      const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-      const content = json.choices?.[0]?.message?.content;
-      if (!content) {
-        console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
-        throw new Error("Invalid AI response");
-      }
-
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(result.content);
       if (parsed.recognized !== true) return null;
 
       return sanitizeRecipeResult(parsed);
