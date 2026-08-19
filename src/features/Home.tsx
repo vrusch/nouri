@@ -15,8 +15,9 @@ import {
 import { computeLoggingStreak } from "../lib/streak";
 import { getLocalDateISO } from "../lib/date";
 import { pickDailyCustomReminder } from "../lib/customReminders";
-import { WATER_TARGET_GLASSES, getWaterProgressPercent } from "../lib/water";
+import { WATER_TARGET_GLASSES, getWaterProgressPercent, formatWaterVolumeCs } from "../lib/water";
 import { formatGlassesCs, formatWorkoutsCs } from "../lib/format";
+import { getTimeOfDay, getTimeGreetingCs, getTimeSubtitleCs } from "../lib/greeting";
 import {
   subscribeWaterLog,
   adjustWaterGlasses,
@@ -89,6 +90,12 @@ export default function Home({ onEditMeal }: HomeProps) {
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [showLogWorkout, setShowLogWorkout] = useState(false);
   const today = getLocalDateISO();
+  // Denní doba se počítá při renderu (ne v state), stejně jako guessMealType v AddMealModal —
+  // Home se překresluje při každé změně jídel/vody, takže při běžném používání appky (otevřít,
+  // zapsat, zavřít) je hodnota vždy čerstvá. Zároveň jde o stabilní string ("morning"/"day"/…),
+  // takže ho fetchGreeting níž může mít v závislostech efektu i v cache klíči, aniž by se efekt
+  // restartoval při každém renderu.
+  const timeOfDay = getTimeOfDay();
 
   // Cyklus (REFERENCE/CYCLE_TRACKING_PROPOSAL.md, Úroveň 2) — appka data odebírá jen když je
   // sledování zapnuté, stejné pravidlo jako ve Stats.tsx.
@@ -246,6 +253,7 @@ export default function Home({ onEditMeal }: HomeProps) {
       const msg = await MyaAI.getDailyGreeting(withEffectiveTDEE(profile), {
         consumedCalories,
         consumedProtein,
+        localHour: new Date().getHours(),
         mood: value,
         moodNote: note || undefined,
       });
@@ -337,8 +345,11 @@ export default function Home({ onEditMeal }: HomeProps) {
         return;
       }
 
-      // Kešování na dnešek + počet zapsaných jídel, ať se pozdrav obnoví po každém novém zápisu
-      const cacheKey = `mya_greeting_${today}_${meals.length}`;
+      // Kešování na dnešek + počet zapsaných jídel, ať se pozdrav obnoví po každém novém zápisu.
+      // V klíči je i denní doba (timeOfDay): bez ní by pozdrav vygenerovaný ráno visel na Home
+      // i večer se stejným počtem jídel, takže by časový kontext poslaný do getDailyGreeting níž
+      // nebyl vidět. Čtyři bloky denně = max 4 volání OpenAI na jeden počet jídel.
+      const cacheKey = `mya_greeting_${today}_${meals.length}_${timeOfDay}`;
       const cached = sessionStorage.getItem(cacheKey);
 
       if (cached) {
@@ -354,7 +365,13 @@ export default function Home({ onEditMeal }: HomeProps) {
       }
 
       try {
-        const msg = await MyaAI.getDailyGreeting(withEffectiveTDEE(profile), { consumedCalories, consumedProtein });
+        const msg = await MyaAI.getDailyGreeting(withEffectiveTDEE(profile), {
+          consumedCalories,
+          consumedProtein,
+          // Hodinu posílá klient schválně: Cloud Function běží v us-central1, takže serverové
+          // new Date().getHours() není čas uživatelky (viz getDailyGreeting v functions/src/index.ts).
+          localHour: new Date().getHours(),
+        });
         // Mezitím (appka na odpověď OpenAI čeká) mohla appka dostat reakci na náladu, nebo
         // zobrazit milníkovou oslavu (efekt výš) — obě mají přednost, tenhle běžný pozdrav
         // by je jinak přepsal, jakmile doletí později.
@@ -392,7 +409,7 @@ export default function Home({ onEditMeal }: HomeProps) {
     // restartovalo na každý render, ne jen když se skutečně změní vstupy, které appka
     // opravdu chce sledovat (profile už deps má).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, today, meals.length, consumedCalories, consumedProtein]);
+  }, [profile, today, meals.length, consumedCalories, consumedProtein, timeOfDay]);
 
   // Nová zpráva (nový den / nově zapsané jídlo) nesmí nechat dobíhat přečtení té staré —
   // zastaví se i při odchodu ze záložky Home (odhlášení posluchače na unmount).
@@ -426,10 +443,14 @@ export default function Home({ onEditMeal }: HomeProps) {
       {/* Uvítání */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
+          {/* Pozdrav i podtitulek jdou z getTimeGreetingCs/getTimeSubtitleCs (greeting.ts) — dřív
+              tu bylo natvrdo "Krásné ráno" a "Dnes to bude skvělý den.", takže večerní zapnutí
+              appky vypadalo rozbitě. Jméno appka nenahrazuje žádným zástupným (dřív 'Petya'),
+              jen ho vynechá — profil dorazí z Firestore hned po prvním renderu. */}
           <h1 className="font-display italic text-2xl font-medium tracking-tight dark:text-slate-100">
-            Krásné ráno, {profile?.name || 'Petya'}
+            {getTimeGreetingCs()}{profile?.name ? `, ${profile.name}` : ""}
           </h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Dnes to bude skvělý den.</p>
+          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">{getTimeSubtitleCs()}</p>
           {!moodAnswered && (
             <div className="mt-2.5">
               <p className="text-slate-500 dark:text-slate-400 text-sm mb-1.5">Jak se cítíš?</p>
@@ -582,6 +603,12 @@ export default function Home({ onEditMeal }: HomeProps) {
               style={{ width: `${getWaterProgressPercent(waterGlasses)}%` }}
             />
           </div>
+          {/* Appka dřív nikde neřekla, co "sklenice" znamená — počítadlo samo tuhle otázku
+              nezodpoví. Objem je čistě popisek, waterLogs dál ukládají počet sklenic (viz
+              WATER_GLASS_ML ve water.ts). */}
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 pt-1">
+            1 sklenice = {formatWaterVolumeCs(1)} · cíl {formatWaterVolumeCs(WATER_TARGET_GLASSES)}
+          </p>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           <button

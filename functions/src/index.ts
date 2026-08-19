@@ -150,6 +150,20 @@ Prosím o vygenerování reportu ve stylu seniorního nutričního poradce.`;
   }
 );
 
+/**
+ * Slovní popis denní doby pro prompt. Hranice jsou schválně stejné jako v src/lib/greeting.ts na
+ * klientovi (5/10/18/22), ať Mya v bublině nemluví o jiné části dne, než jakou hlásí nadpis přímo
+ * nad ní. Duplikace je zde stejným kompromisem jako u nutrition.ts — klient a functions/ nemají
+ * sdílený balíček. Noc jako jediná část přeskakuje půlnoc (22:00–4:59), proto dvě větve.
+ */
+function describeDayPartCs(hour: number): string {
+  if (hour < 5) return "pozdě v noci";
+  if (hour < 10) return "ráno";
+  if (hour < 18) return "během dne";
+  if (hour < 22) return "večer";
+  return "pozdě v noci";
+}
+
 export const getDailyGreeting = onCall(
   { secrets: [openaiApiKey], region: "us-central1" },
   async (request) => {
@@ -166,6 +180,13 @@ export const getDailyGreeting = onCall(
     // <input type="text">, novou řádku appka nedovolí zadat), ale sdílená funkce je levnější
     // než vlastní kopii pravidla.
     const moodNote = sanitizePromptText(request.data?.moodNote, 300);
+    // Místní hodina uživatele. Posílá ji klient (viz localHour v Home.tsx) — tahle funkce běží
+    // v us-central1, takže serverové new Date().getHours() by byl čas úplně jiného pásma.
+    // Validace stejným vzorem jako u mood výš; když hodina nedorazí (starší build appky v cache
+    // PWA), prompt o denní době mlčí, místo aby si ji model domýšlel.
+    const rawLocalHour = Number(request.data?.localHour);
+    const localHour =
+      Number.isInteger(rawLocalHour) && rawLocalHour >= 0 && rawLocalHour <= 23 ? rawLocalHour : undefined;
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
     await enforceRateLimit(request.auth!.uid, "getDailyGreeting", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
@@ -179,10 +200,21 @@ export const getDailyGreeting = onCall(
 
     const systemPrompt = `Jsi Mya z aplikace Nouri. Piš krátké, úderné a motivující zprávy (max 2 věty).
 Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem k denní době, zmiň to konkrétně (počet gramů).${
+      localHour !== undefined
+        ? " Zpráva musí sedět na aktuální denní dobu uvedenou níž — nikdy nepiš ranní pozdrav ani plán na celý den večer a v noci, a nebilancuj celý den dopoledne."
+        : ""
+    }${
       mood !== undefined
         ? " Uživatel právě odpověděl na otázku, jak se dnes cítí — zohledni to v tónu zprávy (empaticky, ale stručně), aniž by to bylo hlavní téma zprávy."
         : ""
     }`;
+
+    // Bez tohohle kontextu dostával model v system promptu pokyn zohlednit "denní dobu", aniž by
+    // mu appka kdy řekla, kolik je hodin — proto Mya mohla znít ranně i v deset večer.
+    const timeContext =
+      localHour !== undefined
+        ? ` Aktuální místní čas uživatele: ${localHour}:00 (${describeDayPartCs(localHour)}).`
+        : "";
 
     const moodContext =
       mood !== undefined
@@ -198,7 +230,7 @@ Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem 
         ? "Zatím dnes nic nezapsal(a) do appky (nejde poznat, jestli ještě nejedl(a), nebo to jen ještě nezapsal(a))."
         : `Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.`;
 
-    const userPrompt = `Uživatel: ${safeName}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g). ${intakeSummary}${moodContext}`;
+    const userPrompt = `Uživatel: ${safeName}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g).${timeContext} ${intakeSummary}${moodContext}`;
 
     try {
       const result = await callOpenAIChat({

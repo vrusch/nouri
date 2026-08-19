@@ -16,6 +16,10 @@ const generateWelcomeReportFn = httpsCallable<{ profile: UserProfile }, AIRespon
 interface DailyStats {
   consumedCalories: number;
   consumedProtein: number;
+  // Místní hodina uživatele (0-23). Musí ji poslat klient — Cloud Function běží v us-central1,
+  // takže serverové new Date().getHours() by byl úplně jiný čas. Nepovinné jen kvůli starším
+  // buildům appky v cache PWA; funkce si bez ní o denní době netvrdí nic.
+  localHour?: number;
   mood?: number; // 1-5, z "Jak se cítíš?" na Home (viz handleSubmitMood v Home.tsx)
   moodNote?: string;
 }
