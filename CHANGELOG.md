@@ -2,6 +2,14 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.17.0] - 2026-08-19
+### Přidáno
+- **Pozdrav podle denní doby**: hlavička na Home byla natvrdo "Krásné ráno" a "Dnes to bude skvělý den." bez ohledu na hodinu — appka teď rozlišuje noc (22:00–4:59), ráno, den a večer, včetně podtitulku. Zmizel i zástupný fallback jména.
+- **Objem sklenice u vody**: karta Vody nikde neříkala, co "sklenice" znamená — teď pod ukazatelem stojí "1 sklenice = 250 ml · cíl 2 l". Jde čistě o popisek, appka dál ukládá počet sklenic, historická data se nemění.
+
+### Opraveno
+- **AI denní pozdrav neznal čas**: Mya dostávala v systémovém promptu pokyn zohlednit denní dobu, ale aplikace jí čas nikdy neposlala — proto mohla znít ráno i v deset večer. Appka teď posílá místní hodinu uživatele (Cloud Function běží v jiném časovém pásmu, takže si ji nemůže zjistit sama) a pozdrav se obnoví při změně části dne, ne až po zápisu dalšího jídla.
+
 ## [0.16.1] - 2026-08-15
 ### Opraveno
 - **31 nálezů z kompletního auditu appky** (`REFERENCE/AUDIT_2026-08-14.md`, 48 nalezených celkem) — logické chyby, nekonzistence a optimalizace napříč celou appkou, ne jen v naposledy přidaných featurách.
