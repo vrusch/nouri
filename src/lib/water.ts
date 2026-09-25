@@ -24,3 +24,36 @@ export function formatWaterVolumeCs(glasses: number, glassMl: number = WATER_GLA
   const liters = (ml / 1000).toFixed(2).replace(/\.?0+$/, "");
   return `${liters.replace(".", ",")} l`;
 }
+
+// Průběžné tempo pití (REFERENCE/STRICT_COACHING_SPEC.md, A4) — appka čeká, že se denní cíl
+// rozloží rovnoměrně mezi 8:00 a 20:00. Před 8:00 nečeká nic, po 20:00 celý cíl.
+const WATER_PACE_START_HOUR = 8;
+const WATER_PACE_END_HOUR = 20;
+
+export interface WaterPaceStatus {
+  expectedGlasses: number;
+  glassesBehind: number;
+  behind: boolean;
+}
+
+/**
+ * Kolik sklenic by touhle dobou "mělo" být vypito a jestli skluz dosáhl prahu. Práh závisí na
+ * stylu Myi (getWaterBehindThreshold v coachingStyle.ts) — přísná připomíná hned po první
+ * chybějící sklenici. Očekávaný počet se zaokrouhluje dolů, ať appka nikdy nečeká sklenici,
+ * na kterou ještě reálně nebyl čas.
+ */
+export function computeWaterPaceStatus(
+  glasses: number,
+  now: Date = new Date(),
+  behindThreshold: number = 2,
+  target: number = WATER_TARGET_GLASSES
+): WaterPaceStatus {
+  const hourFraction = now.getHours() + now.getMinutes() / 60;
+  const dayProgress = Math.min(
+    1,
+    Math.max(0, (hourFraction - WATER_PACE_START_HOUR) / (WATER_PACE_END_HOUR - WATER_PACE_START_HOUR))
+  );
+  const expectedGlasses = Math.floor(dayProgress * target);
+  const glassesBehind = Math.max(0, expectedGlasses - glasses);
+  return { expectedGlasses, glassesBehind, behind: behindThreshold > 0 && glassesBehind >= behindThreshold };
+}

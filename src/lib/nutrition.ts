@@ -3,6 +3,8 @@
  * Používá Mifflin-St Jeor rovnici, která je v současnosti považována za nejpřesnější.
  */
 
+import { DEFAULT_COACHING_STYLE, type CoachingStyle } from "./coachingStyle";
+
 export interface NutritionResults {
   bmr: number;
   tdee: number;
@@ -107,11 +109,49 @@ export function calculateNutrition(data: {
 }
 
 /**
+ * O kolik kcal je dnešek nad cílem (0, pokud není). Cíl musí být ten samý, jaký appka ukazuje
+ * na Home (včetně tréninkového/luteálního bonusu) — ne ořezaný progressPercent, ten končí na 100.
+ */
+export function getCalorieOverage(consumedCalories: number, targetCalories: number): number {
+  if (targetCalories <= 0) return 0;
+  return Math.max(0, Math.round(consumedCalories - targetCalories));
+}
+
+export interface ProgressCaptionOptions {
+  style?: CoachingStyle;
+  isVacationDay?: boolean;
+}
+
+/**
  * Krátká hláška k dennímu kalorickému postupu na Home obrazovce. Musí rozlišit "nic
  * nezapsáno" od "postupuje v pohodě" — 0 % postupu není totéž co "skvělé tempo".
+ *
+ * Nad cílem appka dřív ukazovala pořád "Pozor na večeři!" (i při 160 %) — překročení tak
+ * bylo neviditelné (REFERENCE/STRICT_COACHING_SPEC.md, A2). Text po překročení vždy vede
+ * zpátky k běžnému plánu, nikdy k "zítra jez méně"/vynechání jídla — přísnost nesmí tlačit
+ * ke kompenzačnímu hladovění (stejný princip jako karta nízkého příjmu).
  */
-export function getProgressCaption(consumedCalories: number, progressPercent: number): string {
+export function getProgressCaption(
+  consumedCalories: number,
+  targetCalories: number,
+  options: ProgressCaptionOptions = {}
+): string {
   if (consumedCalories === 0) return "Zatím jsi dnes nic nezapsala — pojďme na to!";
+
+  const overage = getCalorieOverage(consumedCalories, targetCalories);
+  if (overage > 0) {
+    const style = options.style ?? DEFAULT_COACHING_STYLE;
+    if (options.isVacationDay) {
+      if (style === "gentle") return `Dnes máš volno a jsi o ${overage} kcal nad cílem — užij si to, zítra zase podle plánu.`;
+      if (style === "strict") return `Volno neznamená bez pravidel — ${overage} kcal přes limit. Dnes to beru, ale nezvykej si!`;
+      return `Volno, ${overage} kcal přes cíl. Dnes to beru, ale nezvykej si!`;
+    }
+    if (style === "gentle") return `Dnes jsi o ${overage} kcal nad cílem. Nevadí — zítra zase podle plánu.`;
+    if (style === "strict") return `${overage} kcal přes limit! Tohle se nepovedlo — žádné mlsání navíc a zítra přesně podle plánu.`;
+    return `Jsi o ${overage} kcal nad cílem. Zbytek dne už bez mlsání navíc.`;
+  }
+
+  const progressPercent = targetCalories > 0 ? (consumedCalories / targetCalories) * 100 : 0;
   if (progressPercent > 80) return "Pozor na večeři!";
   return "Skvělé tempo! K obědu si můžeš dát něco vydatnějšího.";
 }

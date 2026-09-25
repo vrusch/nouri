@@ -4,6 +4,7 @@ import { doc, onSnapshot, setDoc, deleteField, arrayUnion, arrayRemove } from "f
 import { auth, db } from "../lib/firebase";
 import { db as localDb } from "../db/db";
 import { AuthContext } from "./AuthContextBase";
+import type { CoachingStyle } from "../lib/coachingStyle";
 
 // Lokální Dexie cache (meals/workouts, viz src/db/db.ts) není vázaná na uid — appka ji jinak
 // při přepnutí účtu ve stejném prohlížeči vůbec nemazala, takže nový uživatel dočasně viděl
@@ -45,6 +46,7 @@ export interface UserProfile {
   onHormonalContraception?: boolean; // gate pro luteální kalorický bonus (Úroveň 2) — na hormonální antikoncepci není přirozený vzestup progesteronu jako v běžné luteální fázi
   customProteinGrams?: number; // ruční přepis bílkovin (g/den) místo formulky 1.8g/kg — např. podle výživového poradce/lékaře, viz calculateNutrition v nutrition.ts
   customFatGrams?: number; // ruční přepis tuků (g/den) místo formulky 25 % cílových kalorií — sacharidy appka i s override dopočítá jako zbytek do cílových kalorií
+  coachingStyle?: CoachingStyle; // Styl Myi (jemná/vyvážená/přísná), výchozí (undefined) = 'balanced', viz coachingStyle.ts a REFERENCE/STRICT_COACHING_SPEC.md
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

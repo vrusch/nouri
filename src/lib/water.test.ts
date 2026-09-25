@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getWaterProgressPercent, formatWaterVolumeCs, WATER_TARGET_GLASSES } from "./water";
+import { getWaterProgressPercent, formatWaterVolumeCs, computeWaterPaceStatus, WATER_TARGET_GLASSES } from "./water";
 
 describe("getWaterProgressPercent", () => {
   it("0 sklenic je 0 %", () => {
@@ -52,5 +52,39 @@ describe("formatWaterVolumeCs", () => {
 
   it("nula je 0 ml", () => {
     expect(formatWaterVolumeCs(0)).toBe("0 ml");
+  });
+});
+
+describe("computeWaterPaceStatus", () => {
+  const at = (time: string) => new Date(`2026-09-25T${time}:00`);
+
+  it("před 8:00 appka nic nečeká", () => {
+    expect(computeWaterPaceStatus(0, at("07:30")).expectedGlasses).toBe(0);
+    expect(computeWaterPaceStatus(0, at("07:30")).behind).toBe(false);
+  });
+
+  it("ve 14:00 (polovina okna) čeká polovinu cíle", () => {
+    expect(computeWaterPaceStatus(0, at("14:00")).expectedGlasses).toBe(4);
+  });
+
+  it("po 20:00 čeká celý cíl", () => {
+    expect(computeWaterPaceStatus(0, at("21:00")).expectedGlasses).toBe(WATER_TARGET_GLASSES);
+  });
+
+  it("zaokrouhluje dolů — v 9:00 ještě žádnou sklenici nečeká", () => {
+    expect(computeWaterPaceStatus(0, at("09:00")).expectedGlasses).toBe(0);
+    expect(computeWaterPaceStatus(0, at("09:30")).expectedGlasses).toBe(1);
+  });
+
+  it("připomene až při skluzu >= práh", () => {
+    // 14:00 → čeká 4
+    expect(computeWaterPaceStatus(3, at("14:00"), 2).behind).toBe(false);
+    expect(computeWaterPaceStatus(2, at("14:00"), 2).behind).toBe(true);
+    expect(computeWaterPaceStatus(3, at("14:00"), 1).behind).toBe(true);
+    expect(computeWaterPaceStatus(2, at("14:00"), 3).behind).toBe(false);
+  });
+
+  it("nad tempem skluz není záporný", () => {
+    expect(computeWaterPaceStatus(8, at("10:00")).glassesBehind).toBe(0);
   });
 });

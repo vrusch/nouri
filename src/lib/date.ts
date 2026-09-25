@@ -7,3 +7,12 @@ export function getLocalDateISO(d: Date = new Date()): string {
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+
+/**
+ * ISO datum předchozího dne. Počítá přes lokální Date(rok, měsíc, den - 1), ne odečtením
+ * 86 400 000 ms — to by v den přechodu na letní/zimní čas mohlo vrátit špatný den.
+ */
+export function getPreviousDateISO(dateISO: string): string {
+  const [year, month, day] = dateISO.split("-").map(Number);
+  return getLocalDateISO(new Date(year, month - 1, day - 1));
+}

@@ -10,6 +10,8 @@ import { backupMeal, deleteMeal, subscribeMealTemplates, deleteMealTemplate, typ
 import { calculateNutrition } from "../lib/nutrition";
 import { computeIngredientsTotals } from "../lib/mealComponents";
 import { getLocalDateISO } from "../lib/date";
+import { resolveCoachingStyle } from "../lib/coachingStyle";
+import { isVacationDay } from "../lib/vacationMode";
 import { fileToCompressedDataUrl } from "../lib/image";
 import { useAuth } from "../context/useAuth";
 import { getRecentUniqueMeals, type RecentMealSummary } from "../lib/recentMeals";
@@ -629,11 +631,18 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
       if (user) backupMeal(user.uid, meal);
 
       if (profile) {
-        const todayMeals = await db.meals.where("date").equals(meal.date).toArray();
+        const [todayMeals, todayWorkouts] = await Promise.all([
+          db.meals.where("date").equals(meal.date).toArray(),
+          db.workouts.where("date").equals(meal.date).toArray(),
+        ]);
         const consumedTodayCalories = todayMeals.reduce((sum, m) => sum + m.value, 0);
-        const { targetCalories } = calculateNutrition(
+        const { targetCalories: baseTargetCalories } = calculateNutrition(
           effectiveCalibratedTDEE !== undefined ? { ...profile, calibratedTDEE: effectiveCalibratedTDEE } : profile
         );
+        // Stejný cíl jako Home (adjustedGoalCalories = cíl + dnešní trénink) — dřív Mya hodnotila
+        // jídlo proti cíli BEZ tréninkového bonusu, takže po tréninku mohla hlásit překročení,
+        // které Home neukazoval (REFERENCE/STRICT_COACHING_SPEC.md, A3).
+        const targetCalories = baseTargetCalories + todayWorkouts.reduce((sum, w) => sum + w.caloriesBurned, 0);
         MyaAI.getMealFeedback({
           mealName: meal.name,
           calories: meal.value,
@@ -641,6 +650,9 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
           mealType: meal.type,
           consumedTodayCalories,
           targetCalories,
+          coachingStyle: resolveCoachingStyle(profile.coachingStyle),
+          isVacationDay: isVacationDay(meal.date, profile.vacationDates),
+          gender: profile.gender,
         }).then(setFeedbackText);
       } else {
         setFeedbackText("Zapsáno! 👍");

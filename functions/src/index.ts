@@ -3,6 +3,7 @@ import { defineSecret } from "firebase-functions/params";
 import { calculateNutrition, calculateAge, type Gender, type Goal } from "./nutrition.js";
 import { callOpenAIChat } from "./openai.js";
 import { enforceRateLimit } from "./rateLimit.js";
+import { parseCoachingStyle, buildCoachingPrompt } from "./coachingStyle.js";
 
 const openaiApiKey = defineSecret("OPENAI_API_KEY");
 
@@ -17,6 +18,7 @@ interface UserProfileInput {
   calibratedTDEE?: number;
   customProteinGrams?: number;
   customFatGrams?: number;
+  coachingStyle?: unknown; // Styl Myi, validuje parseCoachingStyle (viz coachingStyle.ts)
 }
 
 function requireAuth(request: CallableRequest) {
@@ -63,6 +65,21 @@ function sanitizePromptText(value: unknown, maxLength: number = DEFAULT_MAX_PROM
   if (typeof value !== "string") return undefined;
   const cleaned = value.replace(/[\r\n]+/g, " ").trim();
   return cleaned ? cleaned.slice(0, maxLength) : undefined;
+}
+
+// Druhy připomínek z klientského computeActiveNudges (src/lib/nudges.ts) → text do promptu.
+const NUDGE_KIND_LABELS = {
+  breakfast: "nezapsaná snídaně",
+  lunch: "nezapsaný oběd",
+  dinner: "nezapsaná večeře",
+  water: "málo vypité vody vzhledem k denní době",
+} as const;
+
+// Celé číslo v rozsahu, jinak undefined — pro nepovinná čísla od klienta (voda, trénink,
+// včerejšek), stejný princip jako validace mood/localHour v getDailyGreeting.
+function parseBoundedInt(value: unknown, min: number, max: number): number | undefined {
+  const n = Number(value);
+  return value !== undefined && value !== null && Number.isInteger(n) && n >= min && n <= max ? n : undefined;
 }
 
 const ACTIVITY_LEVELS: Record<number, string> = {
@@ -187,19 +204,47 @@ export const getDailyGreeting = onCall(
     const rawLocalHour = Number(request.data?.localHour);
     const localHour =
       Number.isInteger(rawLocalHour) && rawLocalHour >= 0 && rawLocalHour <= 23 ? rawLocalHour : undefined;
+    // Přísnější vedení (REFERENCE/STRICT_COACHING_SPEC.md, A3) — všechno nepovinné, starší build
+    // appky nic z toho neposílá a funkce se pak chová jako dřív (styl "balanced").
+    const coachingStyle = parseCoachingStyle(request.data?.coachingStyle);
+    const isVacationDay = request.data?.isVacationDay === true;
+    // Aktivní připomínky spočítané klientem (computeActiveNudges, stejná funkce jako banner) —
+    // server neví, která jídla jsou zapsaná, takže Mya o chybějícím jídle/vodě smí mluvit jen
+    // podle tohohle seznamu. Whitelist, neznámé hodnoty se zahodí.
+    const nudgeKinds = Array.isArray(request.data?.nudgeKinds)
+      ? (request.data.nudgeKinds as unknown[]).filter(
+          (k): k is keyof typeof NUDGE_KIND_LABELS => typeof k === "string" && k in NUDGE_KIND_LABELS
+        )
+      : [];
+    const workoutBonusCalories = parseBoundedInt(request.data?.workoutBonusCalories, 0, 5000) ?? 0;
+    const waterGlasses = parseBoundedInt(request.data?.waterGlasses, 0, 50);
+    const waterTarget = parseBoundedInt(request.data?.waterTarget, 1, 30);
+    const rawYesterday = request.data?.yesterday as
+      | { consumedCalories?: unknown; targetCalories?: unknown; isVacationDay?: unknown }
+      | undefined;
+    const yesterdayConsumed = parseBoundedInt(rawYesterday?.consumedCalories, 1, 20000);
+    const yesterdayTarget = parseBoundedInt(rawYesterday?.targetCalories, 500, 10000);
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
     await enforceRateLimit(request.auth!.uid, "getDailyGreeting", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
     // Živě přepočteno z profilu, ne z uloženého profile.targetCalories — to může být
     // zastaralé (naposledy zapsané při onboardingu nebo posledním "Aktualizovat analýzu").
+    // Dnešní tréninkový bonus appka přičítá stejně jako Home (adjustedGoalCalories), jinak by
+    // Mya po tréninku hlásila překročení, které Home neukazuje.
     const nutrition = buildNutritionFromProfile(profile);
+    const targetCalories = nutrition.targetCalories + workoutBonusCalories;
     const targetProtein = nutrition.macros.protein;
-    const remaining = nutrition.targetCalories - consumedCalories;
+    const remaining = targetCalories - consumedCalories;
     const proteinRemaining = Math.max(0, targetProtein - consumedProtein);
 
-    const systemPrompt = `Jsi Mya z aplikace Nouri. Piš krátké, úderné a motivující zprávy (max 2 věty).
-Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem k denní době, zmiň to konkrétně (počet gramů).${
+    // Max 2 věty a čím dál víc kontextu (voda, včerejšek, překročení) — bez pořadí by model
+    // buď nacpal všechno, nebo vybíral náhodně.
+    const systemPrompt = `Jsi Mya z aplikace Nouri. Piš krátké, úderné zprávy (max 2 věty).
+Zohledni aktuální stav uživatele. Nezmiňuj všechno najednou — vyber nejvýš dvě nejdůležitější věci v tomhle pořadí:
+1) dnešní překročení kalorického cíle, 2) připomínky uvedené v datech (nezapsané jídlo, málo vody), 3) včerejší překročení cíle, 4) výrazně chybějící bílkoviny vzhledem k denní době (konkrétně v gramech).
+O nezapsaném jídle nebo málo vypité vodě mluv JEN když je uvedeno v "Appka právě připomíná" — jinak nic takového netvrď ani nedomýšlej.
+${buildCoachingPrompt(coachingStyle, isVacationDay, profile.gender)}${
       localHour !== undefined
         ? " Zpráva musí sedět na aktuální denní dobu uvedenou níž — nikdy nepiš ranní pozdrav ani plán na celý den večer a v noci, a nebilancuj celý den dopoledne."
         : ""
@@ -228,9 +273,26 @@ Zohledni aktuální stav uživatele. Pokud výrazně chybí bílkoviny vzhledem 
     const intakeSummary =
       consumedCalories === 0
         ? "Zatím dnes nic nezapsal(a) do appky (nejde poznat, jestli ještě nejedl(a), nebo to jen ještě nezapsal(a))."
-        : `Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.`;
+        : remaining < 0
+          ? `Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g) — PŘES denní cíl o ${-remaining} kcal.`
+          : `Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.`;
 
-    const userPrompt = `Uživatel: ${safeName}. Cíl: ${nutrition.targetCalories} kcal (bílkoviny ${targetProtein}g).${timeContext} ${intakeSummary}${moodContext}`;
+    const waterContext =
+      waterGlasses !== undefined ? ` Voda dnes: ${waterGlasses} z ${waterTarget ?? 8} sklenic (sklenice = 250 ml).` : "";
+
+    // Včerejšek jen když klient poslal obě čísla (včera něco zapsáno, viz buildYesterdayReview).
+    const yesterdayContext =
+      yesterdayConsumed !== undefined && yesterdayTarget !== undefined
+        ? ` Včera${rawYesterday?.isVacationDay === true ? " (volný den)" : ""}: ${yesterdayConsumed} kcal z cíle ${yesterdayTarget} kcal${
+            yesterdayConsumed > yesterdayTarget ? ` — přes cíl o ${yesterdayConsumed - yesterdayTarget} kcal` : ""
+          }.`
+        : "";
+
+    const nudgeContext =
+      nudgeKinds.length > 0 ? ` Appka právě připomíná: ${nudgeKinds.map((k) => NUDGE_KIND_LABELS[k]).join("; ")}.` : "";
+
+    const workoutContext = workoutBonusCalories > 0 ? ` (včetně +${workoutBonusCalories} kcal za dnešní trénink)` : "";
+    const userPrompt = `Uživatel: ${safeName}. Cíl: ${targetCalories} kcal${workoutContext} (bílkoviny ${targetProtein}g).${timeContext} ${intakeSummary}${waterContext}${nudgeContext}${yesterdayContext}${moodContext}`;
 
     try {
       const result = await callOpenAIChat({
@@ -457,6 +519,9 @@ interface MealFeedbackInput {
   mealType: MealType;
   consumedTodayCalories: number;
   targetCalories: number;
+  coachingStyle?: unknown; // whitelist přes parseCoachingStyle
+  isVacationDay?: unknown; // bere se jen doslovné true
+  gender?: unknown; // "female" | "male", jen pro správný rod v odpovědi (viz genderPrompt)
 }
 
 const MEAL_TYPE_LABELS: Record<MealType, string> = {
@@ -493,12 +558,21 @@ export const getMealFeedback = onCall(
 
     const remaining = input.targetCalories - input.consumedTodayCalories;
     const mealTypeLabel = MEAL_TYPE_LABELS[input.mealType] ?? "jídlo";
+    // REFERENCE/STRICT_COACHING_SPEC.md, A3 — nepovinné, starší build appky je neposílá.
+    const coachingStyle = parseCoachingStyle(input.coachingStyle);
+    const isVacationDay = input.isVacationDay === true;
 
-    const systemPrompt = `Jsi Mya z aplikace Nouri. Uživatel právě zapsal jídlo. Reaguj JEDNOU krátkou větou (max ~15 slov),
-věcně a přátelsky — jak tohle jídlo zapadá do zbytku dne. Žádné obecné fráze, konkrétní reakce na dané jídlo.`;
+    const systemPrompt = `Jsi Mya z aplikace Nouri. Uživatel právě zapsal jídlo. Reaguj JEDNOU krátkou větou (max ~20 slov) —
+jak tohle jídlo zapadá do zbytku dne. Žádné obecné fráze, konkrétní reakce na dané jídlo.
+Když je uživatel po tomhle jídle PŘES denní cíl, musíš to říct a uvést o kolik kcal — nesmíš to zamlčet ani obejít chválou.
+${buildCoachingPrompt(coachingStyle, isVacationDay, input.gender)}`;
 
+    // Překročení appka modelu píše výslovně, ne jen jako záporné "Zbývá -300 kcal" — to dřív
+    // model snadno přehlédl a odpověděl obecnou pochvalou.
+    const balanceLine =
+      remaining < 0 ? `Tímhle jídlem je PŘES denní cíl o ${-remaining} kcal.` : `Zbývá ${remaining} kcal.`;
     const userPrompt = `Právě zapsáno jako ${mealTypeLabel}: "${mealName}" (${input.calories} kcal, ${protein}g bílkovin).
-Dnes celkem snědeno: ${input.consumedTodayCalories} kcal z cíle ${input.targetCalories} kcal. Zbývá ${remaining} kcal.`;
+Dnes celkem snědeno: ${input.consumedTodayCalories} kcal z cíle ${input.targetCalories} kcal. ${balanceLine}`;
 
     try {
       const result = await callOpenAIChat({
@@ -508,7 +582,7 @@ Dnes celkem snědeno: ${input.consumedTodayCalories} kcal z cíle ${input.target
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        maxTokens: 60,
+        maxTokens: 80, // ~20 slov česky (dřív 60 na ~15 slov)
       });
 
       if (!result.ok) {
@@ -853,6 +927,9 @@ export const chatWithMya = onCall(
     // Živě přepočteno z profilu, ne z profile.targetCalories (stejný důvod jako u getDailyGreeting).
     const nutrition = buildNutritionFromProfile(profile);
     const goalLabel = profile.goal === "lose" ? "hubnutí" : profile.goal === "gain" ? "nabírání svalové hmoty" : "udržování váhy";
+    // Styl Myi jde s profilem (klient posílá celý UserProfile). Volno chat nezná — server nezná
+    // místní datum uživatele a chat se na aktuální den stejně neváže.
+    const coachingStyle = parseCoachingStyle(profile.coachingStyle);
 
     const systemPrompt = `Jsi Mya, AI nutriční a fitness asistentka aplikace Nouri. Vedeš volnou konverzaci s uživatelkou/uživatelem appky.
 
@@ -860,10 +937,12 @@ Kontext uživatele: ${safeName}, cíl ${goalLabel}, cílový příjem ${nutritio
 
 Pravidla:
 - Odpovídej výhradně na témata výživy, hubnutí/nabírání/udržování váhy, cvičení, pohybu a zdravého životního stylu, případně dotazy k používání appky Nouri. Na cokoliv mimo tato témata zdvořile odpověz, že se raději bavíš o výživě a zdraví, a nasměruj konverzaci zpět.
-- Piš česky, věcně ale přátelsky, jako zkušená kamarádka-nutriční poradkyně.
+- Piš česky jako zkušená kamarádka-nutriční poradkyně, v tónu podle stylu níž.
 - Odpovědi drž přiměřeně stručné (typicky 2-5 vět) — delší jen když si to téma opravdu vyžádá (např. rozpis jídelníčku).
 - Nikdy nepoužívej markdown tabulky.
-- Nejsi lékařka — u zdravotních potížích nebo léčebných dotazech doporuč konzultaci s lékařem, nediagnostikuj.`;
+- Nejsi lékařka — u zdravotních potížích nebo léčebných dotazech doporuč konzultaci s lékařem, nediagnostikuj.
+
+${buildCoachingPrompt(coachingStyle, false, profile.gender)}`;
 
     const apiMessages = [
       { role: "system", content: systemPrompt },

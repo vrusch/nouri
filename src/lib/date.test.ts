@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getLocalDateISO } from "./date";
+import { getLocalDateISO, getPreviousDateISO } from "./date";
 
 describe("getLocalDateISO", () => {
   // REGRESE: AUDIT_2026-08-14.md N10 — `toISOString().split("T")[0]` vrací UTC datum
@@ -17,5 +17,21 @@ describe("getLocalDateISO", () => {
     const now = new Date();
     const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     expect(getLocalDateISO()).toBe(expected);
+  });
+});
+
+describe("getPreviousDateISO", () => {
+  it("vrátí předchozí den", () => {
+    expect(getPreviousDateISO("2026-09-25")).toBe("2026-09-24");
+  });
+
+  it("přes hranici měsíce i roku", () => {
+    expect(getPreviousDateISO("2026-03-01")).toBe("2026-02-28");
+    expect(getPreviousDateISO("2026-01-01")).toBe("2025-12-31");
+  });
+
+  it("den po změně času (ČR 2026-03-29 a 2026-10-25) nepřeskočí", () => {
+    expect(getPreviousDateISO("2026-03-30")).toBe("2026-03-29");
+    expect(getPreviousDateISO("2026-10-26")).toBe("2026-10-25");
   });
 });

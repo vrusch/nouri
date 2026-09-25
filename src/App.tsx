@@ -11,6 +11,8 @@ import {
   subscribeWeightLogs,
   subscribeWorkouts,
   subscribeCycleLogs,
+  subscribeWaterLog,
+  adjustWaterGlasses,
   type CycleLogEntry,
 } from "./lib/cloudSync";
 import { getLocalDateISO } from "./lib/date";
@@ -23,7 +25,10 @@ import { computeWorkoutPlanStatus } from "./lib/workoutPlan";
 import { computeMealReminderStatus } from "./lib/mealReminder";
 import { isQuietHours } from "./lib/quietHours";
 import { isVacationDay } from "./lib/vacationMode";
-import { Bell, Search, Dumbbell, MessageCircle, ClipboardList, UtensilsCrossed, TreePalm, AlertCircle, X } from "lucide-react";
+import { computeWaterPaceStatus } from "./lib/water";
+import { computeActiveNudges, type Nudge } from "./lib/nudges";
+import { resolveCoachingStyle, getWaterBehindThreshold, shouldMuteMealRemindersOnVacation } from "./lib/coachingStyle";
+import { Bell, Search, Dumbbell, MessageCircle, ClipboardList, UtensilsCrossed, TreePalm, AlertCircle, X, GlassWater } from "lucide-react";
 
 // N28 (AUDIT_2026-08-14.md) — appka dřív staticky importovala všechny 4 taby i všechny 4 modaly,
 // takže hlavní JS chunk (952,8 KB, gzip 292,4 KB) nesl i kód pro Recipes/Profile/Stats a modaly,
@@ -52,6 +57,15 @@ function ModalLoadingFallback() {
       <LogoIcon className="w-10 h-10" animated />
     </div>
   );
+}
+
+function readDismissedNudges(storageKey: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(sessionStorage.getItem(storageKey) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 export default function App() {
@@ -93,6 +107,45 @@ export default function App() {
   const todaysDataLoaded = todaysWorkoutCountRaw !== undefined && todaysMealsRaw !== undefined;
   const todaysWorkoutCount = todaysWorkoutCountRaw ?? 0;
   const todaysMeals = todaysMealsRaw ?? [];
+
+  // Připomínky jídla/vody (REFERENCE/STRICT_COACHING_SPEC.md, A4/A5) se počítají z aktuální
+  // hodiny — bez tiku by se připomínka na 10:00 objevila až při nejbližším jiném re-renderu
+  // (zápis jídla, přepnutí tabu). Pět minut stačí, připomínky nejsou na minutu přesné.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 5 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Voda v App.tsx kvůli zvonu a banneru připomínek (Home má vlastní odběr pro svou kartu,
+  // Firestore oba listenery obslouží z jedné cache). Datum je součástí stavu: subscribeWaterLog
+  // hlásí 0 i pro neexistující dokument, takže "ještě nedorazilo" appka pozná jen podle toho,
+  // že stav patří jinému (včerejšímu) dni nebo žádnému — jinak by po startu na chvíli
+  // připomínala vodu, kterou uživatelka už vypila.
+  const [waterLog, setWaterLog] = useState<{ date: string; glasses: number } | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    return subscribeWaterLog(user.uid, today, (glasses) => setWaterLog({ date: today, glasses }));
+  }, [user, today]);
+  const waterGlasses = waterLog?.date === today ? waterLog.glasses : null;
+
+  // Schované ("×") připomínky — per den a per slot (u vody i per očekávaný počet sklenic, viz
+  // Nudge.dismissKey), uložené v sessionStorage stejně jako ostatní "záblesky" appky.
+  const dismissedNudgesStorageKey = `nouri_nudges_dismissed_${today}`;
+  const [dismissedNudges, setDismissedNudges] = useState<{ date: string; keys: string[] }>(() => ({
+    date: today,
+    keys: readDismissedNudges(dismissedNudgesStorageKey),
+  }));
+  const dismissedNudgeKeys = dismissedNudges.date === today ? dismissedNudges.keys : [];
+  const handleDismissNudge = (nudge: Nudge) => {
+    const keys = [...dismissedNudgeKeys, nudge.dismissKey];
+    setDismissedNudges({ date: today, keys });
+    try {
+      sessionStorage.setItem(dismissedNudgesStorageKey, JSON.stringify(keys));
+    } catch {
+      // sessionStorage nemusí být dostupné (privátní režim) — připomínka zůstane schovaná aspoň do reloadu.
+    }
+  };
 
   // N-audit 2026-08-14: Mya (denní pozdrav, chat, reakce na zapsané jídlo) počítala s cílem bez
   // luteálního kalorického bonusu (viz stejný výpočet v Home.tsx), protože AddMealModal a
@@ -222,20 +275,45 @@ export default function App() {
 
   const profileCheck = computeProfileCheckStatus(profile.lastProfileCheckAt);
   const workoutPlanRaw = computeWorkoutPlanStatus(profile.plannedWorkoutDays, todaysWorkoutCount > 0);
-  const mealReminderRaw = computeMealReminderStatus(todaysMeals.map((m) => m.type));
+  const mealReminderRaw = computeMealReminderStatus(todaysMeals.map((m) => m.type), now);
   // Dokud Dexie nevrátí dnešní data, appka nudge nepočítá jako aktivní (C2) — jinak by na
   // studeném cache/novém zařízení na pár vteřin ukázala falešnou připomínku.
   const workoutPlan = { ...workoutPlanRaw, reminderDue: todaysDataLoaded && workoutPlanRaw.reminderDue };
-  const mealReminder = { ...mealReminderRaw, lunchOverdue: todaysDataLoaded && mealReminderRaw.lunchOverdue };
+  const mealReminder = {
+    breakfastOverdue: todaysDataLoaded && mealReminderRaw.breakfastOverdue,
+    lunchOverdue: todaysDataLoaded && mealReminderRaw.lunchOverdue,
+    dinnerOverdue: todaysDataLoaded && mealReminderRaw.dinnerOverdue,
+  };
   // Appka během tichých hodin nesmí sama upoutávat pozornost na připomínky — červená tečka
   // je jediný pasivní "nudge" prvek, zvon samotný jde otevřít ručně kdykoliv. Okno je uživatelem
   // nastavitelné v Profilu (výchozí 22-7, viz quietHours.ts), vypínatelné přes quietHoursEnabled.
   const quietHoursActive =
-    (profile.quietHoursEnabled ?? true) && isQuietHours(new Date().getHours(), profile.quietHoursStart, profile.quietHoursEnd);
-  // Volný den / dovolenkový režim (FEATURE_IDEAS.md sekce 3) ztlumí konkrétně připomínku vážení
-  // a nezapsaného oběda (jediné dvě appka podle zadání "ztlumí") — kontrola profilu a plán
-  // tréninků vynechané dny záměrně nerespektují, appka o ně nebyla žádaná.
+    (profile.quietHoursEnabled ?? true) && isQuietHours(now.getHours(), profile.quietHoursStart, profile.quietHoursEnd);
+  // Volný den / dovolenkový režim (FEATURE_IDEAS.md sekce 3) ztlumí vždy připomínku vážení,
+  // připomínku jídla jen mimo přísný styl Myi a vodu nikdy (REFERENCE/STRICT_COACHING_SPEC.md) —
+  // o jídle/vodě rozhoduje computeActiveNudges níž. Kontrola profilu a plán tréninků vynechané
+  // dny záměrně nerespektují, appka o ně nebyla žádaná.
   const vacationActive = isVacationDay(today, profile.vacationDates);
+  const coachingStyle = resolveCoachingStyle(profile.coachingStyle);
+  const nudges = computeActiveNudges({
+    mealReminder,
+    waterPace:
+      waterGlasses === null
+        ? null
+        : { ...computeWaterPaceStatus(waterGlasses, now, getWaterBehindThreshold(coachingStyle)), glasses: waterGlasses },
+    style: coachingStyle,
+    isVacationDay: vacationActive,
+  });
+  const visibleNudges = nudges.filter((n) => !dismissedNudgeKeys.includes(n.dismissKey));
+  const handleNudgeAction = (nudge: Nudge) => {
+    if (nudge.kind === "water") {
+      if (user) adjustWaterGlasses(user.uid, today, 1);
+      return;
+    }
+    setAddMealAction(null);
+    setAddMealOpen(true);
+    setShowReminder(false);
+  };
 
   const renderContent = () => {
     switch (activeTab) {
@@ -298,7 +376,7 @@ export default function App() {
                 {((weighInStatusLoaded && weighInOverdue && !vacationActive) ||
                   profileCheck.checkOverdue ||
                   workoutPlan.reminderDue ||
-                  (mealReminder.lunchOverdue && !vacationActive)) &&
+                  nudges.length > 0) &&
                   !quietHoursActive && (
                     <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 border-2 border-white dark:border-slate-900 rounded-full"></span>
                   )}
@@ -309,7 +387,9 @@ export default function App() {
                     <>
                       <p className="text-sm text-slate-600 dark:text-slate-300 mb-3 flex items-center gap-1.5">
                         <TreePalm className="w-3.5 h-3.5 text-teal-500 shrink-0" />
-                        Jsi v dovolenkovém režimu — připomínky vážení a jídla appka do konce dovolené ztlumí.
+                        {shouldMuteMealRemindersOnVacation(coachingStyle)
+                          ? "Jsi v dovolenkovém režimu — připomínky vážení a jídla appka do konce dovolené ztlumí, vodu hlídá dál."
+                          : "Jsi v dovolenkovém režimu — vážení appka do konce dovolené ztlumí, ale jídlo a vodu hlídá dál (Přísná Mya)."}
                       </p>
                       <button
                         onClick={() => { setActiveTab("profile"); setShowReminder(false); }}
@@ -364,21 +444,25 @@ export default function App() {
                       </button>
                     </>
                   )}
-                  {mealReminder.lunchOverdue && !vacationActive && (
-                    <>
+                  {nudges.map((nudge) => (
+                    <div key={nudge.kind}>
                       <div className="h-px bg-slate-100 dark:bg-slate-700 my-3" />
                       <p className="text-sm text-slate-600 dark:text-slate-300 mb-3 flex items-center gap-1.5">
-                        <UtensilsCrossed className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                        Dneska ještě nemáš zapsaný oběd.
+                        {nudge.kind === "water" ? (
+                          <GlassWater className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                        ) : (
+                          <UtensilsCrossed className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                        )}
+                        {nudge.text}
                       </p>
                       <button
-                        onClick={() => { setAddMealAction(null); setAddMealOpen(true); setShowReminder(false); }}
-                        className="w-full bg-emerald-600 text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all"
+                        onClick={() => handleNudgeAction(nudge)}
+                        className={`w-full text-white text-sm font-bold py-2 rounded-xl active:scale-[0.98] transition-all ${nudge.kind === "water" ? "bg-sky-600" : "bg-emerald-600"}`}
                       >
-                        Zapsat oběd
+                        {nudge.kind === "water" ? "+1 sklenice" : "Zapsat jídlo"}
                       </button>
-                    </>
-                  )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -397,6 +481,41 @@ export default function App() {
 
         {/* --- OBSAH --- */}
         <main className="flex-1 overflow-y-auto px-6 hide-scrollbar">
+          {/* Banner připomínek (REFERENCE/STRICT_COACHING_SPEC.md, A5) — dřív byla připomínka jídla
+              jen červená tečka schovaná pod zvonem. Stejný seznam jako ve zvonu (computeActiveNudges),
+              tichý režim ho potlačí stejně jako tečku. */}
+          {activeTab === "home" && !quietHoursActive && visibleNudges.length > 0 && (
+            <div className="pt-4 -mb-2 space-y-2">
+              {visibleNudges.map((nudge) => (
+                <div
+                  key={nudge.dismissKey}
+                  className={`flex items-center gap-3 p-3 rounded-2xl border text-sm ${
+                    nudge.kind === "water"
+                      ? "bg-sky-50 dark:bg-sky-900/20 border-sky-100 dark:border-sky-900/40 text-sky-800 dark:text-sky-300"
+                      : "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-100 dark:border-emerald-900/40 text-emerald-800 dark:text-emerald-300"
+                  }`}
+                >
+                  {nudge.kind === "water" ? (
+                    <GlassWater className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <UtensilsCrossed className="w-4 h-4 shrink-0" />
+                  )}
+                  <span className="flex-1 font-medium leading-snug">{nudge.text}</span>
+                  <button
+                    onClick={() => handleNudgeAction(nudge)}
+                    className={`shrink-0 text-white text-xs font-bold px-3 py-1.5 rounded-full active:scale-95 transition-all ${
+                      nudge.kind === "water" ? "bg-sky-600" : "bg-emerald-600"
+                    }`}
+                  >
+                    {nudge.kind === "water" ? "+1" : "Zapsat"}
+                  </button>
+                  <button onClick={() => handleDismissNudge(nudge)} aria-label="Schovat připomínku" className="shrink-0 opacity-60">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           <Suspense fallback={<TabLoadingFallback />}>{renderContent()}</Suspense>
           {/* Spodní padding aby obsah nekončil pod menu */}
           <div className="h-32 shrink-0"></div>

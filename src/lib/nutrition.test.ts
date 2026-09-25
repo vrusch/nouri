@@ -5,6 +5,7 @@ import {
   calibrateTarget,
   getCalibrationProgress,
   getProgressCaption,
+  getCalorieOverage,
   getDayTrafficLight,
   computeRemainingMacros,
   getRecipeAvailability,
@@ -475,21 +476,78 @@ describe("getCalibrationProgress", () => {
 
 describe("getProgressCaption (regrese: 'Skvělé tempo' při 0 kcal)", () => {
   it("nechválí 'skvělé tempo', když nic nebylo zapsáno", () => {
-    expect(getProgressCaption(0, 0)).not.toMatch(/skvělé tempo/i);
-    expect(getProgressCaption(0, 0)).toMatch(/nic nezapsala/i);
+    expect(getProgressCaption(0, 2000)).not.toMatch(/skvělé tempo/i);
+    expect(getProgressCaption(0, 2000)).toMatch(/nic nezapsala/i);
   });
 
   it("varuje před večeří nad 80 % postupu", () => {
-    expect(getProgressCaption(1700, 85)).toMatch(/večeři/i);
+    expect(getProgressCaption(1700, 2000)).toMatch(/večeři/i);
   });
 
   it("chválí tempo mezi 0 a 80 % postupu, jen když už něco zapsáno je", () => {
-    expect(getProgressCaption(500, 40)).toMatch(/skvělé tempo/i);
+    expect(getProgressCaption(500, 2000)).toMatch(/skvělé tempo/i);
   });
 
   it("hranice: přesně 80 % ještě nevaruje před večeří (> práh, ne >=)", () => {
-    expect(getProgressCaption(1600, 80)).not.toMatch(/večeři/i);
-    expect(getProgressCaption(1601, 80.01)).toMatch(/večeři/i);
+    expect(getProgressCaption(1600, 2000)).not.toMatch(/večeři/i);
+    expect(getProgressCaption(1601, 2000)).toMatch(/večeři/i);
+  });
+
+  it("přesně na cíli (100 %) to ještě není překročení", () => {
+    expect(getProgressCaption(2000, 2000)).toMatch(/večeři/i);
+  });
+});
+
+// REGRESE: nad cílem appka ukazovala pořád "Pozor na večeři!" (i při 160 %) a "Zbývá ti 0 kcal"
+// — překročení bylo neviditelné, testerky to hlásily jako "appka je moc benevolentní"
+// (REFERENCE/STRICT_COACHING_SPEC.md, A2).
+describe("getProgressCaption nad cílem (regrese: překročení bylo neviditelné)", () => {
+  it("při 160 % neříká 'Pozor na večeři' a uvede, o kolik je přes", () => {
+    const caption = getProgressCaption(3200, 2000);
+    expect(caption).not.toMatch(/večeři/i);
+    expect(caption).toContain("1200 kcal");
+  });
+
+  it("každý styl má vlastní tón", () => {
+    const gentle = getProgressCaption(2300, 2000, { style: "gentle" });
+    const balanced = getProgressCaption(2300, 2000, { style: "balanced" });
+    const strict = getProgressCaption(2300, 2000, { style: "strict" });
+    expect(new Set([gentle, balanced, strict]).size).toBe(3);
+    expect(strict).toMatch(/přes limit/i);
+  });
+
+  it("bez stylu použije vyvážený", () => {
+    expect(getProgressCaption(2300, 2000)).toBe(getProgressCaption(2300, 2000, { style: "balanced" }));
+  });
+
+  it("o volnu překročení nezamlčí — 'dnes to beru, ale nezvykej si'", () => {
+    expect(getProgressCaption(2300, 2000, { style: "balanced", isVacationDay: true })).toMatch(/nezvykej si/i);
+    expect(getProgressCaption(2300, 2000, { style: "strict", isVacationDay: true })).toMatch(/nezvykej si/i);
+    expect(getProgressCaption(2300, 2000, { style: "gentle", isVacationDay: true })).toContain("300 kcal");
+  });
+
+  it("nikdy nenabádá ke kompenzaci hladověním (méně jíst / vynechat jídlo)", () => {
+    for (const style of ["gentle", "balanced", "strict"] as const) {
+      for (const isVacationDay of [false, true]) {
+        const caption = getProgressCaption(3000, 2000, { style, isVacationDay });
+        expect(caption).not.toMatch(/vynech|hladov|nejez|jez méně|méně jíst/i);
+      }
+    }
+  });
+});
+
+describe("getCalorieOverage", () => {
+  it("pod cílem a na cíli je 0", () => {
+    expect(getCalorieOverage(1500, 2000)).toBe(0);
+    expect(getCalorieOverage(2000, 2000)).toBe(0);
+  });
+
+  it("nad cílem vrací zaokrouhlený rozdíl", () => {
+    expect(getCalorieOverage(2340.4, 2000)).toBe(340);
+  });
+
+  it("nesmyslný cíl (0) neznamená překročení", () => {
+    expect(getCalorieOverage(500, 0)).toBe(0);
   });
 });
 

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, Droplet, Beef, AlertCircle, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, Droplet, Beef, AlertCircle, Megaphone, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -27,6 +27,7 @@ import { parseMealsCsv } from "../lib/csvImport";
 import { classifyReportLine, splitBoldSegments } from "../lib/aiReportMarkdown";
 import { computeProfileCheckStatus } from "../lib/profileCheck";
 import { QUIET_HOURS_START, QUIET_HOURS_END } from "../lib/quietHours";
+import { COACHING_STYLE_OPTIONS, resolveCoachingStyle, getCoachingStyleLabel } from "../lib/coachingStyle";
 import { DAY_NAMES_CS } from "../lib/workoutPlan";
 import { expandDateRange, datesToEndVacation } from "../lib/vacationMode";
 import { db, type MealItem } from "../db/db";
@@ -746,6 +747,45 @@ export default function Profile() {
                   </button>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Styl Myi (REFERENCE/STRICT_COACHING_SPEC.md) — obě testerky chtěly přísnější vedení,
+              ale jako volbu, ne natvrdo pro všechny. Stejná kostra řádku jako "Připomínat vážení". */}
+          <div
+            className={`px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${editing === 'coachingStyle' ? accentBg : 'active:bg-slate-50 dark:active:bg-slate-800'}`}
+            onClick={() => setEditing(editing === 'coachingStyle' ? null : 'coachingStyle')}
+          >
+            <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+              <Megaphone className="w-4 h-4 text-red-500" />
+              Styl Myi
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-bold text-slate-800 dark:text-white">
+                {getCoachingStyleLabel(resolveCoachingStyle(profile?.coachingStyle))}
+              </span>
+              <ChevronDown className={`w-4 h-4 ${editing === 'coachingStyle' ? accentText : 'text-slate-400'}`} />
+            </div>
+          </div>
+
+          {editing === 'coachingStyle' && (
+            <div className={`px-2 pb-2 space-y-1 ${accentBg}`}>
+              {COACHING_STYLE_OPTIONS.map((option) => {
+                const selected = resolveCoachingStyle(profile?.coachingStyle) === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    onClick={async () => { await updateProfile({ coachingStyle: option.value }); setEditing(null); }}
+                    className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl text-left transition-all ${selected ? 'bg-white dark:bg-slate-800 shadow-sm' : 'hover:bg-white/50 dark:hover:bg-slate-800/50'}`}
+                  >
+                    <span>
+                      <span className={`block text-sm font-bold ${selected ? accentText : 'text-slate-700 dark:text-slate-200'}`}>{option.label}</span>
+                      <span className="block text-xs text-slate-500 dark:text-slate-400">{option.description}</span>
+                    </span>
+                    {selected && <Check className={`w-4 h-4 shrink-0 ${accentText}`} />}
+                  </button>
+                );
+              })}
             </div>
           )}
 

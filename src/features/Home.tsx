@@ -4,7 +4,11 @@ import { db, type MealItem, type WorkoutItem } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { Volume2, Square, Flame, Droplets, Droplet, Dumbbell, X, Loader2, TreePalm } from "lucide-react";
 import { MyaAI } from "../lib/ai";
-import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight } from "../lib/nutrition";
+import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight, getCalorieOverage } from "../lib/nutrition";
+import { resolveCoachingStyle, getWaterBehindThreshold } from "../lib/coachingStyle";
+import { computeActiveNudges } from "../lib/nudges";
+import { computeMealReminderStatus } from "../lib/mealReminder";
+import { buildYesterdayReview } from "../lib/yesterdayReview";
 import {
   getCyclePhase,
   DEFAULT_CYCLE_LENGTH_DAYS,
@@ -13,9 +17,9 @@ import {
   LUTEAL_CALORIE_BONUS,
 } from "../lib/cyclePhase";
 import { computeLoggingStreak } from "../lib/streak";
-import { getLocalDateISO } from "../lib/date";
+import { getLocalDateISO, getPreviousDateISO } from "../lib/date";
 import { pickDailyCustomReminder } from "../lib/customReminders";
-import { WATER_TARGET_GLASSES, getWaterProgressPercent, formatWaterVolumeCs } from "../lib/water";
+import { WATER_TARGET_GLASSES, getWaterProgressPercent, formatWaterVolumeCs, computeWaterPaceStatus } from "../lib/water";
 import { formatGlassesCs, formatWorkoutsCs } from "../lib/format";
 import { getTimeOfDay, getTimeGreetingCs, getTimeSubtitleCs } from "../lib/greeting";
 import {
@@ -133,6 +137,10 @@ export default function Home({ onEditMeal }: HomeProps) {
   const meals = mealsRaw ?? [];
   const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
   const todaysWorkouts = useLiveQuery(() => db.workouts.where('date').equals(today).toArray()) || [];
+  // Včerejší tréninky jen kvůli cíli ve včerejší bilanci pro pozdrav (buildYesterdayReview) —
+  // jídla appka bere z allMeals výš.
+  const yesterday = getPreviousDateISO(today);
+  const yesterdaysWorkouts = useLiveQuery(() => db.workouts.where('date').equals(yesterday).toArray(), [yesterday]);
 
   // "Jak se cítíš?" zmizí, jakmile appka na dnešek dostane odpověď (sessionStorage, stejný
   // "záblesk pro danou session" princip jako milníky výš) — lazy init čte rovnou při mountu,
@@ -149,9 +157,17 @@ export default function Home({ onEditMeal }: HomeProps) {
     setMoodAnswered(!!sessionStorage.getItem(`mya_mood_answered_${today}`));
   }, [today]);
 
+  // subscribeWaterLog hlásí 0 i pro dosud neexistující dokument — waterLoadedDate appce řekne,
+  // jestli je 0 skutečná, nebo jen "ještě nedorazilo". Pozdrav Myi (viz fetchGreeting níž)
+  // vodu posílá jen po načtení, jinak by Mya kárala za nepití hned po startu appky.
+  const [waterLoadedDate, setWaterLoadedDate] = useState<string | null>(null);
+  const waterLoaded = waterLoadedDate === today;
   useEffect(() => {
     if (!user) return;
-    return subscribeWaterLog(user.uid, today, setWaterGlasses);
+    return subscribeWaterLog(user.uid, today, (glasses) => {
+      setWaterGlasses(glasses);
+      setWaterLoadedDate(today);
+    });
   }, [user, today]);
 
   useEffect(() => {
@@ -245,6 +261,47 @@ export default function Home({ onEditMeal }: HomeProps) {
       ]
     : [];
 
+  // Styl Myi a volno (REFERENCE/STRICT_COACHING_SPEC.md) — sdílí caption pod kaloriemi i obě
+  // volání getDailyGreeting níž, ať si Home a Mya neodporují.
+  const coachingStyle = resolveCoachingStyle(profile?.coachingStyle);
+  const calorieOverage = getCalorieOverage(consumedCalories, adjustedGoalCalories);
+  const yesterdayReview =
+    yesterdaysWorkouts === undefined
+      ? undefined
+      : buildYesterdayReview(
+          allMeals.filter((m) => m.date === yesterday),
+          yesterdaysWorkouts,
+          GOAL_CALORIES,
+          isVacationDay(yesterday, profile?.vacationDates)
+        ) ?? undefined;
+  // Kontext navíc pro obě volání getDailyGreeting (automatický pozdrav i reakce na náladu).
+  // Tréninkový bonus jde zvlášť — server počítá cíl z profilu, bez něj by Mya po tréninku
+  // hlásila překročení, které Home neukazuje.
+  // Aktivní připomínky ze STEJNÉ funkce jako zvon a banner v App.tsx (computeActiveNudges) — Mya
+  // o nezapsaném jídle nebo vodě mluví jen podle tohohle seznamu, nedomýšlí si to z čísel
+  // (server neví, která jídla jsou zapsaná). Dokud jídla/voda nedorazí, appka nic neposílá.
+  const mealStatus = computeMealReminderStatus(meals.map((m) => m.type));
+  const greetingNudgeKinds =
+    mealsRaw === undefined
+      ? []
+      : computeActiveNudges({
+          mealReminder: mealStatus,
+          waterPace: waterLoaded
+            ? { ...computeWaterPaceStatus(waterGlasses, new Date(), getWaterBehindThreshold(coachingStyle)), glasses: waterGlasses }
+            : null,
+          style: coachingStyle,
+          isVacationDay: todayIsVacation,
+        }).map((n) => n.kind);
+  const greetingContext = {
+    coachingStyle,
+    isVacationDay: todayIsVacation,
+    nudgeKinds: greetingNudgeKinds,
+    workoutBonusCalories: Math.round(todaysWorkoutCalories),
+    waterGlasses: waterLoaded ? waterGlasses : undefined,
+    waterTarget: WATER_TARGET_GLASSES,
+    yesterday: yesterdayReview,
+  };
+
   const handleSubmitMood = async (value: number) => {
     if (!profile || submittingMood || mealsRaw === undefined) return;
     setSubmittingMood(true);
@@ -256,6 +313,7 @@ export default function Home({ onEditMeal }: HomeProps) {
         localHour: new Date().getHours(),
         mood: value,
         moodNote: note || undefined,
+        ...greetingContext,
       });
       sessionStorage.setItem(`mya_mood_greeting_${today}`, msg);
       sessionStorage.setItem(`mya_mood_answered_${today}`, "1");
@@ -349,7 +407,9 @@ export default function Home({ onEditMeal }: HomeProps) {
       // V klíči je i denní doba (timeOfDay): bez ní by pozdrav vygenerovaný ráno visel na Home
       // i večer se stejným počtem jídel, takže by časový kontext poslaný do getDailyGreeting níž
       // nebyl vidět. Čtyři bloky denně = max 4 volání OpenAI na jeden počet jídel.
-      const cacheKey = `mya_greeting_${today}_${meals.length}_${timeOfDay}`;
+      // Styl a volno v klíči: přepnutí stylu v Profilu nebo tap na "Dnes mám volno" musí dát
+      // nový pozdrav, ne vrátit ten starý z cache.
+      const cacheKey = `mya_greeting_${today}_${meals.length}_${timeOfDay}_${coachingStyle}_${todayIsVacation ? "volno" : "bezne"}`;
       const cached = sessionStorage.getItem(cacheKey);
 
       if (cached) {
@@ -371,6 +431,7 @@ export default function Home({ onEditMeal }: HomeProps) {
           // Hodinu posílá klient schválně: Cloud Function běží v us-central1, takže serverové
           // new Date().getHours() není čas uživatelky (viz getDailyGreeting v functions/src/index.ts).
           localHour: new Date().getHours(),
+          ...greetingContext,
         });
         // Mezitím (appka na odpověď OpenAI čeká) mohla appka dostat reakci na náladu, nebo
         // zobrazit milníkovou oslavu (efekt výš) — obě mají přednost, tenhle běžný pozdrav
@@ -407,9 +468,11 @@ export default function Home({ onEditMeal }: HomeProps) {
     // withEffectiveTDEE je nová closure na každý render (staví se z lutealBonusActive/
     // baseNutrition, ne z primitiv) — přidání do deps by efekt (i s grace-period timeoutem)
     // restartovalo na každý render, ne jen když se skutečně změní vstupy, které appka
-    // opravdu chce sledovat (profile už deps má).
+    // opravdu chce sledovat (profile už deps má). Stejně tak greetingContext — styl a volno
+    // mění profile, voda se projeví přes waterLoaded (restart během grace period jen posune
+    // timeout, po uložení do cache už další volání OpenAI nevyvolá).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, today, meals.length, consumedCalories, consumedProtein, timeOfDay]);
+  }, [profile, today, meals.length, consumedCalories, consumedProtein, timeOfDay, waterLoaded]);
 
   // Nová zpráva (nový den / nově zapsané jídlo) nesmí nechat dobíhat přečtení té staré —
   // zastaví se i při odchodu ze záložky Home (odhlášení posluchače na unmount).
@@ -539,12 +602,29 @@ export default function Home({ onEditMeal }: HomeProps) {
           </div>
 
           <div className="flex-1">
-            <h2 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Zbývá ti</h2>
-            <div className="text-3xl font-extrabold text-rose-600 dark:text-rose-400 mb-2">
-              {remainingCalories} <span className="text-sm text-slate-500 dark:text-slate-400 font-medium tracking-normal">kcal</span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 leading-snug">
-              {getProgressCaption(consumedCalories, progressPercent)}
+            {/* Nad cílem appka dřív ukazovala "Zbývá ti 0 kcal" — překročení bylo neviditelné
+                (REFERENCE/STRICT_COACHING_SPEC.md, A2). */}
+            {calorieOverage > 0 ? (
+              <>
+                <h2 className="text-sm font-bold text-red-500 dark:text-red-400 uppercase tracking-wider mb-1">Přes cíl</h2>
+                <div className="text-3xl font-extrabold text-red-600 dark:text-red-400 mb-2">
+                  +{calorieOverage} <span className="text-sm text-slate-500 dark:text-slate-400 font-medium tracking-normal">kcal</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">Zbývá ti</h2>
+                <div className="text-3xl font-extrabold text-rose-600 dark:text-rose-400 mb-2">
+                  {remainingCalories} <span className="text-sm text-slate-500 dark:text-slate-400 font-medium tracking-normal">kcal</span>
+                </div>
+              </>
+            )}
+            <p
+              className={`text-xs leading-snug ${
+                calorieOverage > 0 ? "text-red-600 dark:text-red-400 font-semibold" : "text-slate-500 dark:text-slate-400"
+              }`}
+            >
+              {getProgressCaption(consumedCalories, adjustedGoalCalories, { style: coachingStyle, isVacationDay: todayIsVacation })}
             </p>
             {todaysWorkoutCalories > 0 && (
               <p className="text-[11px] font-semibold text-orange-500 dark:text-orange-400 mt-1.5 flex items-center gap-1">

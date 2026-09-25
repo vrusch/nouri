@@ -2,6 +2,9 @@ import { httpsCallable } from "firebase/functions";
 import { functions } from "./firebase";
 import { type UserProfile } from "../context/AuthContext";
 import { calculateNutrition, type NutritionResults, type Goal } from "./nutrition";
+import type { CoachingStyle } from "./coachingStyle";
+import type { YesterdayReview } from "./yesterdayReview";
+import type { NudgeKind } from "./nudges";
 
 export interface AIResponse {
   text: string;
@@ -22,6 +25,16 @@ interface DailyStats {
   localHour?: number;
   mood?: number; // 1-5, z "Jak se cítíš?" na Home (viz handleSubmitMood v Home.tsx)
   moodNote?: string;
+  // REFERENCE/STRICT_COACHING_SPEC.md, A3 — všechno nepovinné, starší funkce na serveru je
+  // jen ignoruje. waterGlasses appka posílá jen když voda už dorazila z Firestore (jinak by
+  // 0 znamenalo "nenačteno" a Mya by kárala za nepití).
+  coachingStyle?: CoachingStyle;
+  isVacationDay?: boolean;
+  nudgeKinds?: NudgeKind[]; // aktivní připomínky (computeActiveNudges) — Mya o chybějícím jídle/vodě mluví jen podle nich
+  workoutBonusCalories?: number; // dnešní tréninkový bonus — server cíl počítá z profilu, bez něj by nesouhlasil s Home
+  waterGlasses?: number;
+  waterTarget?: number;
+  yesterday?: YesterdayReview;
 }
 
 const getDailyGreetingFn = httpsCallable<{ profile: UserProfile } & DailyStats, { text: string }>(
@@ -36,6 +49,9 @@ export interface MealFeedbackInput {
   mealType: string;
   consumedTodayCalories: number;
   targetCalories: number;
+  coachingStyle?: CoachingStyle;
+  isVacationDay?: boolean;
+  gender?: UserProfile["gender"]; // jen pro správný rod v odpovědi Myi
 }
 
 const getMealFeedbackFn = httpsCallable<MealFeedbackInput, { text: string }>(functions, "getMealFeedback");
