@@ -2,13 +2,25 @@ import { useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, type MealItem, type WorkoutItem } from "../db/db";
 import { useAuth } from "../context/useAuth";
-import { Volume2, Square, Flame, Droplets, Droplet, Dumbbell, X, Loader2, TreePalm } from "lucide-react";
+import { Volume2, Square, Flame, Droplets, Droplet, Dumbbell, X, Loader2, TreePalm, Megaphone } from "lucide-react";
 import { MyaAI } from "../lib/ai";
 import { calculateNutrition, computeRemainingMacros, getProgressCaption, getDayTrafficLight, getCalorieOverage } from "../lib/nutrition";
 import { resolveCoachingStyle, getWaterBehindThreshold } from "../lib/coachingStyle";
 import { computeActiveNudges } from "../lib/nudges";
 import { computeMealReminderStatus } from "../lib/mealReminder";
 import { buildYesterdayReview } from "../lib/yesterdayReview";
+import {
+  buildDailyIntakes,
+  detectHighCaloriePattern,
+  buildHighCaloriePatternText,
+  findRecentlyEndedVacation,
+  summarizeVacation,
+  buildVacationRecapText,
+  HIGH_CALORIE_WINDOW_DAYS,
+  HIGH_CALORIE_PATTERN_COOLDOWN_DAYS,
+} from "../lib/overeatingReview";
+import { isQuietHours } from "../lib/quietHours";
+import { daysSince } from "../lib/weighIn";
 import {
   getCyclePhase,
   DEFAULT_CYCLE_LENGTH_DAYS,
@@ -135,12 +147,16 @@ export default function Home({ onEditMeal }: HomeProps) {
   // dotaz ještě neodpověděl.
   const mealsRaw = useLiveQuery(() => db.meals.where('date').equals(today).toArray());
   const meals = mealsRaw ?? [];
-  const allMeals = useLiveQuery(() => db.meals.toArray()) || [];
+  // Surové hodnoty (undefined = Dexie ještě neodpověděla) kvůli kartě "Mya hlídá" níž — bilance
+  // po dovolené by jinak na studeném cache na chvíli tvrdila "jsi nic nezapsala".
+  const allMealsRaw = useLiveQuery(() => db.meals.toArray());
+  const allMeals = allMealsRaw ?? [];
   const todaysWorkouts = useLiveQuery(() => db.workouts.where('date').equals(today).toArray()) || [];
-  // Včerejší tréninky jen kvůli cíli ve včerejší bilanci pro pozdrav (buildYesterdayReview) —
-  // jídla appka bere z allMeals výš.
+  // Všechny tréninky kvůli cíli ve včerejší bilanci pro pozdrav (buildYesterdayReview) a ve
+  // fázi B (overeatingReview.ts) — cíl dne vždy zahrnuje trénink toho dne, stejně jako Home.
+  const allWorkoutsRaw = useLiveQuery(() => db.workouts.toArray());
   const yesterday = getPreviousDateISO(today);
-  const yesterdaysWorkouts = useLiveQuery(() => db.workouts.where('date').equals(yesterday).toArray(), [yesterday]);
+  const yesterdaysWorkouts = allWorkoutsRaw?.filter((w) => w.date === yesterday);
 
   // "Jak se cítíš?" zmizí, jakmile appka na dnešek dostane odpověď (sessionStorage, stejný
   // "záblesk pro danou session" princip jako milníky výš) — lazy init čte rovnou při mountu,
@@ -274,9 +290,6 @@ export default function Home({ onEditMeal }: HomeProps) {
           GOAL_CALORIES,
           isVacationDay(yesterday, profile?.vacationDates)
         ) ?? undefined;
-  // Kontext navíc pro obě volání getDailyGreeting (automatický pozdrav i reakce na náladu).
-  // Tréninkový bonus jde zvlášť — server počítá cíl z profilu, bez něj by Mya po tréninku
-  // hlásila překročení, které Home neukazuje.
   // Aktivní připomínky ze STEJNÉ funkce jako zvon a banner v App.tsx (computeActiveNudges) — Mya
   // o nezapsaném jídle nebo vodě mluví jen podle tohohle seznamu, nedomýšlí si to z čísel
   // (server neví, která jídla jsou zapsaná). Dokud jídla/voda nedorazí, appka nic neposílá.
@@ -292,6 +305,9 @@ export default function Home({ onEditMeal }: HomeProps) {
           style: coachingStyle,
           isVacationDay: todayIsVacation,
         }).map((n) => n.kind);
+  // Kontext navíc pro obě volání getDailyGreeting (automatický pozdrav i reakce na náladu).
+  // Tréninkový bonus jde zvlášť — server počítá cíl z profilu, bez něj by Mya po tréninku
+  // hlásila překročení, které Home neukazuje.
   const greetingContext = {
     coachingStyle,
     isVacationDay: todayIsVacation,
@@ -300,6 +316,56 @@ export default function Home({ onEditMeal }: HomeProps) {
     waterGlasses: waterLoaded ? waterGlasses : undefined,
     waterTarget: WATER_TARGET_GLASSES,
     yesterday: yesterdayReview,
+  };
+
+  // Karta "Mya hlídá" (REFERENCE/STRICT_COACHING_SPEC.md, fáze B) — bilance po dovolené má
+  // přednost před opakovaným přejídáním (dny volna jsou z okna přejídání vyřazené, takže by
+  // jinak appka týž týden vyčetla dvakrát). Cíl "přibrat" (gain) přejídání neřeší. Obojí mlčí
+  // v tichém režimu, během volna a dokud Dexie nevrátí data.
+  const reviewDataLoaded = allMealsRaw !== undefined && allWorkoutsRaw !== undefined;
+  const reviewQuietHours =
+    (profile?.quietHoursEnabled ?? true) && isQuietHours(new Date().getHours(), profile?.quietHoursStart, profile?.quietHoursEnd);
+  const reviewEnabled = !!profile && profile.goal !== "gain" && reviewDataLoaded && !reviewQuietHours && !todayIsVacation;
+  const allWorkouts = allWorkoutsRaw ?? [];
+
+  const endedVacation = reviewEnabled ? findRecentlyEndedVacation(profile?.vacationDates, today) : null;
+  const vacationRecapText =
+    endedVacation && profile?.lastVacationRecapDismissedEnd !== endedVacation.end
+      ? buildVacationRecapText(
+          summarizeVacation(endedVacation, buildDailyIntakes(allMeals, allWorkouts, GOAL_CALORIES, endedVacation.dates)),
+          coachingStyle
+        )
+      : null;
+
+  const highCalorieWindow: string[] = [];
+  for (let d = yesterday; highCalorieWindow.length < HIGH_CALORIE_WINDOW_DAYS; d = getPreviousDateISO(d)) {
+    highCalorieWindow.push(d);
+  }
+  const highCaloriePattern = reviewEnabled
+    ? detectHighCaloriePattern(
+        buildDailyIntakes(
+          allMeals,
+          allWorkouts,
+          GOAL_CALORIES,
+          highCalorieWindow.filter((d) => !isVacationDay(d, profile?.vacationDates))
+        )
+      )
+    : null;
+  const highCalorieDismissedRecently = profile?.lastHighCaloriePatternDismissedAt
+    ? daysSince(profile.lastHighCaloriePatternDismissedAt) < HIGH_CALORIE_PATTERN_COOLDOWN_DAYS
+    : false;
+
+  const coachingReview = vacationRecapText
+    ? { kind: "vacationRecap" as const, title: "Bilance dovolené", text: vacationRecapText }
+    : highCaloriePattern?.detected && !highCalorieDismissedRecently
+      ? { kind: "highCalorie" as const, title: "Mya hlídá", text: buildHighCaloriePatternText(highCaloriePattern, coachingStyle) }
+      : null;
+  const handleDismissCoachingReview = () => {
+    if (coachingReview?.kind === "vacationRecap" && endedVacation) {
+      updateProfile({ lastVacationRecapDismissedEnd: endedVacation.end });
+    } else if (coachingReview?.kind === "highCalorie") {
+      updateProfile({ lastHighCaloriePatternDismissedAt: today });
+    }
   };
 
   const handleSubmitMood = async (value: number) => {
@@ -664,6 +730,35 @@ export default function Home({ onEditMeal }: HomeProps) {
           </div>
         )}
       </div>
+
+      {/* Mya hlídá — opakované přejídání / bilance po dovolené (REFERENCE/STRICT_COACHING_SPEC.md,
+          fáze B). Hned pod kalorie, ne do Stats: testerky chtěly, aby je appka vedla, a Stats se
+          otevírá zřídka. */}
+      {coachingReview && (
+        <div
+          className={`rounded-3xl p-5 border transition-colors ${
+            coachingReview.kind === "vacationRecap"
+              ? "bg-teal-50 dark:bg-teal-900/20 border-teal-100 dark:border-teal-900/40"
+              : "bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/40"
+          }`}
+        >
+          <div className="flex items-center gap-2 mb-2">
+            {coachingReview.kind === "vacationRecap" ? (
+              <TreePalm className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+            ) : (
+              <Megaphone className="w-4 h-4 text-red-600 dark:text-red-400" />
+            )}
+            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">{coachingReview.title}</h3>
+          </div>
+          <p className="text-sm text-slate-700 dark:text-slate-300 leading-snug mb-3">{coachingReview.text}</p>
+          <button
+            onClick={handleDismissCoachingReview}
+            className="text-xs font-bold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+          >
+            Beru na vědomí
+          </button>
+        </div>
+      )}
 
       {/* Voda */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 shadow-sm border border-slate-100 dark:border-slate-800 flex items-center gap-4 transition-colors">
