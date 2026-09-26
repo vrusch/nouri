@@ -6,6 +6,9 @@ import { enforceRateLimit } from "./rateLimit.js";
 import { parseCoachingStyle, buildCoachingPrompt } from "./coachingStyle.js";
 import { parseProfileInput, type UserProfileInput } from "./profileInput.js";
 
+// Fáze C (REFERENCE/STRICT_COACHING_SPEC.md) — push připomínky jídla a vody, viz pushNudges.ts.
+export { sendNudgePushes, sendTestPush } from "./pushNudges.js";
+
 const openaiApiKey = defineSecret("OPENAI_API_KEY");
 
 function requireAuth(request: CallableRequest) {

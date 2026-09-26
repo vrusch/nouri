@@ -46,6 +46,7 @@ export interface UserProfile {
   onHormonalContraception?: boolean; // gate pro luteální kalorický bonus (Úroveň 2) — na hormonální antikoncepci není přirozený vzestup progesteronu jako v běžné luteální fázi
   customProteinGrams?: number; // ruční přepis bílkovin (g/den) místo formulky 1.8g/kg — např. podle výživového poradce/lékaře, viz calculateNutrition v nutrition.ts
   customFatGrams?: number; // ruční přepis tuků (g/den) místo formulky 25 % cílových kalorií — sacharidy appka i s override dopočítá jako zbytek do cílových kalorií
+  timeZone?: string; // IANA pásmo zařízení (Intl), zapisuje App.tsx jen při změně — server podle něj počítá místní čas push připomínek (fáze C)
   coachingStyle?: CoachingStyle; // Styl Myi (jemná/vyvážená/přísná), výchozí (undefined) = 'balanced', viz coachingStyle.ts a REFERENCE/STRICT_COACHING_SPEC.md
   lastHighCaloriePatternDismissedAt?: string; // ISO datum posledního "Beru na vědomí" u karty opakovaného přejídání (viz overeatingReview.ts), 7denní cooldown
   lastVacationRecapDismissedEnd?: string; // konec (ISO) dovolené, jejíž bilanci appka už ukázala a uživatelka ji zavřela — nová dovolená ji ukáže znovu

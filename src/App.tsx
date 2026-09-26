@@ -17,6 +17,7 @@ import {
 } from "./lib/cloudSync";
 import { getLocalDateISO } from "./lib/date";
 import { subscribeCloudErrors } from "./lib/cloudErrors";
+import { getDeviceTimeZone, refreshPushTokenIfEnabled } from "./lib/push";
 import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
 import { calculateNutrition } from "./lib/nutrition";
@@ -70,7 +71,7 @@ function readDismissedNudges(storageKey: string): string[] {
 }
 
 export default function App() {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, updateProfile } = useAuth();
   const [activeTab, setActiveTab] = useState<NavTab>("home");
   const [addMealOpen, setAddMealOpen] = useState(() => {
     const openFromShortcut = new URLSearchParams(window.location.search).get("action") === "add-meal";
@@ -95,6 +96,28 @@ export default function App() {
   // N32 — selhané zápisy z komponent (nákupní seznam, recepty, šablony, chat, fotky) jdou do
   // stejného banneru, viz cloudErrors.ts.
   useEffect(() => subscribeCloudErrors(setSyncError), []);
+
+  // Fáze C (REFERENCE/STRICT_COACHING_SPEC.md) — FCM token se může obnovit, ať server neposílá
+  // na starý. Jen na zařízení, kde je push zapnutý (jinak nic nedělá).
+  const uid = user?.uid;
+  useEffect(() => {
+    if (uid) refreshPushTokenIfEnabled(uid);
+  }, [uid]);
+
+  // Server počítá místní čas připomínek podle pásma v profilu. Zapisuje se jen při změně —
+  // jinak by každý start appky byl zápis do profilu, který živý listener (N16) vrátí zpátky.
+  // updateProfile z kontextu není memoizované (efekt tak běží každý render) — ref drží, že se
+  // pro jedno pásmo zapisuje nejvýš jednou, i kdyby zápis selhal.
+  const profileTimeZone = profile?.timeZone;
+  const profileLoaded = !!profile;
+  const timeZoneWriteAttemptedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!profileLoaded) return;
+    const deviceTimeZone = getDeviceTimeZone();
+    if (!deviceTimeZone || deviceTimeZone === profileTimeZone || timeZoneWriteAttemptedRef.current === deviceTimeZone) return;
+    timeZoneWriteAttemptedRef.current = deviceTimeZone;
+    updateProfile({ timeZone: deviceTimeZone });
+  }, [profileLoaded, profileTimeZone, updateProfile]);
   const [showReminder, setShowReminder] = useState(false);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [myaChatOpen, setMyaChatOpen] = useState(false);

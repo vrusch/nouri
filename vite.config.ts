@@ -72,6 +72,12 @@ export default defineConfig({
           },
         ],
       },
+      // Fáze C (REFERENCE/STRICT_COACHING_SPEC.md) — push notifikace obsluhuje public/push-handler.js
+      // uvnitř TOHOHLE service workeru. FCM tak nepotřebuje vlastní firebase-messaging-sw.js, který
+      // by se se stávajícím SW přetahoval o scope "/" (a rozbil prompt „Nová verze“).
+      workbox: {
+        importScripts: ["push-handler.js"],
+      },
       // N27 (AUDIT_2026-08-14.md) — dřív tu bylo runtimeCaching pravidlo pro `^https://api\./`,
       // na které appka nikdy nemluví (jen firestore.googleapis.com, identitytoolkit.googleapis.com,
       // firebasestorage.app, *.cloudfunctions.net) — mrtvá konfigurace, pravděpodobně zkopírovaná

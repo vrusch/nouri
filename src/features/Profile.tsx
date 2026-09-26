@@ -32,6 +32,7 @@ import { DAY_NAMES_CS } from "../lib/workoutPlan";
 import { expandDateRange, datesToEndVacation } from "../lib/vacationMode";
 import { db, type MealItem } from "../db/db";
 import { reportCloudError } from "../lib/cloudErrors";
+import { detectPushSupport, disablePush, enablePush, isPushEnabledOnThisDevice, readPushEnvironment, sendTestPush } from "../lib/push";
 import pkg from "../../package.json";
 
 // Rozsekání jednoho řádku AI reportu na tučné/normální úseky (viz aiReportMarkdown.ts) do
@@ -59,6 +60,11 @@ export default function Profile() {
 
   // Stavy pro editaci
   const [editing, setEditing] = useState<string | null>(null);
+  // Push připomínky (fáze C, REFERENCE/STRICT_COACHING_SPEC.md) — stav patří zařízení, ne profilu.
+  const [pushEnabled, setPushEnabled] = useState(isPushEnabledOnThisDevice);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMessage, setPushMessage] = useState<string | null>(null);
+  const [pushSupport, setPushSupport] = useState(() => detectPushSupport(readPushEnvironment()));
   const [tempValue, setTempValue] = useState<string>("");
   const [showPrivacy, setShowPrivacy] = useState(false);
 
@@ -100,6 +106,62 @@ export default function Profile() {
   const quietHoursStart = profile?.quietHoursStart ?? QUIET_HOURS_START;
   const quietHoursEnd = profile?.quietHoursEnd ?? QUIET_HOURS_END;
   const formatHour = (h: number) => `${String(h).padStart(2, "0")}:00`;
+  // Notification.requestPermission() je uvnitř enablePush první await — iOS povolení mimo
+  // přímé klepnutí tiše zamítne, proto před voláním enablePush nesmí nic čekat.
+  const handleTogglePush = async () => {
+    if (!user || pushBusy) return;
+    setPushMessage(null);
+    setPushBusy(true);
+    try {
+      if (pushEnabled) {
+        await disablePush(user.uid);
+        setPushEnabled(false);
+        return;
+      }
+      const permission = await enablePush(user.uid);
+      if (permission === "granted") {
+        setPushEnabled(true);
+        setPushMessage("Zapnuto. Mya ti připomene jídlo a vodu nejvýš 3× denně, v tichém režimu nikdy.");
+      } else if (permission === "denied") {
+        setPushMessage("Povolení bylo zamítnuto.");
+      } else {
+        setPushMessage("Povolení nebylo uděleno — zkus to prosím znovu.");
+      }
+    } catch (error) {
+      console.error("Zapnutí/vypnutí upozornění selhalo:", error);
+      setPushMessage("Nepovedlo se to. Zkus to prosím znovu za chvíli.");
+    } finally {
+      setPushBusy(false);
+      setPushSupport(detectPushSupport(readPushEnvironment()));
+    }
+  };
+
+  const handleSendTestPush = async () => {
+    if (pushBusy) return;
+    setPushMessage(null);
+    setPushBusy(true);
+    try {
+      const result = await sendTestPush();
+      setPushMessage(
+        result.sent > 0
+          ? "Zkušební upozornění odesláno — za pár vteřin by mělo přijít."
+          : "Upozornění se nepodařilo doručit. Zkus upozornění vypnout a znovu zapnout."
+      );
+    } catch (error) {
+      console.error("Zkušební upozornění selhalo:", error);
+      const code = (error as { code?: string } | null)?.code;
+      setPushMessage(
+        code === "functions/resource-exhausted"
+          ? "Zkušebních upozornění bylo teď moc — zkus to za pár minut."
+          : code === "functions/failed-precondition"
+            ? "Upozornění nemáš zapnutá na žádném zařízení — zkus je vypnout a znovu zapnout."
+            : "Zkušební upozornění se nepodařilo odeslat."
+      );
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
   const handleAdjustQuietHour = (field: "quietHoursStart" | "quietHoursEnd", delta: number) => {
     const current = field === "quietHoursStart" ? quietHoursStart : quietHoursEnd;
     updateProfile({ [field]: (current + delta + 24) % 24 });
@@ -894,6 +956,72 @@ export default function Profile() {
                 </div>
               </div>
             </div>
+          )}
+
+          {pushSupport !== "no-key" && (
+            <>
+              <div
+                className={`px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${editing === 'push' ? accentBg : 'active:bg-slate-50 dark:active:bg-slate-800'}`}
+                onClick={() => setEditing(editing === 'push' ? null : 'push')}
+              >
+                <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+                  <Bell className="w-4 h-4 text-rose-500" />
+                  Upozornění
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[15px] font-bold text-slate-800 dark:text-white">{pushEnabled ? 'Zapnuto' : 'Vypnuto'}</span>
+                  <ChevronDown className={`w-4 h-4 ${editing === 'push' ? accentText : 'text-slate-400'}`} />
+                </div>
+              </div>
+
+              {editing === 'push' && (
+                <div className={`px-4 pb-4 space-y-3 ${accentBg}`}>
+                  {pushSupport === "needs-install" && (
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      Na iPhonu fungují upozornění jen z appky na ploše: v Safari klepni na <strong>Sdílet → Přidat na plochu</strong> a otevři Nouri z ikony na ploše. Pak je tady zapneš.
+                    </p>
+                  )}
+                  {pushSupport === "unsupported" && (
+                    <p className="text-sm text-slate-600 dark:text-slate-300">Tenhle prohlížeč upozornění neumí.</p>
+                  )}
+                  {pushSupport === "denied" && (
+                    <p className="text-sm text-slate-600 dark:text-slate-300">
+                      Upozornění jsou pro Nouri zakázaná v nastavení. Na iPhonu je povolíš v <strong>Nastavení → Oznámení → Nouri</strong>, pak se sem vrať.
+                    </p>
+                  )}
+                  {pushSupport === "ready" && (
+                    <>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <span className="block text-sm font-semibold text-slate-600 dark:text-slate-300">Připomínat jídlo a vodu na tomhle zařízení</span>
+                          <span className="block text-xs text-slate-400">Nejvýš 3× denně, v tichém režimu nikdy.</span>
+                        </div>
+                        <button
+                          onClick={handleTogglePush}
+                          disabled={pushBusy}
+                          aria-label={pushEnabled ? "Vypnout upozornění" : "Zapnout upozornění"}
+                          className={`relative w-11 h-6 rounded-full transition-colors shrink-0 disabled:opacity-60 ${pushEnabled ? 'bg-rose-600' : 'bg-slate-200 dark:bg-slate-700'}`}
+                        >
+                          <span
+                            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${pushEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                          />
+                        </button>
+                      </div>
+                      {pushEnabled && (
+                        <button
+                          onClick={handleSendTestPush}
+                          disabled={pushBusy}
+                          className="w-full py-2.5 rounded-xl bg-white dark:bg-slate-800 shadow-sm text-sm font-semibold text-slate-600 dark:text-slate-300 active:scale-[0.98] transition-all disabled:opacity-60"
+                        >
+                          Poslat zkušební upozornění
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {pushMessage && <p className="text-xs text-slate-500 dark:text-slate-400">{pushMessage}</p>}
+                </div>
+              )}
+            </>
           )}
 
           <div
