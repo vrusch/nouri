@@ -2,6 +2,10 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.18.1] - 2026-09-26
+### Změněno
+- Interní úklid kódu (opravený popis pole u stylu Myi). Na chování appky nemá žádný vliv.
+
 ## [0.18.0] - 2026-09-26
 ### Přidáno
 - **Styl Myi**: nové nastavení v Profilu – jemná, vyvážená (výchozí) nebo přísná. Styl mění tón Myi v reakcích na jídlo, v denním pozdravu i v chatu a určuje, jak brzy appka připomene vodu a jestli připomíná jídlo i o volnu. Přísnost se týká jen přejídání a zapomínání, nikdy nízkého příjmu. Mya nikdy nehodnotí tělo ani vzhled.
