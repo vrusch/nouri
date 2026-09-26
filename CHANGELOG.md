@@ -2,6 +2,14 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.19.0] - 2026-09-26
+### Přidáno
+- **Upozornění na telefon**: Mya teď umí připomenout zapomenuté jídlo (snídani, oběd, večeři) a pití i ve chvíli, kdy appka není otevřená. Zapíná se v **Profil → Upozornění**, na každém zařízení zvlášť; ve výchozím stavu jsou upozornění vypnutá.
+  - Chodí **nejvýš 3× denně** a nejvýš jedno za hodinu, **v tichém režimu nikdy**. Každé jídlo se připomene jen jednou za den, voda znovu jen když pití dál zaostává.
+  - Řídí se stylem Myi (jemná / vyvážená / přísná) i volnem a dovolenou stejně jako připomínky v appce.
+  - **Na iPhonu fungují jen z ikony na ploše** (v Safari: Sdílet → Přidat na plochu, pak Nouri otevírat z plochy). Po aktualizaci je potřeba nejdřív klepnout na „Aktualizovat“ ve výzvě „Je k dispozici nová verze appky“.
+  - Tlačítko **„Poslat zkušební upozornění“** ověří, že upozornění na daném zařízení opravdu dorazí.
+
 ## [0.18.2] - 2026-09-26
 ### Opraveno
 - **Úprava ingredience mohla přepsat jinou ingredienci**: když byla otevřená úprava jedné ingredience a mezitím se smazala jiná nad ní, uložení úpravy se zapsalo na špatný řádek. Úprava teď vždy míří na správnou ingredienci.
