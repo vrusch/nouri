@@ -33,6 +33,7 @@ import { computeMeasurementTrend, MEASUREMENT_FIELDS, MEASUREMENT_LABELS_CS } fr
 import { fileToCompressedDataUrl } from "../lib/image";
 import { daysSince } from "../lib/weighIn";
 import { getLocalDateISO } from "../lib/date";
+import { reportCloudError } from "../lib/cloudErrors";
 import { getCyclePhase, computeAvgCycleLength, PHASE_LABELS_CS, PHASE_NOTES_CS, DEFAULT_CYCLE_LENGTH_DAYS } from "../lib/cyclePhase";
 import { isQuietHours } from "../lib/quietHours";
 import { MyaAI } from "../lib/ai";
@@ -452,7 +453,7 @@ export default function Stats() {
       const dataUrl = await fileToCompressedDataUrl(file);
       await uploadProgressPhoto(user.uid, dataUrl, today);
     } catch (error) {
-      console.error("Nahrání progress fotky selhalo:", error);
+      reportCloudError("Fotku se nepodařilo nahrát.", error);
     } finally {
       setUploadingPhoto(false);
     }
@@ -460,6 +461,7 @@ export default function Stats() {
 
   const handleDeletePhoto = async (photo: ProgressPhotoEntry) => {
     if (!user) return;
+    // Chybu záměrně nechytá — ProgressPhotoLightbox ji zobrazí přímo u tlačítka a nechá lightbox otevřený.
     await deleteProgressPhoto(user.uid, photo);
   };
 

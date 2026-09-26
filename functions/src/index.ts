@@ -1,25 +1,12 @@
 import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import { calculateNutrition, calculateAge, type Gender, type Goal } from "./nutrition.js";
+import { calculateNutrition, calculateAge, type Goal } from "./nutrition.js";
 import { callOpenAIChat } from "./openai.js";
 import { enforceRateLimit } from "./rateLimit.js";
 import { parseCoachingStyle, buildCoachingPrompt } from "./coachingStyle.js";
+import { parseProfileInput, type UserProfileInput } from "./profileInput.js";
 
 const openaiApiKey = defineSecret("OPENAI_API_KEY");
-
-interface UserProfileInput {
-  name: string;
-  gender: Gender;
-  height: number;
-  weight: number;
-  birthDate: string;
-  activityLevel: number;
-  goal: Goal;
-  calibratedTDEE?: number;
-  customProteinGrams?: number;
-  customFatGrams?: number;
-  coachingStyle?: unknown; // Styl Myi, validuje parseCoachingStyle (viz coachingStyle.ts)
-}
 
 function requireAuth(request: CallableRequest) {
   if (!request.auth) {
@@ -95,8 +82,8 @@ export const generateWelcomeReport = onCall(
   { secrets: [openaiApiKey], region: "us-central1" },
   async (request) => {
     requireAuth(request);
-    const profile = request.data?.profile as UserProfileInput | undefined;
-    if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
+    const profile = parseProfileInput(request.data?.profile);
+    if (!profile) throw new HttpsError("invalid-argument", "Chybí profil nebo je neplatný.");
     await enforceRateLimit(request.auth!.uid, "generateWelcomeReport", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
@@ -185,7 +172,7 @@ export const getDailyGreeting = onCall(
   { secrets: [openaiApiKey], region: "us-central1" },
   async (request) => {
     requireAuth(request);
-    const profile = request.data?.profile as UserProfileInput | undefined;
+    const profile = parseProfileInput(request.data?.profile);
     const consumedCalories = Number(request.data?.consumedCalories) || 0;
     const consumedProtein = Number(request.data?.consumedProtein) || 0;
     // Nálada/energie check-in (FEATURE_IDEAS.md sekce 3) — appka mood/moodNote nikam neukládá,
@@ -224,7 +211,7 @@ export const getDailyGreeting = onCall(
       | undefined;
     const yesterdayConsumed = parseBoundedInt(rawYesterday?.consumedCalories, 1, 20000);
     const yesterdayTarget = parseBoundedInt(rawYesterday?.targetCalories, 500, 10000);
-    if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
+    if (!profile) throw new HttpsError("invalid-argument", "Chybí profil nebo je neplatný.");
     await enforceRateLimit(request.auth!.uid, "getDailyGreeting", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
@@ -894,8 +881,8 @@ export const chatWithMya = onCall(
   { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 30 },
   async (request) => {
     requireAuth(request);
-    const profile = request.data?.profile as UserProfileInput | undefined;
-    if (!profile) throw new HttpsError("invalid-argument", "Chybí profil.");
+    const profile = parseProfileInput(request.data?.profile);
+    if (!profile) throw new HttpsError("invalid-argument", "Chybí profil nebo je neplatný.");
     // profile.name jde na rozdíl od ostatních funkcí do SYSTÉMOVÉ části promptu (B8) — sanitizace
     // řádkových zlomů je tu obzvlášť důležitá, ať appka nemá jméno, které se snaží vydávat za
     // další systémovou instrukci.

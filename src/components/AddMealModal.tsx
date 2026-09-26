@@ -10,6 +10,7 @@ import { backupMeal, deleteMeal, subscribeMealTemplates, deleteMealTemplate, typ
 import { calculateNutrition } from "../lib/nutrition";
 import { computeIngredientsTotals } from "../lib/mealComponents";
 import { getLocalDateISO } from "../lib/date";
+import { reportCloudError } from "../lib/cloudErrors";
 import { resolveCoachingStyle } from "../lib/coachingStyle";
 import { isVacationDay } from "../lib/vacationMode";
 import { fileToCompressedDataUrl } from "../lib/image";
@@ -60,6 +61,21 @@ const MEAL_TYPE_OPTIONS: { id: MealType; label: string }[] = [
   { id: "dinner", label: "Večeře" },
   { id: "snack", label: "Svačina" },
 ];
+
+// N43 (AUDIT_2026-08-14.md) — ingredience měly jako React key i jako cíl úpravy index v poli.
+// Smazání řádku nad právě upravovanou ingrediencí posunulo indexy a "Uložit úpravu" pak
+// přepsalo jinou ingredienci. Řádek teď nese stabilní klíč jen po dobu života modálu; klíč je
+// v obalu ({ key, item }), ne přimíchaný do MealIngredient, takže se nemůže dostat do Firestore/Dexie.
+interface IngredientRow {
+  key: number;
+  item: MealIngredient;
+}
+
+let nextIngredientKey = 0;
+
+function toIngredientRows(items: MealIngredient[]): IngredientRow[] {
+  return items.map((item) => ({ key: nextIngredientKey++, item }));
+}
 
 function guessMealType(): MealType {
   const hour = new Date().getHours();
@@ -144,9 +160,10 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   // Rozpad na ingredience (FEATURE_IDEAS.md sekce 14) — když ingredients.length > 0, jsou
   // jediným zdrojem pravdy pro kalorie/makra jídla, pole nahoře (calories/protein/fat/carbs)
   // se přestanou ručně editovat a jen zobrazují dopočítaný součet (viz ingredientsTotals níž).
-  const [ingredients, setIngredients] = useState<MealIngredient[]>(editMeal?.ingredients ?? []);
+  const [ingredientRows, setIngredientRows] = useState<IngredientRow[]>(() => toIngredientRows(editMeal?.ingredients ?? []));
+  const ingredients = useMemo(() => ingredientRows.map((row) => row.item), [ingredientRows]);
   const [ingredientFormOpen, setIngredientFormOpen] = useState(false);
-  const [editingIngredientIndex, setEditingIngredientIndex] = useState<number | null>(null);
+  const [editingIngredientKey, setEditingIngredientKey] = useState<number | null>(null);
   const [ingredientName, setIngredientName] = useState("");
   const [ingredientValue, setIngredientValue] = useState("");
   const [ingredientProtein, setIngredientProtein] = useState("");
@@ -195,9 +212,9 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   const recentMeals = useMemo(() => getRecentUniqueMeals(allMealsRaw ?? []), [allMealsRaw]);
 
   const resetIngredients = () => {
-    setIngredients([]);
+    setIngredientRows([]);
     setIngredientFormOpen(false);
-    setEditingIngredientIndex(null);
+    setEditingIngredientKey(null);
   };
 
   // N24 (AUDIT_2026-08-14.md) — appka si pamatuje poslední AI-nastavené hodnoty, ať pozná,
@@ -470,6 +487,8 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     setDeletingTemplateId(id);
     try {
       await deleteMealTemplate(user.uid, id);
+    } catch (error) {
+      reportCloudError("Šablonu se nepodařilo smazat.", error);
     } finally {
       setDeletingTemplateId(null);
     }
@@ -523,7 +542,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   };
 
   const openAddIngredientForm = () => {
-    setEditingIngredientIndex(null);
+    setEditingIngredientKey(null);
     setIngredientName("");
     setIngredientValue("");
     setIngredientProtein("");
@@ -532,9 +551,8 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     setIngredientFormOpen(true);
   };
 
-  const openEditIngredientForm = (index: number) => {
-    const item = ingredients[index];
-    setEditingIngredientIndex(index);
+  const openEditIngredientForm = ({ key, item }: IngredientRow) => {
+    setEditingIngredientKey(key);
     setIngredientName(item.name);
     setIngredientValue(String(item.value));
     setIngredientProtein(item.protein !== undefined ? String(item.protein) : "");
@@ -554,19 +572,24 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     if (ingredientFat) draft.fat = Math.max(0, Math.round(Number(ingredientFat)));
     if (ingredientCarbs) draft.carbs = Math.max(0, Math.round(Number(ingredientCarbs)));
 
-    setIngredients((prev) => {
-      if (editingIngredientIndex !== null) {
-        const next = [...prev];
-        next[editingIngredientIndex] = draft;
-        return next;
+    setIngredientRows((prev) => {
+      if (editingIngredientKey !== null) {
+        return prev.map((row) => (row.key === editingIngredientKey ? { key: row.key, item: draft } : row));
       }
-      return [...prev, draft];
+      return [...prev, ...toIngredientRows([draft])];
     });
     setIngredientFormOpen(false);
+    setEditingIngredientKey(null);
   };
 
-  const removeIngredient = (index: number) => {
-    setIngredients((prev) => prev.filter((_, i) => i !== index));
+  const removeIngredient = (key: number) => {
+    setIngredientRows((prev) => prev.filter((row) => row.key !== key));
+    // Smazaná ingredience byla zrovna otevřená v úpravě — formulář by jinak "uložil úpravu"
+    // do neexistujícího řádku (map výš by ji tiše zahodil).
+    if (editingIngredientKey === key) {
+      setIngredientFormOpen(false);
+      setEditingIngredientKey(null);
+    }
   };
 
   const handleSave = async () => {
@@ -1017,19 +1040,19 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ingredience</label>
                 {ingredients.length > 0 && (
                   <div className="mt-1.5 space-y-2">
-                    {ingredients.map((item, index) => (
-                      <div key={index} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl px-3 py-2.5">
+                    {ingredientRows.map((row) => (
+                      <div key={row.key} className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 rounded-xl px-3 py-2.5">
                         <button
                           type="button"
-                          onClick={() => openEditIngredientForm(index)}
+                          onClick={() => openEditIngredientForm(row)}
                           className="flex-1 text-left min-w-0"
                         >
-                          <span className="block text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{item.name}</span>
-                          <span className="block text-xs text-slate-400">{item.value} kcal</span>
+                          <span className="block text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{row.item.name}</span>
+                          <span className="block text-xs text-slate-400">{row.item.value} kcal</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() => removeIngredient(index)}
+                          onClick={() => removeIngredient(row.key)}
                           className="p-1 text-slate-300 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400 transition-colors shrink-0"
                         >
                           <X className="w-4 h-4" />
@@ -1085,7 +1108,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
                         disabled={!ingredientName.trim() || !Number(ingredientValue)}
                         className="flex-1 py-2.5 rounded-xl text-xs font-bold text-white bg-rose-600 disabled:opacity-50 active:scale-[0.98] transition-all"
                       >
-                        {editingIngredientIndex !== null ? "Uložit úpravu" : "Přidat ingredienci"}
+                        {editingIngredientKey !== null ? "Uložit úpravu" : "Přidat ingredienci"}
                       </button>
                     </div>
                   </div>

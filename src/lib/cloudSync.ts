@@ -1,9 +1,20 @@
+// Konvence ošetření chyb (N32, AUDIT_2026-08-14.md) — rozdělení je záměrné, ne náhodné:
+// - POLYKÁ (console.error, nikdy nevyhodí): zápisy, které mají lokální pravdu nebo nízké sázky —
+//   backup*/delete* jídel a tréninků (Dexie je zapsané dřív a synchronizace to později dožene),
+//   váha, cyklus, míry těla, voda, zpráva do chatu. Volající na ně nemusí mít catch.
+// - PROPAGUJE: funkce bez lokální zálohy, kde má volající UI pro výsledek — nákupní seznam,
+//   recepty, šablony, progress fotky, mazání historie/chatu a fetch* pro exporty. Každý volající
+//   MUSÍ chybu chytit (reportCloudError v cloudErrors.ts, nebo vlastní hlášku u tlačítka).
+// - subscribe*: chybu listeneru logují a předají volitelnému onError.
+// Pozor: s persistentLocalCache zápisy offline nevyhodí, ale čekají na připojení — fire-and-forget
+// volání proto nepřepisovat na await (vrátila by se tím zamrznutí z N3–N5).
 import {
   collection,
   deleteDoc,
   doc,
   getDocs,
   increment,
+  limitToLast,
   onSnapshot,
   orderBy,
   query,
@@ -666,12 +677,18 @@ export async function fetchChatMessages(uid: string): Promise<ChatMessageEntry[]
   return snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessageEntry, "id">) }));
 }
 
+// N34 (AUDIT_2026-08-14.md) — listener drží jen posledních `maxMessages` zpráv (limitToLast),
+// starší si MyaChatModal donačte tlačítkem, místo aby appka při každém otevření chatu tahala
+// celou historii. Export (fetchChatMessages) a mazání (clearChatHistory) dál pracují s celou
+// kolekcí. U jídel/tréninků limit záměrně NENÍ: subscribeMeals/subscribeWorkouts při "removed"
+// mažou řádky z Dexie, takže by limit smazal lokální historii mimo okno.
 export function subscribeChatMessages(
   uid: string,
+  maxMessages: number,
   callback: (messages: ChatMessageEntry[]) => void,
   onError?: (error: unknown) => void
 ): Unsubscribe {
-  const q = query(chatMessagesCollection(uid), orderBy("createdAt", "asc"));
+  const q = query(chatMessagesCollection(uid), orderBy("createdAt", "asc"), limitToLast(maxMessages));
   return onSnapshot(
     q,
     (snap) => callback(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ChatMessageEntry, "id">) }))),

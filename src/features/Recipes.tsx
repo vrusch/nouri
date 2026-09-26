@@ -34,6 +34,7 @@ import {
 } from "../lib/cloudSync";
 import { buildShoppingListItems, countUnbought } from "../lib/shoppingList";
 import { getLocalDateISO } from "../lib/date";
+import { reportCloudError } from "../lib/cloudErrors";
 import EmptyState from "../components/EmptyState";
 import ShoppingListView from "../components/ShoppingListView";
 
@@ -171,6 +172,8 @@ export default function Recipes() {
     try {
       await saveRecipe(user.uid, recipe, recipeSource);
       setSavedToLibrary(true);
+    } catch (error) {
+      reportCloudError("Recept se nepodařilo uložit.", error);
     } finally {
       setSavingRecipe(false);
     }
@@ -182,6 +185,8 @@ export default function Recipes() {
     try {
       await handleAddToShoppingList(recipe);
       setAddedToList(true);
+    } catch (error) {
+      reportCloudError("Suroviny se nepodařilo přidat do nákupního seznamu.", error);
     } finally {
       setAddingToList(false);
     }
@@ -189,18 +194,22 @@ export default function Recipes() {
 
   const handleToggleItem = (item: ShoppingListEntry) => {
     if (!user) return;
-    toggleShoppingListItem(user.uid, item.id, !item.bought);
+    toggleShoppingListItem(user.uid, item.id, !item.bought).catch((error) =>
+      reportCloudError("Položku v nákupním seznamu se nepodařilo odškrtnout.", error)
+    );
   };
 
   const handleRemoveItem = (item: ShoppingListEntry) => {
     if (!user) return;
-    removeShoppingListItem(user.uid, item.id);
+    removeShoppingListItem(user.uid, item.id).catch((error) =>
+      reportCloudError("Položku se nepodařilo odebrat z nákupního seznamu.", error)
+    );
   };
 
   const handleDeleteSavedRecipe = (id: string) => {
     if (!user) return;
     if (expandedSavedId === id) setExpandedSavedId(null);
-    deleteSavedRecipe(user.uid, id);
+    deleteSavedRecipe(user.uid, id).catch((error) => reportCloudError("Recept se nepodařilo smazat.", error));
   };
 
   const unboughtCount = countUnbought(shoppingList);
@@ -563,6 +572,8 @@ function SavedRecipesView({
         () => setJustAddedId((current) => (current === entry.id ? null : current)),
         2000
       );
+    } catch (error) {
+      reportCloudError("Suroviny se nepodařilo přidat do nákupního seznamu.", error);
     } finally {
       setAddingListId(null);
     }

@@ -30,6 +30,7 @@ import {
 } from "../lib/cyclePhase";
 import { computeLoggingStreak } from "../lib/streak";
 import { getLocalDateISO, getPreviousDateISO } from "../lib/date";
+import { reportCloudError } from "../lib/cloudErrors";
 import { pickDailyCustomReminder } from "../lib/customReminders";
 import { WATER_TARGET_GLASSES, getWaterProgressPercent, formatWaterVolumeCs, computeWaterPaceStatus } from "../lib/water";
 import { formatGlassesCs, formatWorkoutsCs } from "../lib/format";
@@ -251,6 +252,8 @@ export default function Home({ onEditMeal }: HomeProps) {
       await saveMealTemplate(user.uid, templateNameInput.trim(), items);
       setTemplateNameInput("");
       setShowTemplateSave(false);
+    } catch (error) {
+      reportCloudError("Šablonu se nepodařilo uložit.", error);
     } finally {
       setSavingTemplate(false);
     }

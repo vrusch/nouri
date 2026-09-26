@@ -31,6 +31,7 @@ import { COACHING_STYLE_OPTIONS, resolveCoachingStyle, getCoachingStyleLabel } f
 import { DAY_NAMES_CS } from "../lib/workoutPlan";
 import { expandDateRange, datesToEndVacation } from "../lib/vacationMode";
 import { db, type MealItem } from "../db/db";
+import { reportCloudError } from "../lib/cloudErrors";
 import pkg from "../../package.json";
 
 // Rozsekání jednoho řádku AI reportu na tučné/normální úseky (viz aiReportMarkdown.ts) do
@@ -349,6 +350,8 @@ export default function Profile() {
       a.download = `nouri-zaloha-${getLocalDateISO()}.json`;
       a.click();
       URL.revokeObjectURL(url);
+    } catch (error) {
+      reportCloudError("Zálohu se nepodařilo stáhnout.", error);
     } finally {
       setIsExportingJson(false);
     }
@@ -375,6 +378,8 @@ export default function Profile() {
       const measurements = await fetchBodyMeasurements(user.uid);
       const reportData = buildMonthlyReportData(meals, weightLogs, measurements);
       await downloadMonthlyReportPdf(profile, metrics, reportData);
+    } catch (error) {
+      reportCloudError("PDF report se nepodařilo vytvořit.", error);
     } finally {
       setIsExportingPdf(false);
     }

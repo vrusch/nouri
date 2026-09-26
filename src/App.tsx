@@ -16,6 +16,7 @@ import {
   type CycleLogEntry,
 } from "./lib/cloudSync";
 import { getLocalDateISO } from "./lib/date";
+import { subscribeCloudErrors } from "./lib/cloudErrors";
 import { formatDaysCs } from "./lib/format";
 import { computeWeighInStatus } from "./lib/weighIn";
 import { calculateNutrition } from "./lib/nutrition";
@@ -91,6 +92,9 @@ export default function App() {
   // ale App.tsx ho nepředávalo, takže chyba synchronizace skončila jen v console.error, na
   // telefonu reálně ztracená. Appka teď chybu ukáže, ne jen zaloguje.
   const [syncError, setSyncError] = useState<string | null>(null);
+  // N32 — selhané zápisy z komponent (nákupní seznam, recepty, šablony, chat, fotky) jdou do
+  // stejného banneru, viz cloudErrors.ts.
+  useEffect(() => subscribeCloudErrors(setSyncError), []);
   const [showReminder, setShowReminder] = useState(false);
   const [quickLookupOpen, setQuickLookupOpen] = useState(false);
   const [myaChatOpen, setMyaChatOpen] = useState(false);

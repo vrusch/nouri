@@ -8,6 +8,7 @@ import {
   toggleShoppingListItem,
   type ShoppingListEntry,
 } from "../lib/cloudSync";
+import { reportCloudError } from "../lib/cloudErrors";
 import ShoppingListView from "./ShoppingListView";
 
 interface ShoppingListModalProps {
@@ -38,17 +39,26 @@ export default function ShoppingListModal({ onClose }: ShoppingListModalProps) {
     const trimmed = input.trim();
     if (!trimmed || !user) return;
     setInput("");
-    await addShoppingListItems(user.uid, [{ text: trimmed }]);
+    try {
+      await addShoppingListItems(user.uid, [{ text: trimmed }]);
+    } catch (error) {
+      setInput(trimmed);
+      reportCloudError("Položku se nepodařilo přidat do nákupního seznamu.", error);
+    }
   };
 
   const handleToggle = (item: ShoppingListEntry) => {
     if (!user) return;
-    toggleShoppingListItem(user.uid, item.id, !item.bought);
+    toggleShoppingListItem(user.uid, item.id, !item.bought).catch((error) =>
+      reportCloudError("Položku v nákupním seznamu se nepodařilo odškrtnout.", error)
+    );
   };
 
   const handleRemove = (item: ShoppingListEntry) => {
     if (!user) return;
-    removeShoppingListItem(user.uid, item.id);
+    removeShoppingListItem(user.uid, item.id).catch((error) =>
+      reportCloudError("Položku se nepodařilo odebrat z nákupního seznamu.", error)
+    );
   };
 
   return (

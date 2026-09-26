@@ -3,6 +3,7 @@ import { X, Send, Loader2, Trash2 } from "lucide-react";
 import { useAuth } from "../context/useAuth";
 import { MyaAI } from "../lib/ai";
 import { subscribeChatMessages, saveChatMessage, clearChatHistory, type ChatMessageEntry } from "../lib/cloudSync";
+import { reportCloudError } from "../lib/cloudErrors";
 
 interface MyaChatModalProps {
   onClose: () => void;
@@ -15,6 +16,9 @@ interface MyaChatModalProps {
 // Appka posílá funkci jen posledních pár zpráv (ne celou historii) — drží náklady na OpenAI
 // pod kontrolou i u dlouhé konverzace, funkce sama v index.ts stejný limit i validuje.
 const MAX_CHAT_HISTORY = 20;
+// N34 — kolik zpráv chat načte naráz (musí být ≥ MAX_CHAT_HISTORY, jinak by Mya dostala
+// kratší kontext, než appka slibuje); "Načíst starší zprávy" přidá další stránku.
+const CHAT_PAGE_SIZE = 50;
 
 export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaChatModalProps) {
   const { user, profile } = useAuth();
@@ -22,17 +26,22 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [confirmingClear, setConfirmingClear] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(CHAT_PAGE_SIZE);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isFemale = profile?.gender === "female";
 
   useEffect(() => {
     if (!user) return;
-    return subscribeChatMessages(user.uid, setMessages);
-  }, [user]);
+    return subscribeChatMessages(user.uid, visibleLimit, setMessages);
+  }, [user, visibleLimit]);
 
+  // Posouvá dolů jen při nové poslední zprávě, ne při každé změně počtu — donačtení starších
+  // zpráv nahoře by jinak uživatelku odhodilo zpátky na konec konverzace.
+  const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
+  const hasOlderMessages = messages.length >= visibleLimit;
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, sending]);
+  }, [lastMessageId, sending]);
 
   // N44 (AUDIT_2026-08-14.md) — modály v appce dřív zavíral jen klik na X/backdrop, na rozdíl
   // od BottomNav.tsx's FAB menu, který na Escape reaguje.
@@ -79,7 +88,11 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
   const handleClear = async () => {
     if (!user) return;
     setConfirmingClear(false);
-    await clearChatHistory(user.uid);
+    try {
+      await clearChatHistory(user.uid);
+    } catch (error) {
+      reportCloudError("Historii chatu se nepodařilo smazat.", error);
+    }
   };
 
   return (
@@ -126,6 +139,15 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
         )}
 
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {hasOlderMessages && (
+            <button
+              onClick={() => setVisibleLimit((limit) => limit + CHAT_PAGE_SIZE)}
+              className="block mx-auto text-xs font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-3 py-1.5 transition-colors"
+            >
+              Načíst starší zprávy
+            </button>
+          )}
+
           {messages.length === 0 && (
             <div className="max-w-[85%] bg-slate-100 dark:bg-slate-800 rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200">
               Ahoj! Zeptej se mě na cokoliv o výživě, cvičení nebo zdravém životním stylu.
