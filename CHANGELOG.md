@@ -2,6 +2,16 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.18.2] - 2026-09-26
+### Opraveno
+- **Úprava ingredience mohla přepsat jinou ingredienci**: když byla otevřená úprava jedné ingredience a mezitím se smazala jiná nad ní, uložení úpravy se zapsalo na špatný řádek. Úprava teď vždy míří na správnou ingredienci.
+- **Selhané uložení už nezůstane bez povšimnutí**: když se nepodaří uložit nebo smazat položku nákupního seznamu, recept, šablonu, historii chatu, progress fotku nebo stáhnout export, appka to oznámí v banneru nahoře. Dřív se chyba jen tiše zalogovala.
+- **Serverová kontrola profilu**: Cloud Functions pro úvodní report, denní pozdrav a chat s Myou si teď profil ověří samy. Nesmyslné hodnoty už nepropadnou až do výpočtu a do textu Myi.
+- **Bezpečnostní aktualizace závislostí**: `npm audit` teď hlásí 0 zranitelností v appce i v Cloud Functions.
+
+### Změněno
+- **Chat s Myou načítá jen posledních 50 zpráv**, starší jdou donačíst tlačítkem „Načíst starší zprávy“. Při dlouhé historii se chat otevírá rychleji. Mya dostává jako kontext stejně jako dřív posledních 20 zpráv.
+
 ## [0.18.1] - 2026-09-26
 ### Změněno
 - Interní úklid kódu (opravený popis pole u stylu Myi). Na chování appky nemá žádný vliv.
