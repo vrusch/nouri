@@ -2,6 +2,19 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.18.0] - 2026-09-26
+### Přidáno
+- **Styl Myi**: nové nastavení v Profilu – jemná, vyvážená (výchozí) nebo přísná. Styl mění tón Myi v reakcích na jídlo, v denním pozdravu i v chatu a určuje, jak brzy appka připomene vodu a jestli připomíná jídlo i o volnu. Přísnost se týká jen přejídání a zapomínání, nikdy nízkého příjmu. Mya nikdy nehodnotí tělo ani vzhled.
+- **Připomínky jídla a vody**: kromě oběda appka nově připomíná i snídani (10–14 h) a večeři (20–24 h) a hlídá, jestli pití během dne nezaostává za cílem. Aktivní připomínky se ukazují v banneru nad kartou kalorií (tlačítka „Zapsat“ / „+1 sklenice“, křížkem jdou schovat) i ve zvonu. Tichý režim je potlačí, vodu volno neztlumí.
+- **Mya hlídá přejídání**: když je příjem 4 ze 7 dní nad 110 % cíle, zobrazí se na Home karta s upozorněním. Po návratu z dovolené appka ukáže bilanci volných dní („zpátky do rytmu“). Obojí jde zavřít přes „Beru na vědomí“. Texty jsou pevné, ne generované AI.
+
+### Změněno
+- **Překročení cíle je vidět**: místo „Zbývá ti 0 kcal“ appka nad cílem ukáže červeně „Přes cíl +X kcal“ a popisek podle stylu a volna („dnes to beru, ale nezvykej si“). Mya v reakci na jídlo i v pozdravu překročení pojmenuje číslem a zná i včerejšek, vodu a volný den.
+
+### Opraveno
+- **Reakce Myi na jídlo počítala s cílem bez dnešního tréninku**, takže po tréninku mohla hlásit falešné překročení. Cíl je teď stejný jako na Home.
+- **Mya oslovovala v mužském rodě** („Překročil jsi“) – odpovědi teď respektují pohlaví z profilu.
+
 ## [0.17.0] - 2026-08-19
 ### Přidáno
 - **Pozdrav podle denní doby**: hlavička na Home byla natvrdo "Krásné ráno" a "Dnes to bude skvělý den." bez ohledu na hodinu — appka teď rozlišuje noc (22:00–4:59), ráno, den a večer, včetně podtitulku. Zmizel i zástupný fallback jména.
