@@ -2,6 +2,9 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { LogoHorizontal, LogoIcon } from "./components/Logo";
 import BottomNav, { type NavTab, type AddMealAction } from "./components/BottomNav";
+import WhatsNewModal from "./components/WhatsNewModal";
+import { markVersionSeen } from "./lib/whatsNew";
+import pkg from "../package.json";
 import Home from "./features/Home";
 import { db, type MealItem } from "./db/db";
 import { useAuth } from "./context/useAuth";
@@ -277,6 +280,13 @@ export default function App() {
       setAddMealOpen(false);
     }
   }
+
+  // "Co je nového" (WhatsNewModal níž) je pro aktualizaci, ne pro novou instalaci — zařízení,
+  // které prochází onboardingem, si aktuální verzi zapíše jako viděnou, ať po dokončení nastavení
+  // nevyskočí novinky, které pro novou uživatelku nové nejsou.
+  useEffect(() => {
+    if (needsOnboarding) markVersionSeen(pkg.version);
+  }, [needsOnboarding]);
 
   if (loading) {
     return (
@@ -589,6 +599,9 @@ export default function App() {
           <ShoppingListModal onClose={() => setShoppingListOpen(false)} />
         </Suspense>
       )}
+
+      {/* Jen v hlavní appce (ne přes Onboarding). Poslední, ať je nad ostatními modály. */}
+      <WhatsNewModal />
     </div>
   );
 }

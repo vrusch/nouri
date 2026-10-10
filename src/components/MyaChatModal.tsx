@@ -1,8 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
 import { X, Send, Loader2, Trash2 } from "lucide-react";
 import { useAuth } from "../context/useAuth";
+import { db } from "../db/db";
 import { MyaAI } from "../lib/ai";
-import { subscribeChatMessages, saveChatMessage, clearChatHistory, type ChatMessageEntry } from "../lib/cloudSync";
+import { calculateNutrition } from "../lib/nutrition";
+import { buildChatContext, getRecentDates } from "../lib/chatContext";
+import { getLocalDateISO } from "../lib/date";
+import { WATER_TARGET_GLASSES } from "../lib/water";
+import {
+  subscribeChatMessages,
+  saveChatMessage,
+  clearChatHistory,
+  subscribeWaterLog,
+  subscribeWeightLogs,
+  type ChatMessageEntry,
+  type WeightLogEntry,
+} from "../lib/cloudSync";
 import { reportCloudError } from "../lib/cloudErrors";
 
 interface MyaChatModalProps {
@@ -34,6 +48,30 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
     if (!user) return;
     return subscribeChatMessages(user.uid, visibleLimit, setMessages);
   }, [user, visibleLimit]);
+
+  // Data dne pro Myu (viz buildChatContext) — chat dřív znal jen profil a na "jak jsem na tom
+  // dnes?" neměl z čeho odpovědět. Stejné zdroje jako Home: jídla a tréninky z Dexie (dnešek +
+  // 7 předchozích dní), voda a váha z Firestore. null/undefined = ještě nedorazilo.
+  const today = getLocalDateISO();
+  const windowStart = getRecentDates(today)[0];
+  const recentMeals = useLiveQuery(
+    () => db.meals.where("date").between(windowStart, today, true, true).toArray(),
+    [windowStart, today]
+  );
+  const recentWorkouts = useLiveQuery(
+    () => db.workouts.where("date").between(windowStart, today, true, true).toArray(),
+    [windowStart, today]
+  );
+  const [waterLog, setWaterLog] = useState<{ date: string; glasses: number } | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    return subscribeWaterLog(user.uid, today, (glasses) => setWaterLog({ date: today, glasses }));
+  }, [user, today]);
+  const [weightLogs, setWeightLogs] = useState<WeightLogEntry[] | null>(null);
+  useEffect(() => {
+    if (!user) return;
+    return subscribeWeightLogs(user.uid, setWeightLogs);
+  }, [user]);
 
   // Posouvá dolů jen při nové poslední zprávě, ne při každé změně počtu — donačtení starších
   // zpráv nahoře by jinak uživatelku odhodilo zpátky na konec konverzace.
@@ -78,7 +116,24 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
       // s Czech fallback textem ("Mya právě neodpovídá..."), takže finally spolehlivě proběhne.
       const effectiveProfile =
         effectiveCalibratedTDEE !== undefined ? { ...profile, calibratedTDEE: effectiveCalibratedTDEE } : profile;
-      const reply = await MyaAI.chatWithMya(effectiveProfile, history);
+      // Snímek dne se staví až při odeslání, ať Mya vidí stav i po jídle zapsaném během konverzace.
+      // Dokud jídla/tréninky nedorazí z Dexie, appka kontext neposílá vůbec (radši "nevidím" než 0 kcal).
+      const context =
+        recentMeals !== undefined && recentWorkouts !== undefined
+          ? buildChatContext({
+              today,
+              localHour: new Date().getHours(),
+              nutrition: calculateNutrition(effectiveProfile),
+              meals: recentMeals,
+              workouts: recentWorkouts,
+              waterGlasses: waterLog?.date === today ? waterLog.glasses : null,
+              waterTarget: WATER_TARGET_GLASSES,
+              weightLogs,
+              vacationDates: profile.vacationDates,
+              targetWeight: profile.targetWeight,
+            })
+          : undefined;
+      const reply = await MyaAI.chatWithMya(effectiveProfile, history, context);
       saveChatMessage(user.uid, "assistant", reply);
     } finally {
       setSending(false);
@@ -157,7 +212,7 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
           {messages.map((m) => (
             <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
               <div
-                className={`max-w-[85%] px-4 py-2.5 text-sm whitespace-pre-wrap rounded-2xl ${
+                className={`max-w-[85%] px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl ${
                   m.role === "user"
                     ? `text-white rounded-br-sm ${isFemale ? "bg-rose-600" : "bg-sky-600"}`
                     : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-bl-sm"

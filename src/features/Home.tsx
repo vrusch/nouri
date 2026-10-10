@@ -74,6 +74,18 @@ const MOOD_OPTIONS = [
   { value: 5, emoji: "😄", label: "Skvěle" },
 ] as const;
 
+// Dnešní odpověď na "Jak se cítíš?" v sessionStorage (zapisuje handleSubmitMood) — posílá se
+// s každým dalším pozdravem dne. Rozbitý/cizí obsah = jako by nálada nebyla.
+function readStoredMood(key: string): { mood: number; note?: string } | null {
+  try {
+    const parsed = JSON.parse(sessionStorage.getItem(key) ?? "null") as { mood?: unknown; note?: unknown } | null;
+    if (!parsed || !Number.isInteger(parsed.mood)) return null;
+    return { mood: parsed.mood as number, note: typeof parsed.note === "string" && parsed.note ? parsed.note : undefined };
+  } catch {
+    return null;
+  }
+}
+
 interface HomeProps {
   onEditMeal: (meal: MealItem) => void;
 }
@@ -110,7 +122,7 @@ export default function Home({ onEditMeal }: HomeProps) {
   // Denní doba se počítá při renderu (ne v state), stejně jako guessMealType v AddMealModal —
   // Home se překresluje při každé změně jídel/vody, takže při běžném používání appky (otevřít,
   // zapsat, zavřít) je hodnota vždy čerstvá. Zároveň jde o stabilní string ("morning"/"day"/…),
-  // takže ho fetchGreeting níž může mít v závislostech efektu i v cache klíči, aniž by se efekt
+  // takže ho efekt pozdravu níž může mít v závislostech i v cache klíči, aniž by se efekt
   // restartoval při každém renderu.
   const timeOfDay = getTimeOfDay();
 
@@ -175,7 +187,7 @@ export default function Home({ onEditMeal }: HomeProps) {
   }, [today]);
 
   // subscribeWaterLog hlásí 0 i pro dosud neexistující dokument — waterLoadedDate appce řekne,
-  // jestli je 0 skutečná, nebo jen "ještě nedorazilo". Pozdrav Myi (viz fetchGreeting níž)
+  // jestli je 0 skutečná, nebo jen "ještě nedorazilo". Pozdrav Myi (viz efekt pozdravu níž)
   // vodu posílá jen po načtení, jinak by Mya kárala za nepití hned po startu appky.
   const [waterLoadedDate, setWaterLoadedDate] = useState<string | null>(null);
   const waterLoaded = waterLoadedDate === today;
@@ -195,7 +207,7 @@ export default function Home({ onEditMeal }: HomeProps) {
     return subscribeCycleLogs(user.uid, setCycleLogs);
   }, [user, profile?.cycleTrackingEnabled]);
 
-  // Váhové milníky (viz fetchGreeting níž) potřebují první i poslední záznam váhy —
+  // Váhové milníky (viz efekt níž) potřebují první i poslední záznam váhy —
   // Home dosud weightLogs vůbec netahal, na rozdíl od Stats.tsx.
   const [weightLogs, setWeightLogs] = useState<WeightLogEntry[]>([]);
   useEffect(() => {
@@ -371,8 +383,26 @@ export default function Home({ onEditMeal }: HomeProps) {
     }
   };
 
+  // Kešování pozdravu na dnešek + stav dne, ať se pozdrav obnoví po každé změně čísel, která Mya
+  // v pozdravu cituje. Testování 2026-10-10: klíč dřív obsahoval jen počet jídel — pozdrav
+  // "jen 6 z 8 sklenic" visel na Home i po vypití osmé sklenice a úprava kalorií existujícího
+  // jídla nový pozdrav nevyvolala. Proto v klíči i zaokrouhlené kcal a sklenice vody.
+  // V klíči je i denní doba (timeOfDay): bez ní by pozdrav vygenerovaný ráno visel na Home
+  // i večer se stejnými daty, takže by časový kontext poslaný do getDailyGreeting nebyl vidět.
+  // Styl a volno v klíči: přepnutí stylu v Profilu nebo tap na "Dnes mám volno" musí dát
+  // nový pozdrav, ne vrátit ten starý z cache. Nálada v klíči: pozdrav z doby před odpovědí na
+  // "Jak se cítíš?" se po ní už nesmí vrátit, ani když se data vrátí do stejného stavu.
+  const buildGreetingCacheKey = (withMood: boolean) =>
+    `mya_greeting_${today}_${meals.length}_${Math.round(consumedCalories)}_${waterLoaded ? waterGlasses : "x"}_${timeOfDay}_${coachingStyle}_${todayIsVacation ? "volno" : "bezne"}_${withMood ? "nalada" : "bez"}`;
+  const greetingCacheKey = buildGreetingCacheKey(moodAnswered);
+  const moodStorageKey = `mya_mood_${today}`;
+  // Ref (ne jen submittingMood state) kvůli zpožděnému callbacku pozdravu níž — ten čte stav
+  // z uzávěru renderu, ve kterém vznikl.
+  const submittingMoodRef = useRef(false);
+
   const handleSubmitMood = async (value: number) => {
     if (!profile || submittingMood || mealsRaw === undefined) return;
+    submittingMoodRef.current = true;
     setSubmittingMood(true);
     try {
       const note = moodNoteInput.trim();
@@ -384,18 +414,23 @@ export default function Home({ onEditMeal }: HomeProps) {
         moodNote: note || undefined,
         ...greetingContext,
       });
-      sessionStorage.setItem(`mya_mood_greeting_${today}`, msg);
+      // Testování 2026-10-10: reakce na náladu dřív visela na Home celý den beze změny, takže
+      // v ní zastarala čísla stejně jako u vody. Teď je to obyčejný pozdrav pro aktuální stav
+      // dne — nálada se uloží a efekt níž ji posílá s každým dalším pozdravem, takže tón zůstane
+      // a čísla se obnovují s daty.
+      sessionStorage.setItem(moodStorageKey, JSON.stringify({ mood: value, note: note || undefined }));
+      sessionStorage.setItem(buildGreetingCacheKey(true), msg);
       sessionStorage.setItem(`mya_mood_answered_${today}`, "1");
       // Milníková oslava (viz efekt výš) mohla appka zobrazit, zatímco čekala na tuhle odpověď —
       // stejná třída race jako B1 v AUDIT_2026-08-13.md, jen na cestě odpovědi na náladu místo
-      // automatického pozdravu. Milník má přednost před reakcí na náladu (stejné pořadí jako ve
-      // fetchGreeting výš), takže appka bublinu nepřepíše, i když do sessionStorage reakci na
-      // náladu pro úplnost pořád zapíše.
+      // automatického pozdravu. Milník má přednost před reakcí na náladu (stejné pořadí jako
+      // v efektu pozdravu níž), takže appka bublinu nepřepíše.
       if (!sessionStorage.getItem(`mya_milestone_${today}`)) {
         setGreeting(msg);
       }
       setMoodAnswered(true);
     } finally {
+      submittingMoodRef.current = false;
       setSubmittingMood(false);
     }
   };
@@ -403,7 +438,7 @@ export default function Home({ onEditMeal }: HomeProps) {
   const streak = computeLoggingStreak(Array.from(new Set(allMeals.map((m) => m.date))), undefined, profile?.vacationDates);
 
   // Milníková oslava (streak nebo váha, FEATURE_IDEAS.md sekce 3) — vlastní efekt oddělený od
-  // fetchGreeting níž, ať streak/weightLogs (obojí dorazí asynchronně z Dexie/Firestore až po
+  // efektu pozdravu níž, ať streak/weightLogs (obojí dorazí asynchronně z Dexie/Firestore až po
   // prvním renderu) nespouští další volání OpenAI v efektu níž. Jednou zobrazená oslava zůstává
   // celý den beze změny (klíč nezávisí na meals.length) — kdyby sdílela klíč s cacheKey níž,
   // zápis dalšího jídla ten samý den by ji přepsal běžným pozdravem: updateProfile totiž mění
@@ -450,49 +485,60 @@ export default function Home({ onEditMeal }: HomeProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.lastCelebratedStreakDays, profile?.lastCelebratedWeightMilestoneKg, profile?.goal, today, streak, weightLogs, updateProfile]);
 
+  const mealsLoaded = mealsRaw !== undefined;
   useEffect(() => {
-    const fetchGreeting = async () => {
-      if (!profile) return;
+    if (!profile) return;
 
-      // Milníková oslava (viz efekt výš) má přednost, pokud appka dnes nějakou zobrazila.
-      const milestoneCacheKey = `mya_milestone_${today}`;
-      const cachedMilestone = sessionStorage.getItem(milestoneCacheKey);
-      if (cachedMilestone) {
-        setGreeting(cachedMilestone);
+    // Milníková oslava (viz efekt výš) má přednost, pokud appka dnes nějakou zobrazila.
+    const milestoneCacheKey = `mya_milestone_${today}`;
+    const cachedMilestone = sessionStorage.getItem(milestoneCacheKey);
+    if (cachedMilestone) {
+      setGreeting(cachedMilestone);
+      return;
+    }
+
+    // Klíč viz buildGreetingCacheKey výš. Reakce na náladu je v cache pod stejným klíčem jako
+    // běžný pozdrav (handleSubmitMood ji tam uloží), takže zůstane, dokud se nezmění data dne.
+    const cacheKey = greetingCacheKey;
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) {
+      setGreeting(cached);
+      return;
+    }
+
+    const customReminder = pickDailyCustomReminder(profile.customReminders ?? [], today);
+    if (customReminder) {
+      setGreeting(customReminder);
+      sessionStorage.setItem(cacheKey, customReminder);
+      return;
+    }
+
+    // Dokud jídla z Dexie nedorazí, appka nic nevolá — pozdrav nad "0 kcal" by Myu nechal mluvit
+    // o nezapsaném dni a zůstal by v cache. Na vodu se záměrně nečeká: kdyby její listener
+    // selhal, pozdrav by navždy zůstal na "Přemýšlím..."; nenačtená voda se do getDailyGreeting
+    // vůbec neposílá (greetingContext) a když dorazí do 2,5 s, změní klíč a timeout restartuje.
+    if (!mealsLoaded) return;
+
+    // Zpoždění, než appka sama zavolá OpenAI, má dva důvody:
+    // 1) Grace period (B2 v AUDIT_2026-08-13.md): když uživatelka klikne na náladu dřív, než by
+    //    automat stihl odpovědět, appka zbytečně nezaplatí dvě souběžná volání (handleSubmitMood
+    //    výš má vlastní volání getDailyGreeting a po odpovědi přepne klíč na variantu s náladou,
+    //    čímž tenhle běh zruší).
+    // 2) Debounce: voda je v klíči, takže tři rychlé tapy na "+" by bez zpoždění zaplatily
+    //    tři pozdravy — každá změna dat timeout restartuje a zavolá se jen ten poslední.
+    // `superseded`: odpověď, která doletí až po další změně dat, appka uloží do cache pod jejím
+    // vlastním klíčem (pro ten stav dne platí), ale nezobrazí — přepsala by novější pozdrav.
+    let superseded = false;
+    const timeoutId = setTimeout(async () => {
+      if (submittingMoodRef.current) return;
+      // Pozdrav pro tenhle stav mohla mezitím uložit odpověď předchozího běhu efektu.
+      const cachedMeanwhile = sessionStorage.getItem(cacheKey);
+      if (cachedMeanwhile) {
+        setGreeting(cachedMeanwhile);
         return;
       }
-
-      // Reakce na náladu (viz handleSubmitMood níž) má přednost hned po milníku — jednou
-      // vyžádaná zůstává celý den beze změny, i když appka mezitím normálně přepočítá pozdrav
-      // kvůli nově zapsanému jídlu (cacheKey níž závisí na meals.length).
-      const moodGreetingCacheKey = `mya_mood_greeting_${today}`;
-      const cachedMoodGreeting = sessionStorage.getItem(moodGreetingCacheKey);
-      if (cachedMoodGreeting) {
-        setGreeting(cachedMoodGreeting);
-        return;
-      }
-
-      // Kešování na dnešek + počet zapsaných jídel, ať se pozdrav obnoví po každém novém zápisu.
-      // V klíči je i denní doba (timeOfDay): bez ní by pozdrav vygenerovaný ráno visel na Home
-      // i večer se stejným počtem jídel, takže by časový kontext poslaný do getDailyGreeting níž
-      // nebyl vidět. Čtyři bloky denně = max 4 volání OpenAI na jeden počet jídel.
-      // Styl a volno v klíči: přepnutí stylu v Profilu nebo tap na "Dnes mám volno" musí dát
-      // nový pozdrav, ne vrátit ten starý z cache.
-      const cacheKey = `mya_greeting_${today}_${meals.length}_${timeOfDay}_${coachingStyle}_${todayIsVacation ? "volno" : "bezne"}`;
-      const cached = sessionStorage.getItem(cacheKey);
-
-      if (cached) {
-        setGreeting(cached);
-        return;
-      }
-
-      const customReminder = pickDailyCustomReminder(profile.customReminders ?? [], today);
-      if (customReminder) {
-        setGreeting(customReminder);
-        sessionStorage.setItem(cacheKey, customReminder);
-        return;
-      }
-
+      // Dnešní odpověď na "Jak se cítíš?" jde s každým dalším pozdravem, ať Mya drží tón.
+      const storedMood = readStoredMood(moodStorageKey);
       try {
         const msg = await MyaAI.getDailyGreeting(withEffectiveTDEE(profile), {
           consumedCalories,
@@ -500,48 +546,31 @@ export default function Home({ onEditMeal }: HomeProps) {
           // Hodinu posílá klient schválně: Cloud Function běží v us-central1, takže serverové
           // new Date().getHours() není čas uživatelky (viz getDailyGreeting v functions/src/index.ts).
           localHour: new Date().getHours(),
+          ...(storedMood ? { mood: storedMood.mood, moodNote: storedMood.note } : {}),
           ...greetingContext,
         });
-        // Mezitím (appka na odpověď OpenAI čeká) mohla appka dostat reakci na náladu, nebo
-        // zobrazit milníkovou oslavu (efekt výš) — obě mají přednost, tenhle běžný pozdrav
-        // by je jinak přepsal, jakmile doletí později.
-        if (sessionStorage.getItem(milestoneCacheKey) || sessionStorage.getItem(moodGreetingCacheKey)) return;
-        setGreeting(msg);
         sessionStorage.setItem(cacheKey, msg);
+        // Mezitím (appka na odpověď OpenAI čeká) mohla appka zobrazit milníkovou oslavu (efekt
+        // výš) — ta má přednost, tenhle běžný pozdrav by ji jinak přepsal, jakmile doletí později.
+        if (superseded || sessionStorage.getItem(milestoneCacheKey)) return;
+        setGreeting(msg);
       } catch {
-        if (sessionStorage.getItem(milestoneCacheKey) || sessionStorage.getItem(moodGreetingCacheKey)) return;
+        if (superseded || sessionStorage.getItem(milestoneCacheKey)) return;
         setGreeting(`Ahoj ${profile.name}! Nezapomeň dnes pít hodně vody. ✨`);
       }
-    };
-
-    // Grace period, než appka sama zavolá OpenAI (B2 v AUDIT_2026-08-13.md): pokud appka na
-    // mountu ještě nemá odpověď na náladu, počká pár vteřin, aby zbytečně nezaplatila dvě
-    // souběžná volání, když uživatelka klikne na náladu dřív, než by automat stihl odpovědět
-    // (handleSubmitMood výš má vlastní volání getDailyGreeting). Kontrola sessionStorage přímo
-    // ve zpožděném callbacku (ne přes moodAnswered state v deps) je záměr — nechceme kvůli tomu
-    // přidávat moodAnswered do závislostí a efekt tak zbytečně restartovat při každé odpovědi.
-    const moodAnsweredKey = `mya_mood_answered_${today}`;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    if (sessionStorage.getItem(moodAnsweredKey)) {
-      fetchGreeting();
-    } else {
-      timeoutId = setTimeout(() => {
-        if (sessionStorage.getItem(moodAnsweredKey)) return;
-        fetchGreeting();
-      }, 2500);
-    }
+    }, 2500);
 
     return () => {
-      if (timeoutId) clearTimeout(timeoutId);
+      superseded = true;
+      clearTimeout(timeoutId);
     };
     // withEffectiveTDEE je nová closure na každý render (staví se z lutealBonusActive/
-    // baseNutrition, ne z primitiv) — přidání do deps by efekt (i s grace-period timeoutem)
-    // restartovalo na každý render, ne jen když se skutečně změní vstupy, které appka
-    // opravdu chce sledovat (profile už deps má). Stejně tak greetingContext — styl a volno
-    // mění profile, voda se projeví přes waterLoaded (restart během grace period jen posune
-    // timeout, po uložení do cache už další volání OpenAI nevyvolá).
+    // baseNutrition, ne z primitiv) — přidání do deps by efekt (i s timeoutem) restartovalo na
+    // každý render, ne jen když se skutečně změní vstupy, které appka opravdu chce sledovat
+    // (profile už deps má). Stejně tak greetingContext — styl a volno mění profile; jídla, voda,
+    // denní doba a nálada se projeví přes greetingCacheKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, today, meals.length, consumedCalories, consumedProtein, timeOfDay, waterLoaded]);
+  }, [profile, today, greetingCacheKey, consumedProtein, mealsLoaded]);
 
   // Nová zpráva (nový den / nově zapsané jídlo) nesmí nechat dobíhat přečtení té staré —
   // zastaví se i při odchodu ze záložky Home (odhlášení posluchače na unmount).

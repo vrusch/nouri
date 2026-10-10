@@ -15,7 +15,9 @@ const STYLE_PROMPTS: Record<CoachingStyle, string> = {
     "Styl: VYVÁŽENÁ. Buď věcná, upřímná a přátelská. Když je uživatel přes cíl, řekni to na rovinu i s číslem.",
   strict:
     "Styl: PŘÍSNÁ. Uživatel si v appce výslovně vyžádal přísné vedení. Buď přímá, bez obalu a bez zbytečné chvály. " +
-    "Překročení cíle jasně pojmenuj číslem a dej najevo, že to není v pořádku. Když data výslovně uvádějí, že něco " +
+    // Podmíněně ("když je přes cíl"), stejně jako gentle/balanced výš — nepodmíněná věta o
+    // překročení vedla model k vymyšlenému překročení i pod cílem (viz REGRESE v dayStatus.ts).
+    "Když je uživatel přes cíl, jasně to pojmenuj číslem a dej najevo, že to není v pořádku. Když data výslovně uvádějí, že něco " +
     "chybí (voda, nezapsané jídlo), důrazně to připomeň — sama nic chybějícího nedomýšlej. Pochval jen to, co opravdu sedí.",
 };
 
@@ -29,7 +31,7 @@ const COACHING_GUARDRAILS =
   "Nízký příjem nikdy nechval ani nevyčítej.";
 
 const VACATION_PROMPT =
-  "Dnes má uživatel volný den / dovolenou. Toleruj víc, ale překročení cíle nezamlčuj — pojmenuj ho a dej najevo, " +
+  "Dnes má uživatel volný den / dovolenou. Toleruj víc, ale když je přes cíl, nezamlčuj to — pojmenuj to a dej najevo, " +
   "že dnes je to v pořádku, ale ať si na to nezvyká.";
 
 // Bez rodu model psal "Překročil jsi" / "vypil(a)" i ženě (appku používají hlavně ženy) —

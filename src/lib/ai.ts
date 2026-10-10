@@ -5,6 +5,7 @@ import { calculateNutrition, type NutritionResults, type Goal } from "./nutritio
 import type { CoachingStyle } from "./coachingStyle";
 import type { YesterdayReview } from "./yesterdayReview";
 import type { NudgeKind } from "./nudges";
+import type { ChatContext } from "./chatContext";
 
 export interface AIResponse {
   text: string;
@@ -101,7 +102,10 @@ export interface ChatMessageInput {
   content: string;
 }
 
-const chatWithMyaFn = httpsCallable<{ profile: UserProfile; messages: ChatMessageInput[] }, { text: string }>(
+const chatWithMyaFn = httpsCallable<
+  { profile: UserProfile; messages: ChatMessageInput[]; context?: ChatContext },
+  { text: string }
+>(
   functions,
   "chatWithMya"
 );
@@ -224,9 +228,10 @@ export const MyaAI = {
    * ořezanou appkou na posledních pár zpráv (viz MyaChatModal), aby volání OpenAI
    * nerostlo do nekonečna s délkou konverzace.
    */
-  async chatWithMya(profile: UserProfile, messages: ChatMessageInput[]): Promise<string> {
+  async chatWithMya(profile: UserProfile, messages: ChatMessageInput[], context?: ChatContext): Promise<string> {
     try {
-      const response = await chatWithMyaFn({ profile, messages });
+      // Kontext jen když je — bez něj (data dne ještě nedorazila) server Mye řekne, že je nevidí.
+      const response = await chatWithMyaFn({ profile, messages, ...(context ? { context } : {}) });
       return response.data.text;
     } catch (error) {
       console.error("Mya AI Error:", error);

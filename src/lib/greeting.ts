@@ -1,5 +1,5 @@
 // Hranice denních částí. Sdílené UI nadpisem na Home i časovým blokem v cache klíči AI pozdravu
-// (viz fetchGreeting v Home.tsx) — díky tomu se pozdrav od Myi obnoví přesně tehdy, kdy se změní
+// (viz efekt pozdravu v Home.tsx) — díky tomu se pozdrav od Myi obnoví přesně tehdy, kdy se změní
 // nadpis nad ním, ne dřív (appka tak zaplatí max 4 volání OpenAI denně na jeden počet jídel).
 export const GREETING_NIGHT_UNTIL_HOUR = 5;
 export const GREETING_MORNING_UNTIL_HOUR = 10;

@@ -336,11 +336,12 @@ export default function Recipes() {
               Navrhni mi recept
             </button>
 
+            {/* Bez capture="environment" — iPhone by jinak otevřel rovnou fotoaparát bez výběru
+                z galerie (viz stejná oprava v AddMealModal.tsx). */}
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
               className="hidden"
               onChange={handleFileSelected}
             />

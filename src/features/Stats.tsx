@@ -946,11 +946,12 @@ export default function Stats() {
 
       {/* Progress fotky */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+        {/* Bez capture="environment" — iPhone by jinak otevřel rovnou fotoaparát bez výběru
+            z galerie (viz stejná oprava v AddMealModal.tsx). */}
         <input
           ref={photoInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           className="hidden"
           onChange={handlePhotoSelected}
         />

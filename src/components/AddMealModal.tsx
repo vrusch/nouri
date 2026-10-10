@@ -740,11 +740,12 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
         <div className="flex-1 overflow-y-auto p-5">
           {step === "choose" && (
             <div className="space-y-3 py-4">
+              {/* Záměrně bez capture="environment" — s ním iPhone otevře rovnou fotoaparát a výběr
+                  z galerie vůbec nenabídne. Bez něj iOS ukáže volbu Vyfotit / Knihovna fotografií. */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
-                capture="environment"
                 className="hidden"
                 onChange={handleFileSelected}
               />

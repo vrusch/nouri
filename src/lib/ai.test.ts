@@ -61,6 +61,30 @@ describe("MyaAI — úspěšné volání", () => {
     expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages } }]);
   });
 
+  it("chatWithMya pošle i kontext dne, když ho appka má", async () => {
+    respond("chatWithMya", { text: "Zbývá ti 211 kcal." });
+    const messages = [{ role: "user" as const, content: "Jak jsem na tom dnes?" }];
+    const context = {
+      date: "2026-10-10",
+      localHour: 21,
+      isVacationDay: false,
+      consumedCalories: 1709,
+      consumedProtein: 104,
+      consumedCarbs: 204,
+      consumedFat: 62,
+      hasIncompleteMacroData: false,
+      workoutBonusCalories: 0,
+      meals: [],
+      workouts: [],
+      waterGlasses: 8,
+      waterTarget: 8,
+      recentDays: [],
+    };
+
+    await expect(MyaAI.chatWithMya(profile, messages, context)).resolves.toBe("Zbývá ti 211 kcal.");
+    expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages, context } }]);
+  });
+
   it("generateWelcomeReport vrátí data ze serveru beze změny", async () => {
     respond("generateWelcomeReport", { text: "### Report" });
 

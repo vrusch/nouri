@@ -5,6 +5,9 @@ import { callOpenAIChat } from "./openai.js";
 import { enforceRateLimit } from "./rateLimit.js";
 import { parseCoachingStyle, buildCoachingPrompt } from "./coachingStyle.js";
 import { parseProfileInput, type UserProfileInput } from "./profileInput.js";
+import { describeIntakeStatusCs, INTAKE_STATUS_RULE } from "./dayStatus.js";
+import { parseChatContext, formatChatContextCs } from "./chatContext.js";
+import { sanitizePromptText } from "./promptText.js";
 
 // Fáze C (REFERENCE/STRICT_COACHING_SPEC.md) — push připomínky jídla a vody, viz pushNudges.ts.
 export { sendNudgePushes, sendTestPush } from "./pushNudges.js";
@@ -41,21 +44,6 @@ const EXPENSIVE_AI_CALL_MAX = 20;
 const EXPENSIVE_AI_CALL_WINDOW_MS = 15 * 60 * 1000;
 const STANDARD_AI_CALL_MAX = 60;
 const STANDARD_AI_CALL_WINDOW_MS = 15 * 60 * 1000;
-
-const DEFAULT_MAX_PROMPT_TEXT_LENGTH = 300;
-
-// Ořeže délku a odstraní řádkové zlomy z volného textu, který appka posílá do promptu (jméno,
-// hint, popis jídla/tréninku, preference, suroviny z lednice...) — appku dnes používá jen jedna
-// autentizovaná uživatelka, takže reálné riziko je nízké (nanejvýš by obešla vlastní UI a
-// poslala funkci upravený vstup přímo), ale sdílený limit je levnější než ho nechat bez hranic,
-// zvlášť tam, kde text jde do SYSTÉMOVÉ části promptu (viz profile.name v chatWithMya).
-// undefined vstup (nepovinné pole) i prázdný/jen-mezerový text appka mapuje na undefined, ať
-// volající strana může použít stejný `?.trim()` fallback jako dřív.
-function sanitizePromptText(value: unknown, maxLength: number = DEFAULT_MAX_PROMPT_TEXT_LENGTH): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const cleaned = value.replace(/[\r\n]+/g, " ").trim();
-  return cleaned ? cleaned.slice(0, maxLength) : undefined;
-}
 
 // Druhy připomínek z klientského computeActiveNudges (src/lib/nudges.ts) → text do promptu.
 const NUDGE_KIND_LABELS = {
@@ -225,14 +213,13 @@ export const getDailyGreeting = onCall(
     const nutrition = buildNutritionFromProfile(profile);
     const targetCalories = nutrition.targetCalories + workoutBonusCalories;
     const targetProtein = nutrition.macros.protein;
-    const remaining = targetCalories - consumedCalories;
-    const proteinRemaining = Math.max(0, targetProtein - consumedProtein);
 
     // Max 2 věty a čím dál víc kontextu (voda, včerejšek, překročení) — bez pořadí by model
     // buď nacpal všechno, nebo vybíral náhodně.
     const systemPrompt = `Jsi Mya z aplikace Nouri. Piš krátké, úderné zprávy (max 2 věty).
 Zohledni aktuální stav uživatele. Nezmiňuj všechno najednou — vyber nejvýš dvě nejdůležitější věci v tomhle pořadí:
-1) dnešní překročení kalorického cíle, 2) připomínky uvedené v datech (nezapsané jídlo, málo vody), 3) včerejší překročení cíle, 4) výrazně chybějící bílkoviny vzhledem k denní době (konkrétně v gramech).
+1) dnešní překročení kalorického cíle (jen při STAV: PŘEKROČENO), 2) připomínky uvedené v datech (nezapsané jídlo, málo vody), 3) včerejší překročení cíle, 4) výrazně chybějící bílkoviny vzhledem k denní době (konkrétně v gramech).
+${INTAKE_STATUS_RULE}
 O nezapsaném jídle nebo málo vypité vodě mluv JEN když je uvedeno v "Appka právě připomíná" — jinak nic takového netvrď ani nedomýšlej.
 ${buildCoachingPrompt(coachingStyle, isVacationDay, profile.gender)}${
       localHour !== undefined
@@ -240,7 +227,8 @@ ${buildCoachingPrompt(coachingStyle, isVacationDay, profile.gender)}${
         : ""
     }${
       mood !== undefined
-        ? " Uživatel právě odpověděl na otázku, jak se dnes cítí — zohledni to v tónu zprávy (empaticky, ale stručně), aniž by to bylo hlavní téma zprávy."
+        ? // "dnes", ne "právě": klient náladu posílá s každým dalším pozdravem dne (Home.tsx, readStoredMood).
+          " Uživatel dnes v appce odpověděl na otázku, jak se cítí — zohledni to v tónu zprávy (empaticky, ale stručně), aniž by to bylo hlavní téma zprávy."
         : ""
     }`;
 
@@ -256,16 +244,7 @@ ${buildCoachingPrompt(coachingStyle, isVacationDay, profile.gender)}${
         ? ` Dnešní nálada/energie: ${mood}/5 (1 = mizerně, 5 = skvěle).${moodNote ? ` Poznámka od uživatele: "${moodNote}"` : ""}`
         : "";
 
-    // C1 v REFERENCE/DATA_COMPLETENESS_PLAN.md — appka dřív posílala doslovnou nulu i v případě,
-    // že uživatel ještě jen nic nezapsal (ne že by reálně nic nesnědl), takže Mya mohla reagovat
-    // na fiktivní hladovění. Stejný princip jako getProgressCaption v nutrition.ts: rozlišit
-    // "nic nezapsáno" od "postupuje s nízkým číslem" jen podle toho, jestli je snězeno přesně 0.
-    const intakeSummary =
-      consumedCalories === 0
-        ? "Zatím dnes nic nezapsal(a) do appky (nejde poznat, jestli ještě nejedl(a), nebo to jen ještě nezapsal(a))."
-        : remaining < 0
-          ? `Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g) — PŘES denní cíl o ${-remaining} kcal.`
-          : `Dnes snědeno: ${consumedCalories} kcal (bílkoviny ${consumedProtein}g). Zbývá: ${remaining} kcal, ${proteinRemaining}g bílkovin.`;
+    const intakeSummary = describeIntakeStatusCs(consumedCalories, targetCalories, consumedProtein, targetProtein);
 
     const waterContext =
       waterGlasses !== undefined ? ` Voda dnes: ${waterGlasses} z ${waterTarget ?? 8} sklenic (sklenice = 250 ml).` : "";
@@ -292,6 +271,9 @@ ${buildCoachingPrompt(coachingStyle, isVacationDay, profile.gender)}${
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
+        // Nižší teplota než výchozí 1 — pozdrav opakuje konkrétní čísla z dat a nesmí si je
+        // "kreativně" převracet (viz REGRESE v dayStatus.ts).
+        temperature: 0.4,
         maxTokens: 100,
       });
 
@@ -555,12 +537,16 @@ export const getMealFeedback = onCall(
     const systemPrompt = `Jsi Mya z aplikace Nouri. Uživatel právě zapsal jídlo. Reaguj JEDNOU krátkou větou (max ~20 slov) —
 jak tohle jídlo zapadá do zbytku dne. Žádné obecné fráze, konkrétní reakce na dané jídlo.
 Když je uživatel po tomhle jídle PŘES denní cíl, musíš to říct a uvést o kolik kcal — nesmíš to zamlčet ani obejít chválou.
+${INTAKE_STATUS_RULE}
 ${buildCoachingPrompt(coachingStyle, isVacationDay, input.gender)}`;
 
     // Překročení appka modelu píše výslovně, ne jen jako záporné "Zbývá -300 kcal" — to dřív
-    // model snadno přehlédl a odpověděl obecnou pochvalou.
+    // model snadno přehlédl a odpověděl obecnou pochvalou. Opačný směr (vymyšlené překročení
+    // pod cílem) hlídá výslovné STAV, stejně jako v pozdravu (viz REGRESE v dayStatus.ts).
     const balanceLine =
-      remaining < 0 ? `Tímhle jídlem je PŘES denní cíl o ${-remaining} kcal.` : `Zbývá ${remaining} kcal.`;
+      remaining < 0
+        ? `STAV: PŘEKROČENO — tímhle jídlem je PŘES denní cíl o ${-remaining} kcal.`
+        : `STAV: POD CÍLEM (cíl nepřekročen) — zbývá ještě ${remaining} kcal.`;
     const userPrompt = `Právě zapsáno jako ${mealTypeLabel}: "${mealName}" (${input.calories} kcal, ${protein}g bílkovin).
 Dnes celkem snědeno: ${input.consumedTodayCalories} kcal z cíle ${input.targetCalories} kcal. ${balanceLine}`;
 
@@ -917,13 +903,36 @@ export const chatWithMya = onCall(
     // Živě přepočteno z profilu, ne z profile.targetCalories (stejný důvod jako u getDailyGreeting).
     const nutrition = buildNutritionFromProfile(profile);
     const goalLabel = profile.goal === "lose" ? "hubnutí" : profile.goal === "gain" ? "nabírání svalové hmoty" : "udržování váhy";
-    // Styl Myi jde s profilem (klient posílá celý UserProfile). Volno chat nezná — server nezná
-    // místní datum uživatele a chat se na aktuální den stejně neváže.
+    // Styl Myi jde s profilem (klient posílá celý UserProfile), volný den s kontextem dne.
     const coachingStyle = parseCoachingStyle(profile.coachingStyle);
+    // Snímek dne od klienta (viz chatContext.ts) — bez něj (starší build appky) chat zná jen profil.
+    const dayContext = parseChatContext(request.data?.context);
+
+    const profileSummary =
+      `${safeName}, ${profile.gender === "female" ? "žena" : "muž"}, ${calculateAge(profile.birthDate)} let, ` +
+      `${profile.height} cm, ${profile.weight} kg (váha z profilu), aktivita: ${ACTIVITY_LEVELS[profile.activityLevel] || profile.activityLevel}. ` +
+      `Cíl: ${goalLabel}. BMR ${Math.round(nutrition.bmr)} kcal, TDEE ${Math.round(nutrition.tdee)} kcal, ` +
+      `denní cíl ${nutrition.targetCalories} kcal (bílkoviny ${nutrition.macros.protein} g, sacharidy ${nutrition.macros.carbs} g, tuky ${nutrition.macros.fat} g).`;
+
+    const dataSection = dayContext
+      ? `${formatChatContextCs(dayContext, {
+          calories: nutrition.targetCalories,
+          protein: nutrition.macros.protein,
+          carbs: nutrition.macros.carbs,
+          fat: nutrition.macros.fat,
+        })}
+
+Pravidla k datům:
+- Data výš jsou aktuální stav z appky, stejný, jaký uživatelka vidí na obrazovce. Na otázky o jejím dni, jídlech, vodě, tréninku, váze a pokroku odpovídej z nich a konkrétními čísly.
+- Čísla nepřepočítávej ani si je nedomýšlej. Co v datech není (např. starší historie než 7 dní), na rovinu řekni, že to nevidíš.
+- ${INTAKE_STATUS_RULE}`
+      : "Dnešní data (jídla, vodu, trénink, váhu) appka tentokrát neposlala — o dnešním příjmu nic netvrď a když se na něj uživatelka ptá, řekni, že ho teď nevidíš.";
 
     const systemPrompt = `Jsi Mya, AI nutriční a fitness asistentka aplikace Nouri. Vedeš volnou konverzaci s uživatelkou/uživatelem appky.
 
-Kontext uživatele: ${safeName}, cíl ${goalLabel}, cílový příjem ${nutrition.targetCalories} kcal/den (bílkoviny ${nutrition.macros.protein} g).
+Profil uživatele: ${profileSummary}
+
+${dataSection}
 
 Pravidla:
 - Odpovídej výhradně na témata výživy, hubnutí/nabírání/udržování váhy, cvičení, pohybu a zdravého životního stylu, případně dotazy k používání appky Nouri. Na cokoliv mimo tato témata zdvořile odpověz, že se raději bavíš o výživě a zdraví, a nasměruj konverzaci zpět.
@@ -932,7 +941,7 @@ Pravidla:
 - Nikdy nepoužívej markdown tabulky.
 - Nejsi lékařka — u zdravotních potížích nebo léčebných dotazech doporuč konzultaci s lékařem, nediagnostikuj.
 
-${buildCoachingPrompt(coachingStyle, false, profile.gender)}`;
+${buildCoachingPrompt(coachingStyle, dayContext?.isVacationDay ?? false, profile.gender)}`;
 
     const apiMessages = [
       { role: "system", content: systemPrompt },

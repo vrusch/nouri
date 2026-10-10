@@ -70,6 +70,8 @@
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
   user-select: none;
+  /* Vypne přiblížení dvojklepnutím (pinch řeší main.tsx + viewport v index.html). */
+  touch-action: manipulation;
 }
 
 input, textarea {
