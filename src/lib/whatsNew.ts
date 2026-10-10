@@ -10,6 +10,13 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.21.0",
+    items: [
+      "Když nadiktuješ víc jídel najednou („na snídani…, na svačinu…, k obědu…“), appka je rozdělí a každé zařadí tam, kam patří.",
+      "Večeře zapsaná večer se už správně uloží jako večeře, takže ti ji Mya nepřipomíná.",
+    ],
+  },
+  {
     version: "0.20.0",
     items: [
       "Mya v chatu teď vidí tvůj den — jídla, vodu, trénink i váhu — a umí ti říct, jak na tom jsi.",

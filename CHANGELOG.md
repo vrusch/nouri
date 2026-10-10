@@ -2,6 +2,13 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.21.0] - 2026-10-10
+### Přidáno
+- **Diktování víc jídel najednou**: popis nebo diktát typu „na snídani jsem měla kaši, na svačinu jablko a k obědu kuře s rýží“ appka rozdělí na samostatná jídla a každé zařadí tam, kam patří podle toho, co uživatelka řekla. Před uložením ukáže přehled, kde jde typ přepnout nebo jídlo odebrat. Zpětně nadiktované jídlo dostane typický čas (snídaně 8:00), nikdy ale čas v budoucnu. Talíř s více surovinami („vejce, chleba a rajče“) zůstává jedním jídlem.
+
+### Opraveno
+- **Mya připomínala večeři, která už byla zapsaná**: večeře zapsaná po 20:00 se ve výchozím stavu ukládala jako svačina, přesně v době, kdy připomínka večeře začíná. AI navíc přepisovala typ podle „charakteru jídla“ (jogurt k večeři = svačina). Typ teď určuje to, co uživatelka řekne, jinak čas zápisu (do 15 h oběd, 15–17 h svačina, od 17 h večeře), a ve formuláři jde přepnout. Opraveno i falešné „Oběd chybí“ po pozdním obědě ve 14 h.
+
 ## [0.20.0] - 2026-10-10
 ### Přidáno
 - **Mya v chatu vidí tvůj den**: s každou zprávou dostane dnešní jídla včetně maker, zbývající kalorie (stejné číslo jako na Home), trénink, vodu, posledních 7 dní, vážení a cílovou váhu. Na „jak jsem na tom dnes?“ odpoví konkrétními čísly; co appka ještě nenačetla, Mya řekne, že nevidí.
