@@ -2,6 +2,21 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.20.0] - 2026-10-10
+### Přidáno
+- **Mya v chatu vidí tvůj den**: s každou zprávou dostane dnešní jídla včetně maker, zbývající kalorie (stejné číslo jako na Home), trénink, vodu, posledních 7 dní, vážení a cílovou váhu. Na „jak jsem na tom dnes?“ odpoví konkrétními čísly; co appka ještě nenačetla, Mya řekne, že nevidí.
+- **Co je nového**: po aktualizaci appky se jednou ukáže okno s krátkým přehledem novinek (na každém zařízení zvlášť, při nové instalaci ne).
+
+### Změněno
+- **Pozdrav od Myi se obnovuje s daty**: nově i po každé sklenici vody nebo úpravě kalorií jídla, dřív jen po novém jídle. Rychlé ťukání na vodu stojí jen jeden nový pozdrav.
+- **Reakce na „Jak se cítíš?“ už nevisí celý den**: nálada se posílá s každým dalším pozdravem dne, takže tón zůstává a čísla jsou aktuální.
+- **Fotky jdou nahrát i z galerie**: fotka jídla, lednice v Receptech i progress fotky ve Statistikách — iPhone dřív nabízel jen fotoaparát.
+- **Vypnuté přiblížení obrazovky** roztažením prstů i dvojklepnutím — omylem přiblížená obrazovka vypadala, jako by chat přesahoval šířku.
+
+### Opraveno
+- **Mya si pletla „zbývá“ s „překročila“**: pozdrav tvrdil „překročila jsi cíl o 211 kcal“, zatímco Home ukazovala „Zbývá ti 211 kcal“ (a jednou hlásil překročení i při 0 snědených kcal). Pozdrav, chat i reakce na jídlo teď dostávají výslovný stav (pod cílem / překročeno) a o dnešním překročení smí mluvit jen tehdy, když opravdu nastalo.
+- **Dlouhé slovo nebo odkaz v chatu** se zalomí a nerozšíří bublinu přes okraj obrazovky.
+
 ## [0.19.0] - 2026-09-26
 ### Přidáno
 - **Upozornění na telefon**: Mya teď umí připomenout zapomenuté jídlo (snídani, oběd, večeři) a pití i ve chvíli, kdy appka není otevřená. Zapíná se v **Profil → Upozornění**, na každém zařízení zvlášť; ve výchozím stavu jsou upozornění vypnutá.
