@@ -14,8 +14,23 @@ export interface VisionResult {
   confidence: Confidence;
 }
 
+/** Jedno jídlo z popisu/diktátu s víc jídly (viz functions/src/mealText.ts). */
+export interface TextMealEstimate {
+  name: string;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+  statedType: MealType | null; // typ jen když ho uživatelka řekla ("na snídani…"), jinak null
+  confidence: Confidence;
+}
+
 const analyzeFoodFn = httpsCallable<{ imageDataUrl: string; hint?: string }, VisionResult | null>(functions, "analyzeFood");
 const analyzeFoodTextFn = httpsCallable<{ description: string }, VisionResult | null>(functions, "analyzeFoodText");
+const analyzeMealsTextFn = httpsCallable<
+  { description: string; multi: true },
+  { meals: TextMealEstimate[] } | VisionResult | null
+>(functions, "analyzeFoodText");
 
 export const MyaVision = {
   /**
@@ -46,5 +61,24 @@ export const MyaVision = {
       console.error("Mya Vision Error:", error);
       return null;
     }
-  }
+  },
+
+  /**
+   * Popis/diktát, který může obsahovat víc jídel ("na snídani…, k obědu…"), rozdělený na
+   * jednotlivá jídla. Starší server bez `multi` režimu vrátí jedno jídlo — appka ho pak bere
+   * jako jediné jídlo bez řečeného typu, tedy přesně jako dřív. null při chybě nebo když nic
+   * nerozpoznal — volající strana nabídne manuální zápis.
+   */
+  async analyzeMealsFromText(description: string): Promise<TextMealEstimate[] | null> {
+    try {
+      const data = (await analyzeMealsTextFn({ description, multi: true })).data;
+      if (!data) return null;
+      if ("meals" in data) return Array.isArray(data.meals) && data.meals.length > 0 ? data.meals : null;
+      const { name, calories, protein, fat, carbs, confidence } = data;
+      return [{ name, calories, protein, fat, carbs, confidence, statedType: null }];
+    } catch (error) {
+      console.error("Mya Vision Error:", error);
+      return null;
+    }
+  },
 };

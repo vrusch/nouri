@@ -8,6 +8,7 @@ import { parseProfileInput, type UserProfileInput } from "./profileInput.js";
 import { describeIntakeStatusCs, INTAKE_STATUS_RULE } from "./dayStatus.js";
 import { parseChatContext, formatChatContextCs } from "./chatContext.js";
 import { sanitizePromptText } from "./promptText.js";
+import { MULTI_MEAL_SYSTEM_PROMPT, parseMealsFromText } from "./mealText.js";
 
 // Fáze C (REFERENCE/STRICT_COACHING_SPEC.md) — push připomínky jídla a vody, viz pushNudges.ts.
 export { sendNudgePushes, sendTestPush } from "./pushNudges.js";
@@ -374,11 +375,38 @@ export const analyzeFoodText = onCall(
   { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 30 },
   async (request) => {
     requireAuth(request);
-    const description = sanitizePromptText(request.data?.description, 500);
+    // `multi` (AddMealModal → popis/diktát) rozdělí popis na víc jídel, viz mealText.ts. Bez něj
+    // (QuickLookupModal, starší build appky) funkce vrací jedno jídlo přesně jako dřív. Diktát
+    // tří jídel je delší — limit 1000 znaků, ať appka neusekne poslední (obvykle právě dnešní) jídlo.
+    const multi = request.data?.multi === true;
+    const description = sanitizePromptText(request.data?.description, multi ? 1000 : 500);
     if (!description) {
       throw new HttpsError("invalid-argument", "Chybí popis jídla.");
     }
     await enforceRateLimit(request.auth!.uid, "analyzeFoodText", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
+
+    if (multi) {
+      try {
+        const result = await callOpenAIChat({
+          apiKey: openaiApiKey.value(),
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: MULTI_MEAL_SYSTEM_PROMPT },
+            { role: "user", content: description },
+          ],
+          responseFormat: "json_object",
+          temperature: 0.3,
+          // 300 jako u jednoho jídla by JSON pro 3–5 jídel uřízlo uprostřed.
+          maxTokens: 800,
+        });
+        if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
+        const meals = parseMealsFromText(JSON.parse(result.content), description);
+        return meals.length > 0 ? { meals } : null;
+      } catch (error) {
+        console.error("Mya Text Analysis Error (multi):", error);
+        return null;
+      }
+    }
 
     const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti slovně popíše, co snědl (bez fotky).
 Tvým úkolem je z popisu odhadnout jídlo a jeho nutriční hodnoty pro popsanou porci. Pokud popis neuvádí množství, odhadni typickou porci pro dospělého člověka.

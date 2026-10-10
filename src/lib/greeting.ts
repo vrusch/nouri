@@ -10,7 +10,7 @@ export type TimeOfDay = "morning" | "day" | "evening" | "night";
 
 /**
  * Stejný "hodina z Date" pattern jako computeMealReminderStatus (mealReminder.ts) nebo
- * guessMealType (AddMealModal.tsx) — čistá funkce s injektovatelnými hodinami, ať jde otestovat
+ * guessMealTypeForHour (mealReminder.ts) — čistá funkce s injektovatelnými hodinami, ať jde otestovat
  * hranice bez mockování systémového času.
  *
  * "night" je jediná část přes půlnoc (22:00–4:59), takže se neřeší jako jeden AND rozsah, ale

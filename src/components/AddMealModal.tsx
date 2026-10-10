@@ -3,7 +3,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2, ClipboardList, ListPlus } from "lucide-react";
 import { type AddMealAction } from "./BottomNav";
 import { db, type MealItem, type MealIngredient } from "../db/db";
-import { MyaVision, type VisionResult, type MealType, type Confidence } from "../lib/vision";
+import { MyaVision, type VisionResult, type MealType, type Confidence, type TextMealEstimate } from "../lib/vision";
+import { guessMealTypeForHour, MEAL_TIME_BY_TYPE, planMealTypeAndTime } from "../lib/mealReminder";
 import { MyaVoice } from "../lib/voice";
 import { MyaAI } from "../lib/ai";
 import { backupMeal, deleteMeal, subscribeMealTemplates, deleteMealTemplate, type MealTemplateEntry } from "../lib/cloudSync";
@@ -33,18 +34,19 @@ interface AddMealModalProps {
   effectiveCalibratedTDEE?: number;
 }
 
-type Step = "choose" | "photo-preview" | "describe" | "recording" | "analyzing" | "form" | "feedback" | "templates";
+type Step = "choose" | "photo-preview" | "describe" | "recording" | "analyzing" | "form" | "multi" | "feedback" | "templates";
+
+// Jedno jídlo z diktátu s víc jídly v kroku "multi" — klíč jen pro React a mazání řádku.
+interface DictatedMealRow {
+  key: number;
+  estimate: TextMealEstimate;
+  type: MealType;
+  time: string;
+}
+
+let nextDictatedMealKey = 0;
 
 const RECORDING_MIME_TYPES = ["audio/webm", "audio/mp4", "audio/ogg"];
-
-// Typické časy jídla podle typu — šablona ukládá jen typ (ne konkrétní čas), takže při
-// aplikaci na dnešek appka přiřadí rozumný výchozí čas místo aktuálního okamžiku pro všechny položky.
-const TEMPLATE_TIME_BY_TYPE: Record<MealType, string> = {
-  breakfast: "08:00",
-  lunch: "12:00",
-  dinner: "18:00",
-  snack: "15:00",
-};
 
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -78,11 +80,7 @@ function toIngredientRows(items: MealIngredient[]): IngredientRow[] {
 }
 
 function guessMealType(): MealType {
-  const hour = new Date().getHours();
-  if (hour < 10) return "breakfast";
-  if (hour < 14) return "lunch";
-  if (hour < 20) return "dinner";
-  return "snack";
+  return guessMealTypeForHour(new Date().getHours());
 }
 
 function currentTime(): string {
@@ -131,6 +129,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [feedbackText, setFeedbackText] = useState<string | null>(null);
+  const [dictatedMeals, setDictatedMeals] = useState<DictatedMealRow[]>([]);
   const [analyzingMessage, setAnalyzingMessage] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -225,8 +224,18 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     null
   );
 
-  const resetFormFromVision = (result: VisionResult | null, failureNotice: string) => {
+  const resetFormFromVision = (
+    result: Pick<VisionResult, "name" | "calories" | "protein" | "fat" | "carbs" | "confidence"> | null,
+    failureNotice: string,
+    statedType: MealType | null = null
+  ) => {
     resetIngredients();
+    // Typ podle toho, co uživatelka řekla ("na snídani…", jen u popisu/diktátu), jinak podle
+    // hodiny zápisu — nikdy result.type z AI: ta vidí jen jídlo, ne kdy ho uživatelka jí (jogurt
+    // k večeři odhadla jako svačinu a připomínka večeře pak nezmizela). Ve formuláři jde přepnout.
+    const planned = planMealTypeAndTime(result ? statedType : null, new Date());
+    setType(planned.type);
+    setTime(planned.time);
     if (result) {
       const caloriesStr = result.calories ? String(result.calories) : "";
       const proteinStr = result.protein ? String(result.protein) : "";
@@ -237,7 +246,6 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
       setProtein(proteinStr);
       setFat(fatStr);
       setCarbs(carbsStr);
-      setType(result.type);
       setLastConfidence(result.confidence);
       // V režimu "Jím venku" nahrazuje pasivní varování o nejistotě uklidňujícím textem —
       // nepřesnost je tady očekávaná, ne důvod k obavám (viz roughEstimate v handleSave).
@@ -255,12 +263,10 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
       setProtein("");
       setFat("");
       setCarbs("");
-      setType(guessMealType());
       setLastConfidence(null);
       setNotice(failureNotice);
       lastAiSnapshotRef.current = null;
     }
-    setTime(currentTime());
   };
 
   // resetFormFromVision vždy volá resetIngredients() první, takže `ingredients.length > 0`
@@ -330,9 +336,63 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     if (!description.trim()) return;
     setAnalyzingMessage("Mya čte popis a počítá kalorie...");
     setStep("analyzing");
-    const result = await MyaVision.analyzeFoodText(description.trim());
-    resetFormFromVision(result, "Mya nerozpoznala jídlo z popisu. Zapiš prosím hodnoty ručně.");
+    // Diktát může obsahovat víc jídel ("na snídani…, na svačinu…, k obědu…" — ráno není čas,
+    // tak se dohání v poledne). Víc jídel → krok "multi" s přehledem, jedno → formulář jako dřív.
+    const meals = await MyaVision.analyzeMealsFromText(description.trim());
+    if (meals && meals.length > 1) {
+      const now = new Date();
+      setDictatedMeals(
+        meals.map((estimate) => ({ key: nextDictatedMealKey++, estimate, ...planMealTypeAndTime(estimate.statedType, now) }))
+      );
+      setStep("multi");
+      return;
+    }
+    const single = meals?.[0] ?? null;
+    resetFormFromVision(single, "Mya nerozpoznala jídlo z popisu. Zapiš prosím hodnoty ručně.", single?.statedType ?? null);
     setStep("form");
+  };
+
+  const handleChangeDictatedMealType = (key: number, type: MealType) => {
+    // Čas jde s typem (snídaně ráno, ne v čase zápisu), stejně jako při prvním rozdělení.
+    setDictatedMeals((rows) => rows.map((row) => (row.key === key ? { ...row, ...planMealTypeAndTime(type, new Date()) } : row)));
+  };
+
+  const handleRemoveDictatedMeal = (key: number) => {
+    setDictatedMeals((rows) => rows.filter((row) => row.key !== key));
+  };
+
+  // Stejný ukládací vzor jako šablona (handleApplyTemplate): bulkAdd + záloha každého jídla,
+  // pevný text místo AI reakce — reakce Myi je na jedno jídlo, ne na dohnaný půlden.
+  const handleSaveDictatedMeals = async () => {
+    if (dictatedMeals.length === 0 || saving) return;
+    setSaving(true);
+    try {
+      const today = getLocalDateISO();
+      const newMeals: MealItem[] = dictatedMeals.map(({ estimate, type, time }) => {
+        const meal: MealItem = {
+          name: estimate.name,
+          value: Math.round(estimate.calories),
+          time,
+          date: today,
+          type,
+          source: "manual",
+          syncId: crypto.randomUUID(),
+        };
+        // Nula z AI = makro chybí (stejně jako u jednoho jídla v resetFormFromVision).
+        if (estimate.protein) meal.protein = Math.round(estimate.protein);
+        if (estimate.fat) meal.fat = Math.round(estimate.fat);
+        if (estimate.carbs) meal.carbs = Math.round(estimate.carbs);
+        if (eatingOut) meal.roughEstimate = true;
+        return meal;
+      });
+      await db.meals.bulkAdd(newMeals);
+      if (user) newMeals.forEach((m) => backupMeal(user.uid, m));
+      const labels = newMeals.map((m) => MEAL_TYPE_OPTIONS.find((o) => o.id === m.type)?.label.toLowerCase() ?? m.type);
+      setFeedbackText(`Zapsáno ${formatMealsCs(newMeals.length)}: ${labels.join(", ")} 👍`);
+      setStep("feedback");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleRecordingStopped = async () => {
@@ -449,7 +509,8 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
         const newMeal: MealItem = {
           name: item.name,
           value: item.value,
-          time: TEMPLATE_TIME_BY_TYPE[item.type],
+          // Šablona ukládá jen typ (ne konkrétní čas) — typický čas místo okamžiku aplikace.
+          time: MEAL_TIME_BY_TYPE[item.type],
           date: today,
           type: item.type,
           source: "manual",
@@ -712,7 +773,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
         {/* HLAVIČKA */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800 shrink-0">
           <div className="flex items-center gap-2">
-            {!isEditing && (step === "photo-preview" || step === "describe" || step === "recording" || step === "form" || step === "templates") && (
+            {!isEditing && (step === "photo-preview" || step === "describe" || step === "recording" || step === "form" || step === "multi" || step === "templates") && (
               <button
                 onClick={handleBack}
                 className="p-1 -ml-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
@@ -727,6 +788,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
               {step === "recording" && "Nahrávám..."}
               {step === "analyzing" && "Mya analyzuje..."}
               {step === "form" && (isEditing ? "Upravit jídlo" : source === "photo" ? "Potvrď jídlo" : "Zapsat jídlo")}
+              {step === "multi" && "Zkontroluj jídla"}
               {step === "feedback" && "Uloženo"}
               {step === "templates" && "Šablony"}
             </h2>
@@ -1179,6 +1241,60 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
                   {confirmDelete ? "Opravdu smazat? Klikni znovu" : "Smazat jídlo"}
                 </button>
               )}
+            </div>
+          )}
+
+          {step === "multi" && (
+            <div className="space-y-4">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Mya v popisu našla {formatMealsCs(dictatedMeals.length)}. Zkontroluj typ — po uložení jde každé jídlo upravit na Home.
+              </p>
+              {dictatedMeals.some((row) => row.estimate.confidence === "low") && !eatingOut && (
+                <div className="p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
+                  U některého jídla si Mya nebyla úplně jistá odhadem — zkontroluj ho po uložení.
+                </div>
+              )}
+              {dictatedMeals.map((row) => (
+                <div key={row.key} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-800 dark:text-white">{row.estimate.name}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                        {row.time} · {Math.round(row.estimate.calories)} kcal · B {row.estimate.protein} g · S {row.estimate.carbs} g · T {row.estimate.fat} g
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveDictatedMeal(row.key)}
+                      aria-label={`Odebrat ${row.estimate.name}`}
+                      className="p-1 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors shrink-0"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {MEAL_TYPE_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.id}
+                        onClick={() => handleChangeDictatedMealType(row.key, opt.id)}
+                        className={`py-2 rounded-xl text-xs font-bold border-2 transition-all ${
+                          row.type === opt.id
+                            ? "border-rose-600 bg-rose-50 dark:bg-rose-900/20 text-rose-600"
+                            : "border-transparent bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <button
+                onClick={handleSaveDictatedMeals}
+                disabled={dictatedMeals.length === 0 || saving}
+                className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all disabled:opacity-50"
+              >
+                {saving ? "Ukládám..." : `Uložit ${formatMealsCs(dictatedMeals.length)}`}
+              </button>
             </div>
           )}
 

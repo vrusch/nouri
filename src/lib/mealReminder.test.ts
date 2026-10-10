@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeMealReminderStatus } from "./mealReminder";
+import { computeMealReminderStatus, guessMealTypeForHour, planMealTypeAndTime } from "./mealReminder";
 
 describe("computeMealReminderStatus", () => {
   const morning = new Date("2026-08-12T10:00:00");
@@ -92,5 +92,49 @@ describe("computeMealReminderStatus — snídaně a večeře", () => {
       const s = computeMealReminderStatus([], at(`${String(h).padStart(2, "0")}:30`));
       expect([s.breakfastOverdue, s.lunchOverdue, s.dinnerOverdue].filter(Boolean).length).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+describe("guessMealTypeForHour", () => {
+  const atHour = (h: number) => new Date(`2026-10-10T${String(h).padStart(2, "0")}:30:00`);
+
+  // REGRESE: "Nezapomeň si zapsat večeři", i když večeře zapsaná byla — odhad typu vracel od
+  // 20:00 "snack", tedy přesně v okně připomínky večeře.
+  it("jídlo zapsané kdykoli v okně připomínky večeře (20–24 h) je večeře a připomínku zruší", () => {
+    for (let h = 20; h <= 23; h++) {
+      expect(guessMealTypeForHour(h)).toBe("dinner");
+      expect(computeMealReminderStatus([guessMealTypeForHour(h)], atHour(h)).dinnerOverdue).toBe(false);
+    }
+  });
+
+  it("pozdní oběd ve 14 h je oběd a připomínku oběda zruší", () => {
+    expect(guessMealTypeForHour(14)).toBe("lunch");
+    expect(computeMealReminderStatus([guessMealTypeForHour(14)], atHour(14)).lunchOverdue).toBe(false);
+  });
+
+  it("odpolední svačina večeři tiše nesplní", () => {
+    expect(guessMealTypeForHour(15)).toBe("snack");
+    expect(computeMealReminderStatus([guessMealTypeForHour(15)], atHour(20)).dinnerOverdue).toBe(true);
+  });
+
+  it("ráno snídaně, od 17 h večeře", () => {
+    expect(guessMealTypeForHour(7)).toBe("breakfast");
+    expect(guessMealTypeForHour(17)).toBe("dinner");
+  });
+});
+
+describe("planMealTypeAndTime", () => {
+  const at = (hhmm: string) => new Date(`2026-10-10T${hhmm}:00`);
+
+  it("nadiktovaná snídaně v poledne zůstane snídaní s ranním časem", () => {
+    expect(planMealTypeAndTime("breakfast", at("12:30"))).toEqual({ type: "breakfast", time: "08:00" });
+  });
+
+  it("čas nikdy není v budoucnu (svačina nadiktovaná v poledne)", () => {
+    expect(planMealTypeAndTime("snack", at("12:30"))).toEqual({ type: "snack", time: "12:30" });
+  });
+
+  it("bez řečeného typu: typ podle hodiny zápisu a čas zápisu (večeře ve 22 h)", () => {
+    expect(planMealTypeAndTime(null, at("22:05"))).toEqual({ type: "dinner", time: "22:05" });
   });
 });
