@@ -2,6 +2,10 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.24.1] - 2026-10-11
+### Opraveno
+- **Mya si u receptů z chatu domýšlela tuky a sacharidy**: do historie chatu šly z karet receptů jen kalorie a bílkoviny, takže na „kolik má ten oběd tuku?“ Mya odpověděla jiné číslo, než ukazovala karta (12 g místo 14 g). Teď dostává všechno, co karta ukazuje (makra, čas, suroviny i postup); ověřeno živě.
+
 ## [0.24.0] - 2026-10-11
 ### Přidáno
 - **Tři recepty místo jednoho**: Recepty (z popisu i z fotky lednice) navrhnou až 3 různé recepty, standardně lehkou snídani, oběd a večeři z toho, co je doma. Když uživatelka v přání napíše „jen večeře“, dostane 3 varianty večeře. Porce odpovídá typu jídla (podíl denního cíle) a nikdy nepřesáhne, co dnes zbývá. Každý recept je sbalená karta s typem jídla, kcal, bílkovinami a časem; po rozkliknutí je celý recept s vlastním „Uložit recept“ a „Do seznamu“.
