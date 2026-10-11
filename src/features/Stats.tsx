@@ -28,6 +28,7 @@ import {
 } from "../lib/calorieIntakePattern";
 import { computeMonthRetrospective } from "../lib/monthRetrospective";
 import { detectGoalReached } from "../lib/goalReached";
+import { computeBmi, getBmiCategory, getBmiScalePosition, BMI_CATEGORY_LABELS_CS, BMI_SCALE_SEGMENTS, type BmiCategory } from "../lib/bmi";
 import { isVacationDay } from "../lib/vacationMode";
 import { computeMeasurementTrend, MEASUREMENT_FIELDS, MEASUREMENT_LABELS_CS } from "../lib/bodyMeasurements";
 import { fileToCompressedDataUrl } from "../lib/image";
@@ -87,6 +88,14 @@ function lastNDates(n: number, offsetDays: number = 0): string[] {
   }
   return dates;
 }
+
+// Tlumené barvy stupnice BMI — vědomě bez červené, karta je orientační, ne hodnoticí.
+const BMI_SEGMENT_CLASSES: Record<BmiCategory, string> = {
+  underweight: "bg-sky-200 dark:bg-sky-800",
+  normal: "bg-emerald-300 dark:bg-emerald-700",
+  overweight: "bg-amber-200 dark:bg-amber-800",
+  obese: "bg-orange-300 dark:bg-orange-800",
+};
 
 export default function Stats() {
   const { profile, user, updateProfile } = useAuth();
@@ -348,6 +357,14 @@ export default function Stats() {
       ? detectGoalReached(latestKnownWeight, profile.targetWeight, profile.goal, profile.lastCelebratedGoalReachedWeight)
       : false;
   const showGoalReachedCard = goalReached && !quietHoursActive;
+
+  // BMI z poslední známé váhy (stejná jako u detekce cíle výš), takže se ukáže i bez trendu;
+  // změna jen při trendu a za stejné období jako graf váhy (posledních 30 záznamů).
+  const currentBmi = computeBmi(latestKnownWeight, profile?.height);
+  const firstChartBmi = hasWeightTrend ? computeBmi(chartWeights[0].weight, profile?.height) : null;
+  const bmiDelta =
+    currentBmi !== null && firstChartBmi !== null ? Math.round((currentBmi - firstChartBmi) * 10) / 10 : null;
+  const targetBmi = profile?.goal !== "maintain" ? computeBmi(profile?.targetWeight, profile?.height) : null;
   // B4 v REFERENCE/DATA_COMPLETENESS_PLAN.md — bez targetWeight appka nikdy nemůže detekovat
   // dosažený cíl a dřív o tom mlčela úplně, bez odkazu zpátky na to, co appce chybí.
   const showTargetWeightHint = !!profile && profile.goal !== "maintain" && profile.targetWeight === undefined && !quietHoursActive;
@@ -773,6 +790,57 @@ export default function Stats() {
           </>
         )}
       </div>
+
+      {/* BMI — orientační, bez červené a bez barvy u změny (stejná změna je pro cíl "nabrat"
+          a "zhubnout" opačná zpráva). */}
+      {currentBmi !== null && (
+        <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="font-bold text-slate-800 dark:text-slate-100 text-sm">BMI</h3>
+            {bmiDelta !== null && (
+              <span className="text-xs font-bold text-slate-400">
+                {bmiDelta > 0 ? "+" : ""}{bmiDelta}
+              </span>
+            )}
+          </div>
+          <div className="flex items-baseline gap-2 mb-4">
+            <span className="text-3xl font-extrabold text-slate-800 dark:text-white">{currentBmi}</span>
+            <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
+              {BMI_CATEGORY_LABELS_CS[getBmiCategory(currentBmi)]}
+            </span>
+          </div>
+          <div className="relative">
+            <div className="flex h-2 rounded-full overflow-hidden">
+              {BMI_SCALE_SEGMENTS.map((seg) => (
+                <div
+                  key={seg.category}
+                  className={BMI_SEGMENT_CLASSES[seg.category]}
+                  style={{ width: `${getBmiScalePosition(seg.to) - getBmiScalePosition(seg.from)}%` }}
+                />
+              ))}
+            </div>
+            <div
+              className="absolute top-1/2 w-3.5 h-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white dark:bg-slate-900 border-2 border-slate-700 dark:border-slate-200"
+              style={{ left: `${getBmiScalePosition(currentBmi)}%` }}
+            />
+          </div>
+          <div className="relative h-4 mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
+            {BMI_SCALE_SEGMENTS.slice(1).map((seg) => (
+              <span key={seg.category} className="absolute -translate-x-1/2" style={{ left: `${getBmiScalePosition(seg.from)}%` }}>
+                {seg.from}
+              </span>
+            ))}
+          </div>
+          {targetBmi !== null && (
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+              Při cílové váze {profile?.targetWeight} kg: BMI {targetBmi} ({BMI_CATEGORY_LABELS_CS[getBmiCategory(targetBmi)].toLowerCase()})
+            </p>
+          )}
+          <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2">
+            BMI je jen orientační — nerozliší svaly od tuku ani stavbu těla.
+          </p>
+        </div>
+      )}
 
       {/* Cyklus (REFERENCE/CYCLE_TRACKING_PROPOSAL.md) — jen gender: 'female' a jen po zapnutí
           v Profilu, appka gender nikdy nepoužije k automatickému zapnutí. */}
