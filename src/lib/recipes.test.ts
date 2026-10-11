@@ -105,11 +105,12 @@ describe("chatHistoryContent", () => {
     expect(chatHistoryContent({ content: "Ahoj", recipes: [] })).toBe("Ahoj");
   });
 
-  it("k úvodní větě přidá shrnutí karet s typem jídla a surovinami", () => {
+  // REGRESE: bez tuků/sacharidů ve shrnutí si Mya na "kolik má ten oběd tuku?" číslo vymyslela.
+  it("k úvodní větě přidá shrnutí karet se vším, co karta ukazuje", () => {
     expect(chatHistoryContent({ content: "Tady máš tyhle recepty:", recipes: [recipe, dinner] })).toBe(
       "Tady máš tyhle recepty:\n[Karty receptů:\n" +
-        "- Tvarohová miska, 300 kcal, 30 g bílkovin — suroviny: tvaroh\n" +
-        "- Večeře: Losos se zeleninou, 300 kcal, 30 g bílkovin — suroviny: tvaroh]"
+        "- Tvarohová miska — 300 kcal, bílkoviny 30 g, tuky 5 g, sacharidy 20 g, 5 min; suroviny: tvaroh; postup: smíchat\n" +
+        "- Večeře: Losos se zeleninou — 300 kcal, bílkoviny 30 g, tuky 5 g, sacharidy 20 g, 5 min; suroviny: tvaroh; postup: smíchat]"
     );
   });
 });

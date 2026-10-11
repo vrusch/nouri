@@ -130,11 +130,19 @@ export function isRecipeSaved(recipe: RecipeResult, savedRecipes: RecipeResult[]
  * jen úvodní věta, takže bez tohohle shrnutí by Mya na "a ten oběd bez šunky?" nevěděla, který
  * oběd navrhla. Formát "[Karty receptů: …]" server Mye popisuje jako metadata, ne vzor odpovědi.
  */
+//
+// REGRESE (živý test 2026-10-11): shrnutí neslo jen kcal a bílkoviny a na "kolik má ten oběd
+// tuku?" Mya odpověděla 12 g, zatímco karta ukazovala 14 g — co v historii chybí, si model
+// domyslí. Proto jde všechno, co karta ukazuje: makra, čas, suroviny i postup.
 export function chatHistoryContent(message: { content: string; recipes?: RecipeResult[] }): string {
   if (!message.recipes || message.recipes.length === 0) return message.content;
   const lines = message.recipes.map((recipe) => {
     const type = recipe.mealType ? `${RECIPE_MEAL_TYPE_LABELS[recipe.mealType]}: ` : "";
-    return `- ${type}${recipe.name}, ${recipe.calories} kcal, ${recipe.protein} g bílkovin — suroviny: ${recipe.ingredients.join(", ")}`;
+    return (
+      `- ${type}${recipe.name} — ${recipe.calories} kcal, bílkoviny ${recipe.protein} g, tuky ${recipe.fat} g, ` +
+      `sacharidy ${recipe.carbs} g, ${recipe.prepMinutes} min; suroviny: ${recipe.ingredients.join(", ")}; ` +
+      `postup: ${recipe.instructions.join(" ")}`
+    );
   });
   return `${message.content}\n[Karty receptů:\n${lines.join("\n")}]`;
 }
