@@ -17,6 +17,7 @@ vi.mock("firebase/firestore", () => ({
 import { collection, doc, getDocs, onSnapshot, orderBy, setDoc } from "firebase/firestore";
 import {
   logWeight,
+  saveChatMessage,
   seedWeightLogIfEmpty,
   subscribeMeals,
   subscribeSavedRecipes,
@@ -243,5 +244,38 @@ describe("subscribeSavedRecipes", () => {
   it("řadí dotaz podle savedAt sestupně (nejnovější první)", () => {
     subscribeSavedRecipes("uid1", vi.fn());
     expect(orderBy).toHaveBeenCalledWith("savedAt", "desc");
+  });
+});
+
+describe("saveChatMessage", () => {
+  beforeEach(() => {
+    vi.mocked(setDoc).mockReset();
+    vi.mocked(setDoc).mockResolvedValue(undefined);
+  });
+
+  const recipe = {
+    name: "Omeleta",
+    description: "",
+    ingredients: ["2 vejce"],
+    instructions: ["Usmaž"],
+    prepMinutes: 10,
+    calories: 250,
+    protein: 15,
+    fat: 18,
+    carbs: 2,
+    mealType: "breakfast" as const,
+  };
+
+  it("zprávu s recepty uloží i s kartami", async () => {
+    await saveChatMessage("uid", "assistant", "Tady máš recepty:", [recipe]);
+    expect(vi.mocked(setDoc).mock.calls[0][1]).toMatchObject({ role: "assistant", content: "Tady máš recepty:", recipes: [recipe] });
+  });
+
+  it("bez receptů klíč recipes vůbec nezapíše (Firestore odmítá undefined)", async () => {
+    await saveChatMessage("uid", "user", "Ahoj");
+    await saveChatMessage("uid", "assistant", "Ahoj", []);
+    for (const call of vi.mocked(setDoc).mock.calls) {
+      expect("recipes" in (call[1] as object)).toBe(false);
+    }
   });
 });

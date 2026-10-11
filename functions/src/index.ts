@@ -7,10 +7,28 @@ import { parseCoachingStyle, buildCoachingPrompt } from "./coachingStyle.js";
 import { parseProfileInput, type UserProfileInput } from "./profileInput.js";
 import { describeIntakeStatusCs, INTAKE_STATUS_RULE } from "./dayStatus.js";
 import { parseChatContext, formatChatContextCs } from "./chatContext.js";
+import { parseChatMessages } from "./chatMessages.js";
 import { sanitizePromptText } from "./promptText.js";
 import { MULTI_MEAL_SYSTEM_PROMPT, parseMealsFromText } from "./mealText.js";
 import { parseFoodImages } from "./visionInput.js";
 import { FOOD_PHOTO_SYSTEM_PROMPT, parseFoodPhotoResult } from "./foodPhoto.js";
+import {
+  FRIDGE_RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
+  FRIDGE_RECIPE_SET_SYSTEM_PROMPT,
+  RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
+  RECIPE_SET_SYSTEM_PROMPT,
+  SUGGEST_RECIPES_TOOL,
+  SUGGEST_RECIPES_TOOL_NAME,
+  buildRecipeSetUserPrompt,
+  chatRecipeBudget,
+  chatRecipeIntro,
+  parseDailyTarget,
+  parseRecipeSet,
+  parseSuggestRecipesArgs,
+  recipeSetBudget,
+  sanitizeRecipeResult,
+  type RecipeResult,
+} from "./recipes.js";
 
 // Fáze C (REFERENCE/STRICT_COACHING_SPEC.md) — push připomínky jídla a vody, viz pushNudges.ts.
 export { sendNudgePushes, sendTestPush } from "./pushNudges.js";
@@ -589,59 +607,68 @@ interface RecipeInput {
   availableIngredients?: string;
 }
 
-interface RecipeResult {
-  name: string;
-  description: string;
-  ingredients: string[];
-  instructions: string[];
-  prepMinutes: number;
-  calories: number;
-  protein: number;
-  fat: number;
-  carbs: number;
-}
-
 const GOAL_LABELS: Record<Goal, string> = {
   lose: "hubnutí",
   maintain: "udržování váhy",
   gain: "nabírání svalové hmoty",
 };
 
-function sanitizeStringList(value: unknown, maxItems: number): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    .map((item) => item.trim())
-    .slice(0, maxItems);
-}
-
-function sanitizeRecipeResult(parsed: Record<string, unknown>): RecipeResult {
-  return {
-    name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Recept",
-    description: typeof parsed.description === "string" ? parsed.description.trim() : "",
-    ingredients: sanitizeStringList(parsed.ingredients, 20),
-    instructions: sanitizeStringList(parsed.instructions, 15),
-    prepMinutes: Math.min(240, Math.max(1, Math.round(Number(parsed.prepMinutes) || 20))),
-    calories: Math.max(0, Math.round(Number(parsed.calories) || 0)),
-    protein: Math.max(0, Math.round(Number(parsed.protein) || 0)),
-    fat: Math.max(0, Math.round(Number(parsed.fat) || 0)),
-    carbs: Math.max(0, Math.round(Number(parsed.carbs) || 0)),
-  };
+// Sada receptů přes gpt-4o-mini (záložka Recepty i karty v chatu) — při chybě vyhodí, volající
+// si sám rozhodne, co ukáže.
+async function generateRecipeSet(systemPrompt: string, userPrompt: string): Promise<RecipeResult[]> {
+  const result = await callOpenAIChat({
+    apiKey: openaiApiKey.value(),
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    responseFormat: "json_object",
+    temperature: 0.8,
+    // 700 jako u jednoho receptu by JSON se třemi recepty uřízlo uprostřed.
+    maxTokens: 2200,
+  });
+  if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
+  return parseRecipeSet(JSON.parse(result.content));
 }
 
 export const generateRecipe = onCall(
   { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 45 },
-  async (request): Promise<RecipeResult | null> => {
+  async (request): Promise<RecipeResult | { recipes: RecipeResult[] } | null> => {
     requireAuth(request);
     const input = request.data as RecipeInput | undefined;
-    if (!input || !Number.isFinite(input.remainingCalories) || input.remainingCalories <= 0) {
+    // Sada receptů (`multi`) umí i recepty "na jindy" — zbytek dne smí být malý i záporný
+    // (den přes cíl), porce pak určí denní cíl. Jeden recept (starší appka) dál jen do zbytku dne.
+    const multi = request.data?.multi === true;
+    if (!input || !Number.isFinite(input.remainingCalories) || (!multi && input.remainingCalories <= 0)) {
       throw new HttpsError("invalid-argument", "Chybí platný zbývající kalorický rozpočet.");
+    }
+    const daily = parseDailyTarget(request.data);
+    const remaining = recipeSetBudget(input);
+    if (multi && !remaining && !daily) {
+      throw new HttpsError("invalid-argument", "Chybí denní cíl pro recepty na jindy.");
     }
     await enforceRateLimit(request.auth!.uid, "generateRecipe", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
     const preferences = sanitizePromptText(input.preferences, 300);
-    const availableIngredients = sanitizePromptText(input.availableIngredients, 300);
+    // Ze seznamu surovin teď appka dělá tři různá jídla — 500 znaků, ať se vejde i delší výčet.
+    const availableIngredients = sanitizePromptText(input.availableIngredients, 500);
+
+    // `multi` (Recepty.tsx) = sada receptů, viz recipes.ts. Bez něj (starší build appky) jeden
+    // recept přesně jako dřív.
+    if (multi) {
+      try {
+        const recipes = await generateRecipeSet(
+          remaining ? RECIPE_SET_SYSTEM_PROMPT : RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
+          buildRecipeSetUserPrompt({ remaining, goalLabel, daily, preferences, availableIngredients })
+        );
+        return recipes.length > 0 ? { recipes } : null;
+      } catch (error) {
+        console.error("Mya Recipe Error (multi):", error);
+        return null;
+      }
+    }
 
     const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel chce recept, který mu pomůže
 dojíst zbytek denního nutričního cíle. Navrhni JEDEN recept reálně uvařitelný doma z běžně dostupných surovin,
@@ -859,22 +886,25 @@ Bílkoviny: cíl ${input.targetProtein}g/den. Všední dny průměr ${input.week
   }
 );
 
-interface ChatMessageInput {
-  role: "user" | "assistant";
-  content: string;
-}
-
-const MAX_CHAT_HISTORY = 20;
-const MAX_CHAT_MESSAGE_LENGTH = 2000;
 const CHAT_FALLBACK_TEXT = "Mya právě neodpovídá — zkus to prosím znovu za chvíli.";
+const CHAT_RECIPE_FALLBACK_TEXT = "Recepty se mi teď nepodařilo vymyslet — zkus to prosím znovu za chvíli.";
+// Zpětná vazba 2026-10-11: uživatelka se na recepty ptá hlavně Myi v chatu, ne v záložce Recepty —
+// chat má navrhovat stejně jako generátor (recipes.ts): víc různých jídel ze surovin, co má doma.
+// Textová varianta jen pro starší build appky (bez `recipeCards`), který karty neumí ukázat.
+const CHAT_RECIPE_RULE = `Když se uživatelka ptá na recept nebo co si uvařit, nebo vypíše suroviny, které má doma, navrhni 3 různé recepty — standardně lehkou snídani, oběd a večeři; když chce konkrétní jídlo (např. jen večeři), tak 3 varianty toho jídla. Když suroviny uvedla, použij jen je (navíc smíš sůl, pepř, koření, olej, vodu), žádný recept nemusí použít všechny. Každý recept je jedna porce, velká podle typu jídla a toho, kolik jí dnes zbývá. U každého receptu napiš řádek "Snídaně/Oběd/Večeře/Svačina: název (cca X kcal, Y g bílkovin)", pod něj suroviny s množstvím na jednom řádku a 2–4 krátké kroky postupu, každý na vlastním řádku s pomlčkou. Mezi recepty nech prázdný řádek.`;
 
 // Volný chat s Myou (FEATURE_IDEAS.md sekce 6) — jediná funkce v tomhle souboru s vícekolovou
 // konverzací (ostatní jsou vždy přesně systém+user). Zůstává bezstavová jako všechny sourozenní
 // funkce: appka posílá ořezanou historii z users/{uid}/chatMessages (viz cloudSync.ts), funkce
 // sama do Firestore nesahá. Protože historie teď přichází od klienta, je to nedůvěryhodný vstup —
 // validuje se délka pole i každé zprávy zvlášť, na rozdíl od ostatních funkcí v souboru.
+// Nová appka (`recipeCards: true`) dostane recepty jako karty: model jen zavolá nástroj
+// navrhni_recepty a sadu vygeneruje stejný prompt jako záložka Recepty (recipes.ts).
+const CHAT_RECIPE_TOOL_RULE = `Když uživatelka chce recept nebo nápad, co si uvařit, nebo vypíše suroviny, které má doma, zavolej nástroj ${SUGGEST_RECIPES_TOOL_NAME} — appka jí recepty ukáže jako karty. Recepty nikdy nepiš textem. Řádky "[Karty receptů: …]" v historii jsou recepty, které už dostala jako karty; na otázky k nim odpovídej textem a ten formát nikdy nepoužívej.`;
+
+// Timeout 60 s: odpověď s recepty jsou dvě volání OpenAI po sobě (nástroj + sada receptů).
 export const chatWithMya = onCall(
-  { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 30 },
+  { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 60 },
   async (request) => {
     requireAuth(request);
     const profile = parseProfileInput(request.data?.profile);
@@ -884,27 +914,10 @@ export const chatWithMya = onCall(
     // další systémovou instrukci.
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
-    const rawMessages = request.data?.messages;
-    if (!Array.isArray(rawMessages) || rawMessages.length === 0) {
-      throw new HttpsError("invalid-argument", "Chybí zprávy.");
-    }
-    if (rawMessages.length > MAX_CHAT_HISTORY) {
-      throw new HttpsError("invalid-argument", "Příliš dlouhá historie konverzace.");
-    }
-
-    const messages: ChatMessageInput[] = [];
-    for (const raw of rawMessages as unknown[]) {
-      const entry = raw as { role?: unknown; content?: unknown } | null;
-      const role = entry?.role;
-      const content = entry?.content;
-      if (role !== "user" && role !== "assistant") {
-        throw new HttpsError("invalid-argument", "Neplatná role zprávy.");
-      }
-      if (typeof content !== "string" || !content.trim() || content.length > MAX_CHAT_MESSAGE_LENGTH) {
-        throw new HttpsError("invalid-argument", "Neplatný obsah zprávy.");
-      }
-      messages.push({ role, content: content.trim() });
-    }
+    // Validace historie (délky, role, oříznutí dlouhé odpovědi Myi) — viz chatMessages.ts.
+    const parsedMessages = parseChatMessages(request.data?.messages);
+    if (!parsedMessages.ok) throw new HttpsError("invalid-argument", parsedMessages.error);
+    const messages = parsedMessages.messages;
     await enforceRateLimit(request.auth!.uid, "chatWithMya", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     // Živě přepočteno z profilu, ne z profile.targetCalories (stejný důvod jako u getDailyGreeting).
@@ -914,6 +927,7 @@ export const chatWithMya = onCall(
     const coachingStyle = parseCoachingStyle(profile.coachingStyle);
     // Snímek dne od klienta (viz chatContext.ts) — bez něj (starší build appky) chat zná jen profil.
     const dayContext = parseChatContext(request.data?.context);
+    const recipeCards = request.data?.recipeCards === true;
 
     const profileSummary =
       `${safeName}, ${profile.gender === "female" ? "žena" : "muž"}, ${calculateAge(profile.birthDate)} let, ` +
@@ -944,8 +958,9 @@ ${dataSection}
 Pravidla:
 - Odpovídej výhradně na témata výživy, hubnutí/nabírání/udržování váhy, cvičení, pohybu a zdravého životního stylu, případně dotazy k používání appky Nouri. Na cokoliv mimo tato témata zdvořile odpověz, že se raději bavíš o výživě a zdraví, a nasměruj konverzaci zpět.
 - Piš česky jako zkušená kamarádka-nutriční poradkyně, v tónu podle stylu níž.
-- Odpovědi drž přiměřeně stručné (typicky 2-5 vět) — delší jen když si to téma opravdu vyžádá (např. rozpis jídelníčku).
-- Nikdy nepoužívej markdown tabulky.
+- Odpovědi drž přiměřeně stručné (typicky 2-5 vět) — delší jen když si to téma opravdu vyžádá (např. rozpis jídelníčku nebo recepty).
+- Píšeš do obyčejného textu, ne do markdownu: žádné tabulky, hvězdičky (**), mřížky (#) ani číslované nadpisy — odrážky jen pomlčkou na začátku řádku.
+- ${recipeCards ? CHAT_RECIPE_TOOL_RULE : CHAT_RECIPE_RULE}
 - Nejsi lékařka — u zdravotních potížích nebo léčebných dotazech doporuč konzultaci s lékařem, nediagnostikuj.
 
 ${buildCoachingPrompt(coachingStyle, dayContext?.isVacationDay ?? false, profile.gender)}`;
@@ -960,8 +975,10 @@ ${buildCoachingPrompt(coachingStyle, dayContext?.isVacationDay ?? false, profile
         apiKey: openaiApiKey.value(),
         model: "gpt-4o-mini",
         messages: apiMessages,
-        maxTokens: 500,
+        // 500 by tři recepty (viz CHAT_RECIPE_RULE) uřízlo uprostřed; běžné odpovědi jsou dál krátké.
+        maxTokens: 1100,
         temperature: 0.7,
+        ...(recipeCards ? { tools: [SUGGEST_RECIPES_TOOL] } : {}),
       });
 
       if (!result.ok) {
@@ -969,6 +986,42 @@ ${buildCoachingPrompt(coachingStyle, dayContext?.isVacationDay ?? false, profile
           text: result.reason === "rate_limited" ? "Mya je momentálně přetížená, zkus to prosím za chvíli." : CHAT_FALLBACK_TEXT,
         };
       }
+
+      if (recipeCards && result.toolCall?.name === SUGGEST_RECIPES_TOOL_NAME) {
+        const args = parseSuggestRecipesArgs(result.toolCall.arguments);
+        const daily = {
+          calories: nutrition.targetCalories,
+          protein: nutrition.macros.protein,
+          fat: nutrition.macros.fat,
+          carbs: nutrition.macros.carbs,
+        };
+        const remaining = chatRecipeBudget(daily, dayContext);
+        try {
+          const recipes = await generateRecipeSet(
+            remaining ? RECIPE_SET_SYSTEM_PROMPT : RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
+            buildRecipeSetUserPrompt({
+              remaining,
+              goalLabel,
+              daily,
+              preferences: args.preferences,
+              availableIngredients: args.ingredients,
+            })
+          );
+          if (recipes.length === 0) return { text: CHAT_RECIPE_FALLBACK_TEXT };
+          return {
+            text: chatRecipeIntro({
+              hasIngredients: !!args.ingredients,
+              todayFull: !!dayContext && !remaining,
+              count: recipes.length,
+            }),
+            recipes,
+          };
+        } catch (error) {
+          console.error("Mya Chat Recipe Error:", error);
+          return { text: CHAT_RECIPE_FALLBACK_TEXT };
+        }
+      }
+
       const content = result.content.trim();
       if (!content) return { text: CHAT_FALLBACK_TEXT };
       return { text: content };
@@ -1102,19 +1155,60 @@ Vrať jen čistý text zprávy, žádný markdown ani uvozovky okolo.`;
 
 export const generateRecipeFromFridge = onCall(
   { secrets: [openaiApiKey], region: "us-central1", memory: "512MiB", timeoutSeconds: 60 },
-  async (request): Promise<RecipeResult | null> => {
+  async (request): Promise<RecipeResult | { recipes: RecipeResult[] } | null> => {
     requireAuth(request);
     const input = request.data as FridgeRecipeInput | undefined;
     if (!input?.imageDataUrl || !input.imageDataUrl.startsWith("data:image/")) {
       throw new HttpsError("invalid-argument", "Chybí platný obrázek.");
     }
-    if (!Number.isFinite(input.remainingCalories) || input.remainingCalories <= 0) {
+    // Recepty "na jindy" stejně jako generateRecipe.
+    const multi = request.data?.multi === true;
+    if (!Number.isFinite(input.remainingCalories) || (!multi && input.remainingCalories <= 0)) {
       throw new HttpsError("invalid-argument", "Chybí platný zbývající kalorický rozpočet.");
+    }
+    const daily = parseDailyTarget(request.data);
+    const remaining = recipeSetBudget(input);
+    if (multi && !remaining && !daily) {
+      throw new HttpsError("invalid-argument", "Chybí denní cíl pro recepty na jindy.");
     }
     await enforceRateLimit(request.auth!.uid, "generateRecipeFromFridge", EXPENSIVE_AI_CALL_MAX, EXPENSIVE_AI_CALL_WINDOW_MS);
 
     const goalLabel = GOAL_LABELS[input.goal] ?? GOAL_LABELS.maintain;
     const preferences = sanitizePromptText(input.preferences, 300);
+
+    // `multi` (Recepty.tsx) = sada receptů jako u generateRecipe, viz recipes.ts.
+    if (multi) {
+      try {
+        const result = await callOpenAIChat({
+          apiKey: openaiApiKey.value(),
+          model: "gpt-4o",
+          messages: [
+            {
+              role: "system",
+              content: remaining ? FRIDGE_RECIPE_SET_SYSTEM_PROMPT : FRIDGE_RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
+            },
+            {
+              role: "user",
+              content: [
+                { type: "text", text: buildRecipeSetUserPrompt({ remaining, goalLabel, daily, preferences }) },
+                { type: "image_url", image_url: { url: input.imageDataUrl } },
+              ],
+            },
+          ],
+          responseFormat: "json_object",
+          temperature: 0.7,
+          maxTokens: 2200,
+        });
+        if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
+        const parsed = JSON.parse(result.content);
+        if (parsed.recognized !== true) return null;
+        const recipes = parseRecipeSet(parsed);
+        return recipes.length > 0 ? { recipes } : null;
+      } catch (error) {
+        console.error("Mya Fridge Recipe Error (multi):", error);
+        return null;
+      }
+    }
 
     const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti pošle fotku obsahu lednice nebo spíže.
 Podívej se, jaké potravinové suroviny jsou na fotce rozpoznatelné, a navrhni JEDEN recept, který z nich (klidně i s

@@ -17,10 +17,23 @@ interface OpenAIChatOptions {
   temperature?: number;
   maxTokens?: number;
   responseFormat?: "json_object";
+  // Jen chatWithMya (karty receptů). Model smí zavolat nejvýš jeden nástroj — appka výsledek
+  // nástroje modelu nevrací, jen podle volání spustí vlastní generování (viz index.ts).
+  tools?: OpenAITool[];
+}
+
+export interface OpenAITool {
+  type: "function";
+  function: { name: string; description: string; parameters: Record<string, unknown> };
+}
+
+export interface OpenAIToolCall {
+  name: string;
+  arguments: string;
 }
 
 export type OpenAIChatResult =
-  | { ok: true; content: string }
+  | { ok: true; content: string; toolCall?: OpenAIToolCall }
   | { ok: false; reason: "rate_limited" }
   | { ok: false; reason: "empty_response" };
 
@@ -42,6 +55,7 @@ export async function callOpenAIChat(options: OpenAIChatOptions): Promise<OpenAI
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
       ...(options.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
       ...(options.responseFormat ? { response_format: { type: options.responseFormat } } : {}),
+      ...(options.tools ? { tools: options.tools, tool_choice: "auto", parallel_tool_calls: false } : {}),
     }),
   });
 
@@ -49,8 +63,18 @@ export async function callOpenAIChat(options: OpenAIChatOptions): Promise<OpenAI
     return { ok: false, reason: "rate_limited" };
   }
 
-  const json = (await response.json()) as { choices?: { message: { content: string } }[] };
-  const content = json.choices?.[0]?.message?.content;
+  const json = (await response.json()) as {
+    choices?: {
+      message: { content: string | null; tool_calls?: { function?: { name?: string; arguments?: string } }[] };
+    }[];
+  };
+  const message = json.choices?.[0]?.message;
+  const content = message?.content;
+  // Při volání nástroje je content null — to není prázdná odpověď.
+  const toolFunction = message?.tool_calls?.[0]?.function;
+  if (toolFunction?.name) {
+    return { ok: true, content: content ?? "", toolCall: { name: toolFunction.name, arguments: toolFunction.arguments ?? "{}" } };
+  }
   if (!content) {
     console.error("OpenAI response missing content:", response.status, JSON.stringify(json));
     return { ok: false, reason: "empty_response" };

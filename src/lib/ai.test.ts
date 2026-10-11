@@ -53,12 +53,33 @@ describe("MyaAI — úspěšné volání", () => {
     expect(callable.calls).toEqual([{ name: "getDailyGreeting", payload: { profile, ...stats } }]);
   });
 
-  it("chatWithMya pošle profil a historii zpráv", async () => {
+  it("chatWithMya pošle profil, historii a recipeCards, vrátí text bez receptů", async () => {
     respond("chatWithMya", { text: "Jasně." });
     const messages = [{ role: "user" as const, content: "Kolik bílkovin?" }];
 
-    await expect(MyaAI.chatWithMya(profile, messages)).resolves.toBe("Jasně.");
-    expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages } }]);
+    await expect(MyaAI.chatWithMya(profile, messages)).resolves.toEqual({ text: "Jasně." });
+    expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages, recipeCards: true } }]);
+  });
+
+  it("chatWithMya vrátí i recepty, když je Mya navrhla jako karty", async () => {
+    const recipe = {
+      name: "Omeleta",
+      description: "",
+      ingredients: ["2 vejce"],
+      instructions: ["Usmaž"],
+      prepMinutes: 10,
+      calories: 250,
+      protein: 15,
+      fat: 18,
+      carbs: 2,
+      mealType: "breakfast",
+    };
+    respond("chatWithMya", { text: "Tady máš tyhle recepty:", recipes: [recipe] });
+
+    await expect(MyaAI.chatWithMya(profile, [{ role: "user", content: "Mám vejce" }])).resolves.toEqual({
+      text: "Tady máš tyhle recepty:",
+      recipes: [recipe],
+    });
   });
 
   it("chatWithMya pošle i kontext dne, když ho appka má", async () => {
@@ -81,8 +102,8 @@ describe("MyaAI — úspěšné volání", () => {
       recentDays: [],
     };
 
-    await expect(MyaAI.chatWithMya(profile, messages, context)).resolves.toBe("Zbývá ti 211 kcal.");
-    expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages, context } }]);
+    await expect(MyaAI.chatWithMya(profile, messages, context)).resolves.toEqual({ text: "Zbývá ti 211 kcal." });
+    expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages, recipeCards: true, context } }]);
   });
 
   it("generateWelcomeReport vrátí data ze serveru beze změny", async () => {
@@ -146,6 +167,6 @@ describe("MyaAI — selhání Cloud Function nikdy nevyhodí, vrací fallback", 
   });
 
   it("chatWithMya vrátí omluvu místo chyby", async () => {
-    await expect(MyaAI.chatWithMya(profile, [])).resolves.toBe("Mya právě neodpovídá — zkus to prosím znovu za chvíli.");
+    await expect(MyaAI.chatWithMya(profile, [])).resolves.toEqual({ text: "Mya právě neodpovídá — zkus to prosím znovu za chvíli." });
   });
 });

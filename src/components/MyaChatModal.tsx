@@ -14,10 +14,17 @@ import {
   clearChatHistory,
   subscribeWaterLog,
   subscribeWeightLogs,
+  subscribeSavedRecipes,
+  saveRecipe,
+  addShoppingListItems,
   type ChatMessageEntry,
+  type SavedRecipeEntry,
   type WeightLogEntry,
 } from "../lib/cloudSync";
 import { reportCloudError } from "../lib/cloudErrors";
+import { chatHistoryContent, isRecipeSaved, type RecipeResult } from "../lib/recipes";
+import { buildShoppingListItems } from "../lib/shoppingList";
+import { RecipeSuggestion } from "./RecipeCards";
 
 interface MyaChatModalProps {
   onClose: () => void;
@@ -73,6 +80,25 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
     return subscribeWeightLogs(user.uid, setWeightLogs);
   }, [user]);
 
+  // Karty receptů v chatu (Mya je navrhne místo textu, viz chatWithMya) — Uložené kvůli
+  // "Uloženo" u karet, které přežily zavření chatu. Rozbalená je nejvýš jedna karta naráz.
+  const [savedRecipes, setSavedRecipes] = useState<SavedRecipeEntry[]>([]);
+  useEffect(() => {
+    if (!user) return;
+    return subscribeSavedRecipes(user.uid, setSavedRecipes);
+  }, [user]);
+  const [expandedRecipeKey, setExpandedRecipeKey] = useState<string | null>(null);
+
+  const handleSaveRecipe = async (recipe: RecipeResult) => {
+    if (!user) return;
+    await saveRecipe(user.uid, recipe, "chat");
+  };
+
+  const handleAddToShoppingList = async (recipe: RecipeResult) => {
+    if (!user) return;
+    await addShoppingListItems(user.uid, buildShoppingListItems(recipe));
+  };
+
   // Posouvá dolů jen při nové poslední zprávě, ne při každé změně počtu — donačtení starších
   // zpráv nahoře by jinak uživatelku odhodilo zpátky na konec konverzace.
   const lastMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
@@ -109,9 +135,10 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
     try {
       // Historie se skládá lokálně (messages + právě odeslaná zpráva), ne z živého snapshotu —
       // ten by v tuhle chvíli ještě nemusel obsahovat zprávu, kterou appka teprve zapsala.
+      // Zpráva s kartami receptů jde Mye i se shrnutím karet (chatHistoryContent), ať ví, co navrhla.
       const history = [...messages, { role: "user" as const, content: trimmed }]
         .slice(-MAX_CHAT_HISTORY)
-        .map(({ role, content }) => ({ role, content }));
+        .map((message) => ({ role: message.role, content: chatHistoryContent(message) }));
       // chatWithMya nikdy nezreject appce zpátky (viz ai.ts) — i offline appka doběhne rychle
       // s Czech fallback textem ("Mya právě neodpovídá..."), takže finally spolehlivě proběhne.
       const effectiveProfile =
@@ -134,7 +161,7 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
             })
           : undefined;
       const reply = await MyaAI.chatWithMya(effectiveProfile, history, context);
-      saveChatMessage(user.uid, "assistant", reply);
+      saveChatMessage(user.uid, "assistant", reply.text, reply.recipes);
     } finally {
       setSending(false);
     }
@@ -210,16 +237,33 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
           )}
 
           {messages.map((m) => (
-            <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div
-                className={`max-w-[85%] px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl ${
-                  m.role === "user"
-                    ? `text-white rounded-br-sm ${isFemale ? "bg-rose-600" : "bg-sky-600"}`
-                    : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-bl-sm"
-                }`}
-              >
-                {m.content}
+            <div key={m.id} className="space-y-2">
+              <div className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div
+                  className={`max-w-[85%] px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl ${
+                    m.role === "user"
+                      ? `text-white rounded-br-sm ${isFemale ? "bg-rose-600" : "bg-sky-600"}`
+                      : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-bl-sm"
+                  }`}
+                >
+                  {m.content}
+                </div>
               </div>
+              {m.role === "assistant" &&
+                m.recipes?.map((recipe, i) => {
+                  const key = `${m.id}-${i}`;
+                  return (
+                    <RecipeSuggestion
+                      key={key}
+                      recipe={recipe}
+                      expanded={expandedRecipeKey === key}
+                      onToggleExpand={() => setExpandedRecipeKey(expandedRecipeKey === key ? null : key)}
+                      onSave={handleSaveRecipe}
+                      onAddToShoppingList={handleAddToShoppingList}
+                      alreadySaved={isRecipeSaved(recipe, savedRecipes)}
+                    />
+                  );
+                })}
             </div>
           ))}
 

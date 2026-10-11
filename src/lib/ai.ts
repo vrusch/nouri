@@ -6,6 +6,7 @@ import type { CoachingStyle } from "./coachingStyle";
 import type { YesterdayReview } from "./yesterdayReview";
 import type { NudgeKind } from "./nudges";
 import type { ChatContext } from "./chatContext";
+import { normalizeRecipeSet, type RecipeResult } from "./recipes";
 
 export interface AIResponse {
   text: string;
@@ -102,9 +103,15 @@ export interface ChatMessageInput {
   content: string;
 }
 
+/** Odpověď Myi v chatu — recipes jen když navrhla recepty (appka je ukáže jako karty). */
+export interface ChatReply {
+  text: string;
+  recipes?: RecipeResult[];
+}
+
 const chatWithMyaFn = httpsCallable<
-  { profile: UserProfile; messages: ChatMessageInput[]; context?: ChatContext },
-  { text: string }
+  { profile: UserProfile; messages: ChatMessageInput[]; recipeCards: true; context?: ChatContext },
+  { text: string; recipes?: unknown }
 >(
   functions,
   "chatWithMya"
@@ -228,14 +235,17 @@ export const MyaAI = {
    * ořezanou appkou na posledních pár zpráv (viz MyaChatModal), aby volání OpenAI
    * nerostlo do nekonečna s délkou konverzace.
    */
-  async chatWithMya(profile: UserProfile, messages: ChatMessageInput[], context?: ChatContext): Promise<string> {
+  async chatWithMya(profile: UserProfile, messages: ChatMessageInput[], context?: ChatContext): Promise<ChatReply> {
     try {
       // Kontext jen když je — bez něj (data dne ještě nedorazila) server Mye řekne, že je nevidí.
-      const response = await chatWithMyaFn({ profile, messages, ...(context ? { context } : {}) });
-      return response.data.text;
+      // recipeCards: appka umí recepty ukázat jako karty (server bez téhle změny ho ignoruje
+      // a recepty napíše textem).
+      const response = await chatWithMyaFn({ profile, messages, recipeCards: true, ...(context ? { context } : {}) });
+      const recipes = normalizeRecipeSet({ recipes: response.data.recipes });
+      return recipes ? { text: response.data.text, recipes } : { text: response.data.text };
     } catch (error) {
       console.error("Mya AI Error:", error);
-      return "Mya právě neodpovídá — zkus to prosím znovu za chvíli.";
+      return { text: "Mya právě neodpovídá — zkus to prosím znovu za chvíli." };
     }
   }
 };

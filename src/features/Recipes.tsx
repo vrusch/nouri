@@ -5,7 +5,6 @@ import {
   Sparkles,
   Camera,
   Loader2,
-  Clock,
   AlertCircle,
   RefreshCw,
   ChevronLeft,
@@ -15,11 +14,13 @@ import {
   BookMarked,
   CheckCircle2,
   Trash2,
+  Refrigerator,
+  Heart,
 } from "lucide-react";
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, computeRemainingMacros, getRecipeAvailability } from "../lib/nutrition";
-import { MyaRecipes, type RecipeResult } from "../lib/recipes";
+import { MyaRecipes, RECIPE_MEAL_TYPE_LABELS, isRecipeSaved, type RecipeResult } from "../lib/recipes";
 import { fileToCompressedDataUrl } from "../lib/image";
 import {
   addShoppingListItems,
@@ -37,6 +38,7 @@ import { getLocalDateISO } from "../lib/date";
 import { reportCloudError } from "../lib/cloudErrors";
 import EmptyState from "../components/EmptyState";
 import ShoppingListView from "../components/ShoppingListView";
+import { MacroTile, RecipeCard, RecipeSuggestion } from "../components/RecipeCards";
 
 type Status = "idle" | "photo-preview" | "loading" | "result" | "error";
 type View = "generate" | "saved" | "list";
@@ -50,7 +52,11 @@ const VIEW_OPTIONS: { id: View; label: string }[] = [
 export default function Recipes() {
   const { profile, user } = useAuth();
   const [status, setStatus] = useState<Status>("idle");
-  const [recipe, setRecipe] = useState<RecipeResult | null>(null);
+  const [recipes, setRecipes] = useState<RecipeResult[]>([]);
+  // Každé generování dostane nové číslo — karty návrhů se podle něj klíčují, takže nová sada
+  // začne s čistým stavem "Uložit"/"Do seznamu" (zámek N21 drží jen v rámci jedné sady).
+  const [generation, setGeneration] = useState(0);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
   const [recipeSource, setRecipeSource] = useState<"text" | "photo">("text");
   const [preferences, setPreferences] = useState("");
   const [availableIngredients, setAvailableIngredients] = useState("");
@@ -59,15 +65,6 @@ export default function Recipes() {
   const [view, setView] = useState<View>("generate");
   const [shoppingList, setShoppingList] = useState<ShoppingListEntry[]>([]);
   const [savedRecipes, setSavedRecipes] = useState<SavedRecipeEntry[]>([]);
-  const [addedToList, setAddedToList] = useState(false);
-  const [savedToLibrary, setSavedToLibrary] = useState(false);
-  // N21 (AUDIT_2026-08-14.md) — addedToList/savedToLibrary se nastavují až PO doběhnutí
-  // await, takže appka bez týhle ochrany neblokovala rychlé dvojťuknutí BĚHEM zápisu (obě
-  // volání by proběhla, jedno by přidalo suroviny/uložilo recept dvakrát). Appka drží zápis
-  // trvale zamčený (addedToList/savedToLibrary), ne jen na dobu zápisu — recept z generování
-  // je jednorázový, appka nemá důvod dovolit dvojí přidání téhož vygenerovaného výsledku.
-  const [savingRecipe, setSavingRecipe] = useState(false);
-  const [addingToList, setAddingToList] = useState(false);
   const [expandedSavedId, setExpandedSavedId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -89,10 +86,32 @@ export default function Recipes() {
   const target = calculateNutrition(profile);
   const remaining = computeRemainingMacros(target, todaysMeals);
   const availability = getRecipeAvailability(remaining.calories);
+  const forAnotherDay = availability !== "ready";
+
+  // Denní cíl jde s každým generováním, ať Mya porce dimenzuje podle typu jídla (lehká snídaně
+  // je menší než oběd), ne každý recept na celý zbytek dne.
+  const dailyTarget = {
+    dailyCalories: target.targetCalories,
+    dailyProtein: target.macros.protein,
+    dailyFat: target.macros.fat,
+    dailyCarbs: target.macros.carbs,
+  };
+
+  const showRecipes = (result: RecipeResult[] | null, source: "text" | "photo") => {
+    if (result) {
+      setRecipes(result);
+      setGeneration((n) => n + 1);
+      setExpandedIndex(result.length === 1 ? 0 : null);
+      setRecipeSource(source);
+      setStatus("result");
+    } else {
+      setStatus("error");
+    }
+  };
 
   const handleGenerateText = async () => {
     setStatus("loading");
-    const result = await MyaRecipes.generateRecipe({
+    const result = await MyaRecipes.generateRecipes({
       remainingCalories: remaining.calories,
       remainingProtein: remaining.protein,
       remainingFat: remaining.fat,
@@ -100,14 +119,9 @@ export default function Recipes() {
       goal: profile.goal,
       preferences: preferences.trim() || undefined,
       availableIngredients: availableIngredients.trim() || undefined,
+      ...dailyTarget,
     });
-    if (result) {
-      setRecipe(result);
-      setRecipeSource("text");
-      setStatus("result");
-    } else {
-      setStatus("error");
-    }
+    showRecipes(result, "text");
   };
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -128,7 +142,7 @@ export default function Recipes() {
   const handleGenerateFromPhoto = async () => {
     if (!photoDataUrl) return;
     setStatus("loading");
-    const result = await MyaRecipes.generateRecipeFromFridgePhoto({
+    const result = await MyaRecipes.generateRecipesFromFridgePhoto({
       imageDataUrl: photoDataUrl,
       remainingCalories: remaining.calories,
       remainingProtein: remaining.protein,
@@ -136,22 +150,16 @@ export default function Recipes() {
       remainingCarbs: remaining.carbs,
       goal: profile.goal,
       preferences: preferences.trim() || undefined,
+      ...dailyTarget,
     });
-    if (result) {
-      setRecipe(result);
-      setRecipeSource("photo");
-      setStatus("result");
-    } else {
-      setStatus("error");
-    }
+    showRecipes(result, "photo");
   };
 
   const handleReset = () => {
-    setRecipe(null);
+    setRecipes([]);
+    setExpandedIndex(null);
     setPhotoDataUrl(null);
     setPhotoError(null);
-    setAddedToList(false);
-    setSavedToLibrary(false);
     setStatus("idle");
   };
 
@@ -166,30 +174,9 @@ export default function Recipes() {
     await addShoppingListItems(user.uid, buildShoppingListItems(recipeToAdd));
   };
 
-  const handleSaveRecipe = async () => {
-    if (!user || !recipe || savingRecipe || savedToLibrary) return;
-    setSavingRecipe(true);
-    try {
-      await saveRecipe(user.uid, recipe, recipeSource);
-      setSavedToLibrary(true);
-    } catch (error) {
-      reportCloudError("Recept se nepodařilo uložit.", error);
-    } finally {
-      setSavingRecipe(false);
-    }
-  };
-
-  const handleAddCurrentToShoppingList = async () => {
-    if (!recipe || addingToList || addedToList) return;
-    setAddingToList(true);
-    try {
-      await handleAddToShoppingList(recipe);
-      setAddedToList(true);
-    } catch (error) {
-      reportCloudError("Suroviny se nepodařilo přidat do nákupního seznamu.", error);
-    } finally {
-      setAddingToList(false);
-    }
+  const handleSaveRecipe = async (recipeToSave: RecipeResult) => {
+    if (!user) return;
+    await saveRecipe(user.uid, recipeToSave, recipeSource);
   };
 
   const handleToggleItem = (item: ShoppingListEntry) => {
@@ -253,71 +240,82 @@ export default function Recipes() {
         />
       )}
 
-      {view === "generate" && availability === "over-target" && status === "idle" && (
-        <EmptyState
-          icon={<ChefHat className="w-7 h-7" />}
-          title="Dnešní cíl máš splněný"
-          text="Dnes už jsi na cíli nebo nad ním, takže by ti recept navíc do plánu neseděl. Zkus to zítra."
-        />
-      )}
-
-      {view === "generate" && availability === "too-little-remaining" && status === "idle" && (
-        <EmptyState
-          icon={<ChefHat className="w-7 h-7" />}
-          title="Zbývá už jen málo"
-          text={`Do cíle ti zbývá jen ${Math.max(0, Math.round(remaining.calories))} kcal — na plnohodnotný recept to není moc. Radši malá svačina.`}
-        />
-      )}
-
-      {view === "generate" && availability === "ready" && status === "idle" && (
+      {/* Rozhodnutí 2026-10-11: po splnění cíle (nebo při malém zbytku) appka formulář neschová —
+          Mya navrhne recepty "na jindy" s porcemi podle denního cíle, stejně jako chat. Server
+          o režimu rozhoduje sám podle zbytku dne (recipeSetBudget ve functions/src/recipes.ts). */}
+      {view === "generate" && status === "idle" && (
         <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 space-y-5 transition-colors">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center text-rose-500 dark:text-rose-400 shrink-0">
               <ChefHat className="w-6 h-6" />
             </div>
-            <div>
-              <h2 className="font-bold text-slate-800 dark:text-white">Co ti dnes ještě zbývá</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Mya navrhne recept, který se do toho vejde</p>
+            {forAnotherDay ? (
+              <div>
+                <h2 className="font-bold text-slate-800 dark:text-white">Recepty na jindy</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {availability === "over-target"
+                    ? "Dnešní cíl máš splněný, tak ti Mya navrhne tři recepty s porcemi podle denního cíle."
+                    : `Do cíle ti zbývá jen ${Math.max(0, Math.round(remaining.calories))} kcal, tak ti Mya navrhne tři recepty s porcemi podle denního cíle.`}
+                </p>
+              </div>
+            ) : (
+              <div>
+                <h2 className="font-bold text-slate-800 dark:text-white">Co ti dnes ještě zbývá</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Mya navrhne tři recepty, každý se do toho vejde</p>
+              </div>
+            )}
+          </div>
+
+          {!forAnotherDay && (
+            <div className="grid grid-cols-4 gap-2 text-center">
+              <MacroTile label="Kcal" value={Math.round(remaining.calories)} />
+              <MacroTile label="Bílkoviny" value={Math.round(remaining.protein)} unit="g" />
+              <MacroTile label="Tuky" value={Math.round(remaining.fat)} unit="g" />
+              <MacroTile label="Sacharidy" value={Math.round(remaining.carbs)} unit="g" />
             </div>
-          </div>
+          )}
 
-          <div className="grid grid-cols-4 gap-2 text-center">
-            <MacroTile label="Kcal" value={Math.round(remaining.calories)} />
-            <MacroTile label="Bílkoviny" value={Math.round(remaining.protein)} unit="g" />
-            <MacroTile label="Tuky" value={Math.round(remaining.fat)} unit="g" />
-            <MacroTile label="Sacharidy" value={Math.round(remaining.carbs)} unit="g" />
-          </div>
-
-          {remaining.hasIncompleteMacroData && (
+          {!forAnotherDay && remaining.hasIncompleteMacroData && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
               <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
               <span>Některé dnešní jídlo má zapsané jen kalorie bez maker, takže zbývající bílkoviny/tuky/sacharidy nemusí sedět úplně přesně.</span>
             </div>
           )}
 
-          <div>
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Co máš doma? (nepovinné)</label>
-            <input
-              type="text"
-              value={availableIngredients}
-              onChange={(e) => setAvailableIngredients(e.target.value)}
-              placeholder="Např. kuřecí prsa, rýže, brokolice"
-              className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
-            />
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 px-1">
-              Uveď je a Mya navrhne recept jen z toho, co máš — jinak vybere z běžně dostupných surovin.
-            </p>
-          </div>
+          {/* Zpětná vazba 2026-10-11: šedé popisky malým písmem byly na stránce přehlédnutelné —
+              pole jsou teď ve vlastním zvýrazněném bloku s ikonou a čitelným nadpisem. */}
+          <div className="bg-rose-50/70 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-900/30 rounded-2xl p-4 space-y-4">
+            <RecipeField
+              id="recipe-ingredients"
+              icon={<Refrigerator className="w-4 h-4" />}
+              title="Co máš doma?"
+              hint="Vypiš suroviny a Mya z nich vymyslí lehkou snídani, oběd i večeři. Když nic nenapíšeš, vybere z běžně dostupných."
+            >
+              <textarea
+                id="recipe-ingredients"
+                rows={2}
+                value={availableIngredients}
+                onChange={(e) => setAvailableIngredients(e.target.value)}
+                placeholder="Např. vejce, tvaroh, brambory, šunka, rajčata"
+                className="w-full resize-none bg-white dark:bg-slate-800 border border-rose-100 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm font-medium outline-rose-500 dark:text-white transition-all"
+              />
+            </RecipeField>
 
-          <div>
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Nějaké přání? (nepovinné)</label>
-            <input
-              type="text"
-              value={preferences}
-              onChange={(e) => setPreferences(e.target.value)}
-              placeholder="Např. vegetariánské, bez lepku, rychlovka do 15 minut"
-              className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
-            />
+            <RecipeField
+              id="recipe-preferences"
+              icon={<Heart className="w-4 h-4" />}
+              title="Nějaké přání?"
+              hint="Třeba jen večeře, bez lepku nebo rychlovka do 15 minut."
+            >
+              <input
+                id="recipe-preferences"
+                type="text"
+                value={preferences}
+                onChange={(e) => setPreferences(e.target.value)}
+                placeholder="Např. vegetariánské, jen večeře"
+                className="w-full bg-white dark:bg-slate-800 border border-rose-100 dark:border-slate-700 rounded-2xl px-4 py-3 text-sm font-medium outline-rose-500 dark:text-white transition-all"
+              />
+            </RecipeField>
           </div>
 
           {photoError && (
@@ -333,7 +331,7 @@ export default function Recipes() {
               className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
             >
               <Sparkles className="w-4 h-4" />
-              Navrhni mi recept
+              Navrhni mi recepty
             </button>
 
             {/* Bez capture="environment" — iPhone by jinak otevřel rovnou fotoaparát bez výběru
@@ -371,7 +369,7 @@ export default function Recipes() {
             className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
           >
             <Sparkles className="w-4 h-4" />
-            Najít recept z fotky
+            Najít recepty z fotky
           </button>
         </div>
       )}
@@ -380,8 +378,9 @@ export default function Recipes() {
         <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center gap-4 py-16 transition-colors">
           <Loader2 className="w-8 h-8 text-rose-500 animate-spin" />
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            {photoDataUrl ? "Mya kouká na lednici a hledá recept..." : "Mya vymýšlí recept..."}
+            {photoDataUrl ? "Mya kouká na lednici a vymýšlí recepty..." : "Mya vymýšlí recepty..."}
           </p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 -mt-2">Tři jídla chvilku trvají.</p>
         </div>
       )}
 
@@ -393,7 +392,7 @@ export default function Recipes() {
             text={
               photoDataUrl
                 ? "Mya na fotce nerozpoznala použitelné suroviny, nebo se něco pokazilo. Zkus jinou fotku nebo to zkus znovu."
-                : "Mye se teď nepodařilo recept vymyslet. Zkus to prosím znovu."
+                : "Mye se teď nepodařilo recepty vymyslet. Zkus to prosím znovu."
             }
           />
           <button
@@ -406,46 +405,33 @@ export default function Recipes() {
         </div>
       )}
 
-      {view === "generate" && status === "result" && recipe && (
-        <div className="space-y-4">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 shadow-sm border border-slate-100 dark:border-slate-800 transition-colors">
-            <RecipeCard recipe={recipe} />
-          </div>
+      {view === "generate" && status === "result" && recipes.length > 0 && (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-500 dark:text-slate-400 px-1">
+            {recipes.length === 1
+              ? "Mya ti navrhla recept:"
+              : `Mya ti navrhla ${recipes.length} recepty — rozklikni ten, co tě láká.`}
+            {forAnotherDay && " Ber je jako inspiraci na jindy, porce jsou podle denního cíle."}
+          </p>
 
-          <div className="flex gap-2.5">
-            <button
-              onClick={handleSaveRecipe}
-              disabled={savedToLibrary || savingRecipe}
-              className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
-                savedToLibrary
-                  ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
-                  : "bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400"
-              }`}
-            >
-              {savedToLibrary ? <CheckCircle2 className="w-4 h-4" /> : <BookMarked className="w-4 h-4" />}
-              {savedToLibrary ? "Uloženo" : "Uložit recept"}
-            </button>
-
-            <button
-              onClick={handleAddCurrentToShoppingList}
-              disabled={addedToList || addingToList}
-              className={`flex-1 flex items-center justify-center gap-2 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all ${
-                addedToList
-                  ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400"
-                  : "bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400"
-              }`}
-            >
-              {addedToList ? <CheckCircle2 className="w-4 h-4" /> : <ShoppingCart className="w-4 h-4" />}
-              {addedToList ? "Přidáno" : "Do seznamu"}
-            </button>
-          </div>
+          {recipes.map((item, i) => (
+            <RecipeSuggestion
+              key={`${generation}-${i}`}
+              recipe={item}
+              expanded={expandedIndex === i}
+              onToggleExpand={() => setExpandedIndex(expandedIndex === i ? null : i)}
+              onSave={handleSaveRecipe}
+              onAddToShoppingList={handleAddToShoppingList}
+              alreadySaved={isRecipeSaved(item, savedRecipes)}
+            />
+          ))}
 
           <button
             onClick={handleReset}
             className="w-full flex items-center justify-center gap-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 py-3.5 rounded-2xl font-bold active:scale-[0.98] transition-all"
           >
             <RefreshCw className="w-4 h-4" />
-            Zkusit jiný recept
+            Zkusit jiné recepty
           </button>
         </div>
       )}
@@ -453,69 +439,32 @@ export default function Recipes() {
   );
 }
 
-function RecipeCard({ recipe }: { recipe: RecipeResult }) {
+function RecipeField({
+  id,
+  icon,
+  title,
+  hint,
+  children,
+}: {
+  id: string;
+  icon: React.ReactNode;
+  title: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="font-bold text-lg text-slate-800 dark:text-white">{recipe.name}</h2>
-        {recipe.description && (
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">{recipe.description}</p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 dark:text-slate-500">
-        <Clock className="w-3.5 h-3.5" />
-        {recipe.prepMinutes} min
-      </div>
-
-      <div className="grid grid-cols-4 gap-2 text-center">
-        <MacroTile label="Kcal" value={recipe.calories} />
-        <MacroTile label="Bílkoviny" value={recipe.protein} unit="g" />
-        <MacroTile label="Tuky" value={recipe.fat} unit="g" />
-        <MacroTile label="Sacharidy" value={recipe.carbs} unit="g" />
-      </div>
-
-      {recipe.ingredients.length > 0 && (
-        <div>
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Suroviny</h3>
-          <ul className="space-y-1.5">
-            {recipe.ingredients.map((item, i) => (
-              <li key={i} className="text-sm text-slate-700 dark:text-slate-300 flex gap-2">
-                <span className="text-rose-400">•</span>
-                {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {recipe.instructions.length > 0 && (
-        <div>
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Postup</h3>
-          <ol className="space-y-2">
-            {recipe.instructions.map((step, i) => (
-              <li key={i} className="text-sm text-slate-700 dark:text-slate-300 flex gap-3">
-                <span className="shrink-0 w-5 h-5 rounded-full bg-rose-50 dark:bg-rose-900/30 text-rose-500 dark:text-rose-400 text-xs font-bold flex items-center justify-center">
-                  {i + 1}
-                </span>
-                {step}
-              </li>
-            ))}
-          </ol>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MacroTile({ label, value, unit }: { label: string; value: number; unit?: string }) {
-  return (
-    <div className="bg-slate-50 dark:bg-slate-800/50 rounded-2xl py-2.5">
-      <div className="text-sm font-extrabold text-slate-800 dark:text-slate-100">
-        {value}
-        {unit && <span className="text-[10px] font-bold text-slate-400 ml-0.5">{unit}</span>}
-      </div>
-      <div className="text-[9px] uppercase font-bold text-slate-400 dark:text-slate-500 tracking-wider mt-0.5">{label}</div>
+    <div className="space-y-2">
+      <label htmlFor={id} className="flex items-center gap-2.5">
+        <span className="w-8 h-8 rounded-xl bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+          {icon}
+        </span>
+        <span className="font-bold text-slate-800 dark:text-white">{title}</span>
+        <span className="ml-auto text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+          nepovinné
+        </span>
+      </label>
+      {children}
+      <p className="text-xs text-slate-500 dark:text-slate-400 px-1 leading-relaxed">{hint}</p>
     </div>
   );
 }
@@ -606,6 +555,7 @@ function SavedRecipesView({
               <div className="min-w-0">
                 <h3 className="font-bold text-slate-800 dark:text-white truncate">{entry.name}</h3>
                 <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
+                  {entry.mealType && `${RECIPE_MEAL_TYPE_LABELS[entry.mealType]} · `}
                   {entry.calories} kcal · {entry.prepMinutes} min
                 </p>
               </div>

@@ -503,7 +503,7 @@ export async function removeShoppingListItem(uid: string, itemId: string): Promi
 export interface SavedRecipeEntry extends RecipeResult {
   id: string;
   savedAt: string;
-  source: "text" | "photo";
+  source: "text" | "photo" | "chat"; // "chat" = karta receptu z chatu s Myou
 }
 
 // Jednorázové načtení pro JSON export (B6) — stejný vzor jako fetchShoppingList výš.
@@ -532,7 +532,7 @@ export function subscribeSavedRecipes(
   );
 }
 
-export async function saveRecipe(uid: string, recipe: RecipeResult, source: "text" | "photo"): Promise<void> {
+export async function saveRecipe(uid: string, recipe: RecipeResult, source: SavedRecipeEntry["source"]): Promise<void> {
   const entry: Omit<SavedRecipeEntry, "id"> = { ...recipe, source, savedAt: new Date().toISOString() };
   await setDoc(doc(savedRecipesCollection(uid)), entry);
 }
@@ -668,6 +668,9 @@ export interface ChatMessageEntry {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  // Recepty, které Mya navrhla jako karty (content je pak jen úvodní věta). Chybí u běžných
+  // zpráv i u všech zpráv ze starších verzí appky.
+  recipes?: RecipeResult[];
 }
 
 // Jednorázové načtení pro JSON export (B6) — stejný vzor jako fetchShoppingList výš.
@@ -699,8 +702,19 @@ export function subscribeChatMessages(
   );
 }
 
-export async function saveChatMessage(uid: string, role: "user" | "assistant", content: string): Promise<void> {
-  const entry: Omit<ChatMessageEntry, "id"> = { role, content, createdAt: new Date().toISOString() };
+export async function saveChatMessage(
+  uid: string,
+  role: "user" | "assistant",
+  content: string,
+  recipes?: RecipeResult[]
+): Promise<void> {
+  // Klíč recipes jen když recepty jsou — Firestore undefined odmítá.
+  const entry: Omit<ChatMessageEntry, "id"> = {
+    role,
+    content,
+    createdAt: new Date().toISOString(),
+    ...(recipes && recipes.length > 0 ? { recipes } : {}),
+  };
   try {
     await setDoc(doc(chatMessagesCollection(uid)), entry);
   } catch (error) {
