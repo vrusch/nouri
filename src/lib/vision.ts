@@ -4,6 +4,9 @@ import { functions } from "./firebase";
 export type MealType = "breakfast" | "lunch" | "dinner" | "snack";
 export type Confidence = "low" | "medium" | "high";
 
+// Fotek jednoho jídla najednou — stejný limit hlídá i server (functions/src/visionInput.ts).
+export const MAX_FOOD_PHOTOS = 3;
+
 export interface VisionResult {
   name: string;
   calories: number;
@@ -25,7 +28,10 @@ export interface TextMealEstimate {
   confidence: Confidence;
 }
 
-const analyzeFoodFn = httpsCallable<{ imageDataUrl: string; hint?: string }, VisionResult | null>(functions, "analyzeFood");
+const analyzeFoodFn = httpsCallable<
+  { imageDataUrl: string; imageDataUrls: string[]; hint?: string },
+  VisionResult | null
+>(functions, "analyzeFood");
 const analyzeFoodTextFn = httpsCallable<{ description: string }, VisionResult | null>(functions, "analyzeFoodText");
 const analyzeMealsTextFn = httpsCallable<
   { description: string; multi: true },
@@ -34,14 +40,16 @@ const analyzeMealsTextFn = httpsCallable<
 
 export const MyaVision = {
   /**
-   * Rozpozná jídlo z fotky přes server-side Cloud Function (OpenAI klíč zůstává na serveru).
-   * Volitelný `hint` je doplňující upřesnění od uživatele k nejisté fotce (viz interaktivní
-   * doptání v AddMealModal), appka jím vyžádá re-analýzu se stejnou fotkou.
+   * Rozpozná jídlo z 1–3 fotek téhož jídla přes server-side Cloud Function (OpenAI klíč zůstává
+   * na serveru). Volitelný `hint` je doplňující upřesnění od uživatele k nejisté fotce (viz
+   * interaktivní doptání v AddMealModal), appka jím vyžádá re-analýzu se stejnými fotkami.
+   * `imageDataUrl` (první fotka) jde navíc kvůli starší verzi funkce, která víc fotek nezná —
+   * ta pak vyhodnotí aspoň první místo chyby.
    * Vrací null při chybě — volající strana musí v tom případě nabídnout manuální zápis.
    */
-  async analyzeFood(imageDataUrl: string, hint?: string): Promise<VisionResult | null> {
+  async analyzeFood(imageDataUrls: string[], hint?: string): Promise<VisionResult | null> {
     try {
-      const response = await analyzeFoodFn({ imageDataUrl, hint });
+      const response = await analyzeFoodFn({ imageDataUrl: imageDataUrls[0], imageDataUrls, hint });
       return response.data;
     } catch (error) {
       console.error("Mya Vision Error:", error);

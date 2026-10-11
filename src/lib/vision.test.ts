@@ -26,12 +26,16 @@ beforeEach(() => {
 });
 
 describe("MyaVision", () => {
-  it("analyzeFood pošle fotku i upřesnění od uživatelky", async () => {
+  it("analyzeFood pošle všechny fotky (první i zvlášť kvůli starší funkci) a upřesnění", async () => {
     callable.results.set("analyzeFood", () => Promise.resolve({ data: estimate }));
 
-    await expect(MyaVision.analyzeFood("data:image/jpeg;base64,xx", "bez oleje")).resolves.toEqual(estimate);
+    const photos = ["data:image/jpeg;base64,xx", "data:image/jpeg;base64,yy"];
+    await expect(MyaVision.analyzeFood(photos, "bez oleje")).resolves.toEqual(estimate);
     expect(callable.calls).toEqual([
-      { name: "analyzeFood", payload: { imageDataUrl: "data:image/jpeg;base64,xx", hint: "bez oleje" } },
+      {
+        name: "analyzeFood",
+        payload: { imageDataUrl: "data:image/jpeg;base64,xx", imageDataUrls: photos, hint: "bez oleje" },
+      },
     ]);
   });
 
@@ -71,7 +75,7 @@ describe("MyaVision", () => {
   });
 
   it("při selhání vrátí null, nevyhodí", async () => {
-    await expect(MyaVision.analyzeFood("x")).resolves.toBeNull();
+    await expect(MyaVision.analyzeFood(["x"])).resolves.toBeNull();
     await expect(MyaVision.analyzeFoodText("x")).resolves.toBeNull();
     await expect(MyaVision.analyzeMealsFromText("x")).resolves.toBeNull();
   });

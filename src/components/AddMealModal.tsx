@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2, ClipboardList, ListPlus } from "lucide-react";
+import { X, Camera, PenLine, Mic, Square, Loader2, ChevronLeft, AlertCircle, CheckCircle2, Trash2, ClipboardList, ListPlus, ImagePlus } from "lucide-react";
 import { type AddMealAction } from "./BottomNav";
 import { db, type MealItem, type MealIngredient } from "../db/db";
-import { MyaVision, type VisionResult, type MealType, type Confidence, type TextMealEstimate } from "../lib/vision";
+import { MyaVision, MAX_FOOD_PHOTOS, type VisionResult, type MealType, type Confidence, type TextMealEstimate } from "../lib/vision";
 import { guessMealTypeForHour, MEAL_TIME_BY_TYPE, planMealTypeAndTime } from "../lib/mealReminder";
 import { MyaVoice } from "../lib/voice";
 import { MyaAI } from "../lib/ai";
@@ -123,7 +123,8 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   const { profile, user } = useAuth();
   const isEditing = editMeal !== undefined;
   const [step, setStep] = useState<Step>(editMeal ? "form" : "choose");
-  const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
+  // 1–MAX_FOOD_PHOTOS fotek jednoho jídla (jiný úhel, detail, etiketa) pro přesnější odhad.
+  const [photoDataUrls, setPhotoDataUrls] = useState<string[]>([]);
   const [description, setDescription] = useState("");
   const [source, setSource] = useState<"photo" | "manual">(editMeal?.source ?? "manual");
   const [notice, setNotice] = useState<string | null>(null);
@@ -279,34 +280,54 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     return name !== last.name || calories !== last.calories || protein !== last.protein || fat !== last.fat || carbs !== last.carbs;
   };
 
+  // První výběr (z "choose") otevře náhled, další přidávají fotky ke stejnému jídlu.
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!file) return;
-    try {
-      const dataUrl = await fileToCompressedDataUrl(file);
-      setPhotoDataUrl(dataUrl);
+    if (files.length === 0) return;
+    const isFirst = photoDataUrls.length === 0;
+    const accepted = files.slice(0, MAX_FOOD_PHOTOS - photoDataUrls.length);
+    const results = await Promise.allSettled(accepted.map((file) => fileToCompressedDataUrl(file)));
+    const loaded = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    results.forEach((r) => r.status === "rejected" && console.error(r.reason));
+    if (loaded.length === 0) {
+      setNotice("Fotku se nepodařilo načíst. Zkus to znovu nebo zapiš jídlo ručně.");
+      return;
+    }
+    setPhotoDataUrls((prev) => [...prev, ...loaded].slice(0, MAX_FOOD_PHOTOS));
+    setNotice(
+      loaded.length < accepted.length
+        ? "Některou fotku se nepodařilo načíst."
+        : files.length > accepted.length
+          ? `K jednomu jídlu jdou nejvýš ${MAX_FOOD_PHOTOS} fotky — ty navíc se nepřidaly.`
+          : null
+    );
+    if (isFirst) {
       setSource("photo");
       setEatingOut(false);
       setHintText("");
       setStep("photo-preview");
-    } catch (error) {
-      console.error(error);
-      setNotice("Fotku se nepodařilo načíst. Zkus to znovu nebo zapiš jídlo ručně.");
     }
   };
 
+  const handleRemovePhoto = (index: number) => {
+    setPhotoDataUrls((prev) => prev.filter((_, i) => i !== index));
+    setNotice(null);
+  };
+
   const handleAnalyze = async () => {
-    if (!photoDataUrl) return;
-    setAnalyzingMessage("Mya kouká na fotku a počítá kalorie...");
+    if (photoDataUrls.length === 0) return;
+    setAnalyzingMessage(
+      photoDataUrls.length > 1 ? "Mya kouká na fotky a počítá kalorie..." : "Mya kouká na fotku a počítá kalorie..."
+    );
     setStep("analyzing");
-    const result = await MyaVision.analyzeFood(photoDataUrl);
+    const result = await MyaVision.analyzeFood(photoDataUrls);
     resetFormFromVision(result, "Mya se nepodařilo rozpoznat jídlo z fotky. Zapiš prosím hodnoty ručně.");
     setStep("form");
   };
 
   const handleRefineWithHint = async () => {
-    if (!photoDataUrl || !hintText.trim()) return;
+    if (photoDataUrls.length === 0 || !hintText.trim()) return;
     // N24 — jednou ozbrojené potvrzení appka drží jen 4s (stejný vzor jako handleDeleteMeal),
     // ať appka po delší odmlce nepřepíše formulář na starý, dávno neaktuální souhlas.
     if (formEditedSinceLastAiAnalysis() && !confirmRefineOverwrite) {
@@ -317,7 +338,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     setConfirmRefineOverwrite(false);
     setAnalyzingMessage("Mya upřesňuje odhad...");
     setStep("analyzing");
-    const result = await MyaVision.analyzeFood(photoDataUrl, hintText.trim());
+    const result = await MyaVision.analyzeFood(photoDataUrls, hintText.trim());
     resetFormFromVision(result, "Mya se nepodařilo rozpoznat jídlo z fotky. Zapiš prosím hodnoty ručně.");
     setHintText("");
     setStep("form");
@@ -325,7 +346,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
 
   const handleDescribeStart = () => {
     setSource("manual");
-    setPhotoDataUrl(null);
+    setPhotoDataUrls([]);
     setDescription("");
     setNotice(null);
     setEatingOut(false);
@@ -437,7 +458,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
       mediaRecorderRef.current = recorder;
       recorder.start();
       setSource("manual");
-      setPhotoDataUrl(null);
+      setPhotoDataUrls([]);
       setStep("recording");
     } catch (error) {
       console.error(error);
@@ -462,7 +483,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
 
   const handleManualStart = () => {
     setSource("manual");
-    setPhotoDataUrl(null);
+    setPhotoDataUrls([]);
     setName("");
     setCalories("");
     setProtein("");
@@ -484,7 +505,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
 
   const handleQuickRelog = (meal: RecentMealSummary) => {
     setSource("manual");
-    setPhotoDataUrl(null);
+    setPhotoDataUrls([]);
     setName(meal.name);
     setCalories(String(meal.value));
     setProtein(meal.protein !== undefined ? String(meal.protein) : "");
@@ -558,7 +579,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   const handleBack = () => {
     stopRecordingWithoutTranscription();
     setStep("choose");
-    setPhotoDataUrl(null);
+    setPhotoDataUrls([]);
     setDescription("");
     setNotice(null);
     setEatingOut(false);
@@ -783,7 +804,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
             )}
             <h2 className="font-bold text-slate-800 dark:text-white">
               {step === "choose" && "Přidat jídlo"}
-              {step === "photo-preview" && "Zkontroluj fotku"}
+              {step === "photo-preview" && (photoDataUrls.length > 1 ? "Zkontroluj fotky" : "Zkontroluj fotku")}
               {step === "describe" && "Popiš jídlo"}
               {step === "recording" && "Nahrávám..."}
               {step === "analyzing" && "Mya analyzuje..."}
@@ -800,17 +821,20 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
 
         {/* OBSAH */}
         <div className="flex-1 overflow-y-auto p-5">
+          {/* Záměrně bez capture="environment" — s ním iPhone otevře rovnou fotoaparát a výběr
+              z galerie vůbec nenabídne. Bez něj iOS ukáže volbu Vyfotit / Knihovna fotografií.
+              Mimo krok "choose", ať na něj dosáhne i "Přidat další fotku" v náhledu. */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={handleFileSelected}
+          />
+
           {step === "choose" && (
             <div className="space-y-3 py-4">
-              {/* Záměrně bez capture="environment" — s ním iPhone otevře rovnou fotoaparát a výběr
-                  z galerie vůbec nenabídne. Bez něj iOS ukáže volbu Vyfotit / Knihovna fotografií. */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleFileSelected}
-              />
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="w-full flex flex-col items-center gap-3 py-8 bg-rose-50 dark:bg-rose-900/20 rounded-3xl border-2 border-dashed border-rose-200 dark:border-rose-900/50 active:scale-[0.98] transition-all"
@@ -931,9 +955,44 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
             </div>
           )}
 
-          {step === "photo-preview" && photoDataUrl && (
+          {step === "photo-preview" && photoDataUrls.length > 0 && (
             <div className="space-y-4">
-              <img src={photoDataUrl} alt="Fotka jídla" className="w-full aspect-square object-cover rounded-3xl" />
+              {photoDataUrls.length === 1 ? (
+                <img src={photoDataUrls[0]} alt="Fotka jídla" className="w-full aspect-square object-cover rounded-3xl" />
+              ) : (
+                <div className={`grid gap-2 ${photoDataUrls.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
+                  {photoDataUrls.map((url, i) => (
+                    <div key={i} className="relative">
+                      <img src={url} alt={`Fotka jídla ${i + 1}`} className="w-full aspect-square object-cover rounded-2xl" />
+                      <button
+                        onClick={() => handleRemovePhoto(i)}
+                        aria-label={`Odebrat fotku ${i + 1}`}
+                        className="absolute top-1.5 right-1.5 w-7 h-7 rounded-full bg-black/50 text-white flex items-center justify-center active:scale-90 transition-all"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {photoDataUrls.length < MAX_FOOD_PHOTOS && (
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full flex flex-col items-center gap-0.5 py-3 rounded-2xl border-2 border-dashed border-rose-200 dark:border-rose-900/50 active:scale-[0.98] transition-all"
+                >
+                  <span className="flex items-center gap-2 text-sm font-bold text-rose-600 dark:text-rose-400">
+                    <ImagePlus className="w-4 h-4" />
+                    Přidat další fotku ({photoDataUrls.length}/{MAX_FOOD_PHOTOS})
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Jiný úhel, detail nebo etiketa zpřesní odhad</span>
+                </button>
+              )}
+              {notice && (
+                <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{notice}</span>
+                </div>
+              )}
               <button
                 onClick={handleAnalyze}
                 className="w-full bg-rose-600 text-white py-4 rounded-2xl font-bold shadow-lg shadow-rose-500/20 active:scale-[0.98] transition-all"
@@ -1008,7 +1067,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
                     <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
                     <span>{notice}</span>
                   </div>
-                  {source === "photo" && photoDataUrl && lastConfidence === "low" && (
+                  {source === "photo" && photoDataUrls.length > 0 && lastConfidence === "low" && (
                     <div className="flex items-center gap-2 pt-1">
                       <input
                         type="text"
@@ -1031,15 +1090,19 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
                 </div>
               )}
 
-              {photoDataUrl && (
-                <img src={photoDataUrl} alt="Fotka jídla" className="w-full h-32 object-cover rounded-2xl" />
+              {photoDataUrls.length > 0 && (
+                <div className="flex gap-2">
+                  {photoDataUrls.map((url, i) => (
+                    <img key={i} src={url} alt={`Fotka jídla ${i + 1}`} className="flex-1 min-w-0 h-32 object-cover rounded-2xl" />
+                  ))}
+                </div>
               )}
 
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Název</label>
                 <input
                   type="text"
-                  autoFocus={!photoDataUrl}
+                  autoFocus={photoDataUrls.length === 0}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Např. Kuřecí salát"

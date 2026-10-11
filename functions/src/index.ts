@@ -9,6 +9,7 @@ import { describeIntakeStatusCs, INTAKE_STATUS_RULE } from "./dayStatus.js";
 import { parseChatContext, formatChatContextCs } from "./chatContext.js";
 import { sanitizePromptText } from "./promptText.js";
 import { MULTI_MEAL_SYSTEM_PROMPT, parseMealsFromText } from "./mealText.js";
+import { parseFoodImages } from "./visionInput.js";
 
 // Fáze C (REFERENCE/STRICT_COACHING_SPEC.md) — push připomínky jídla a vody, viz pushNudges.ts.
 export { sendNudgePushes, sendTestPush } from "./pushNudges.js";
@@ -304,15 +305,21 @@ export const analyzeFood = onCall(
   { secrets: [openaiApiKey], region: "us-central1", memory: "512MiB", timeoutSeconds: 60 },
   async (request) => {
     requireAuth(request);
-    const imageDataUrl = request.data?.imageDataUrl as string | undefined;
+    // 1–3 fotky jednoho jídla (viz visionInput.ts), starší klient posílá jen jednu.
+    const imageDataUrls = parseFoodImages(request.data);
     const hint = sanitizePromptText(request.data?.hint, 300);
-    if (!imageDataUrl || !imageDataUrl.startsWith("data:image/")) {
+    if (!imageDataUrls) {
       throw new HttpsError("invalid-argument", "Chybí platný obrázek.");
     }
     await enforceRateLimit(request.auth!.uid, "analyzeFood", EXPENSIVE_AI_CALL_MAX, EXPENSIVE_AI_CALL_WINDOW_MS);
 
-    const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti pošle fotku jídla.
+    const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti pošle jednu nebo víc fotek (nejvýš 3) JEDNOHO jídla.
 Tvým úkolem je identifikovat jídlo a odhadnout jeho nutriční hodnoty pro porci na fotce.
+
+Víc fotek = pořád jedna porce jednoho jídla, jen pro přesnější rozpoznání (jiný úhel, detail, obal nebo etiketa):
+- co je vidět na víc fotkách, započítej jen jednou
+- součást, která je jen na jedné fotce (příloha, omáčka, nápoj), k jídlu přičti
+- když je vidět etiketa s nutričními hodnotami, vycházej z ní, ale velikost porce odhadni podle fotek
 
 Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný markdown, žádný text okolo):
 {
@@ -342,7 +349,7 @@ Pokud na fotce není rozpoznatelné jídlo, vrať confidence "low", name "Nezná
                   ? `Analyzuj toto jídlo. Doplňující upřesnění od uživatele: ${hint}`
                   : "Analyzuj toto jídlo.",
               },
-              { type: "image_url", image_url: { url: imageDataUrl } },
+              ...imageDataUrls.map((url) => ({ type: "image_url", image_url: { url } })),
             ],
           },
         ],
