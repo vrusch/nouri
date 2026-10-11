@@ -2,6 +2,19 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.24.0] - 2026-10-11
+### Přidáno
+- **Tři recepty místo jednoho**: Recepty (z popisu i z fotky lednice) navrhnou až 3 různé recepty, standardně lehkou snídani, oběd a večeři z toho, co je doma. Když uživatelka v přání napíše „jen večeře“, dostane 3 varianty večeře. Porce odpovídá typu jídla (podíl denního cíle) a nikdy nepřesáhne, co dnes zbývá. Každý recept je sbalená karta s typem jídla, kcal, bílkovinami a časem; po rozkliknutí je celý recept s vlastním „Uložit recept“ a „Do seznamu“.
+- **Recepty v chatu s Myou jako karty**: na dotaz na recept nebo výčet surovin odpoví Mya v chatu stejnými kartami jako záložka Recepty. Jdou uložit i poslat do nákupního seznamu, zůstávají v historii chatu a Mya ví, co navrhla, takže zvládne i „a ten oběd bez šunky?“. Uložený recept ukáže „Uloženo“ i po zavření chatu. Starší verze appky dostane recepty dál jako text.
+
+### Změněno
+- **Výraznější pole v Receptech**: „Co máš doma?“ a „Nějaké přání?“ jsou ve vlastním zvýrazněném bloku s ikonou a čitelným nadpisem, pole na suroviny je větší.
+- **Recepty i po splnění cíle**: záložka Recepty už formulář neschová. Když dnes zbývá méně než 200 kcal, Mya navrhne recepty „na jindy“ s porcemi podle denního cíle, stejně jako chat.
+- **firebase-functions 7.4.0** v Cloud Functions.
+
+### Opraveno
+- **Chat se mohl po dlouhé odpovědi zaseknout**: odpověď Myi delší než 2000 znaků (třeba s recepty) server v historii odmítl a každá další zpráva končila „Mya právě neodpovídá“. Odpovědi Myi mají teď vyšší limit a delší se jen zkrátí.
+
 ## [0.23.0] - 2026-10-11
 ### Přidáno
 - **Gramáž složek u jídla z fotky**: Mya na fotce pozná, co na talíři je (brambory, šunka, sýr), ale gramy jednotlivých složek z fotky odhadne nepřesně. Teď jídlo rozloží na složky s odhadem gramů a předvyplní je jako ingredience. Když uživatelka ví, kolik čeho bylo, může gramy přepsat přímo v řádku a kalorie i makra se hned přepočítají, bez dalšího čekání na Myu. Je to nepovinné: bez úprav se uloží odhad jako dřív. Gramy platí pro hotové jídlo na talíři (rýže a těstoviny uvařené).

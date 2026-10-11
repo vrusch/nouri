@@ -10,6 +10,14 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.24.0",
+    items: [
+      "Mya ti teď navrhne tři recepty najednou – lehkou snídani, oběd a večeři z toho, co máš doma. Chceš jen večeři? Napiš to do přání.",
+      "Když se Myi zeptáš na recept v chatu, ukáže ti ho jako kartu, kterou si můžeš uložit nebo poslat do nákupního seznamu.",
+      "Recepty fungují i po splnění denního cíle – Mya ti je navrhne na jindy.",
+    ],
+  },
+  {
     version: "0.23.0",
     items: [
       "U jídla z fotky ti Mya ukáže, z čeho se skládá a kolik čeho odhadla. Když víš přesné gramy, přepiš je a kalorie se hned přepočítají.",
