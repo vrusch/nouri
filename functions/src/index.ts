@@ -10,6 +10,7 @@ import { parseChatContext, formatChatContextCs } from "./chatContext.js";
 import { sanitizePromptText } from "./promptText.js";
 import { MULTI_MEAL_SYSTEM_PROMPT, parseMealsFromText } from "./mealText.js";
 import { parseFoodImages } from "./visionInput.js";
+import { FOOD_PHOTO_SYSTEM_PROMPT, parseFoodPhotoResult } from "./foodPhoto.js";
 
 // Fáze C (REFERENCE/STRICT_COACHING_SPEC.md) — push připomínky jídla a vody, viz pushNudges.ts.
 export { sendNudgePushes, sendTestPush } from "./pushNudges.js";
@@ -313,33 +314,13 @@ export const analyzeFood = onCall(
     }
     await enforceRateLimit(request.auth!.uid, "analyzeFood", EXPENSIVE_AI_CALL_MAX, EXPENSIVE_AI_CALL_WINDOW_MS);
 
-    const systemPrompt = `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatel ti pošle jednu nebo víc fotek (nejvýš 3) JEDNOHO jídla.
-Tvým úkolem je identifikovat jídlo a odhadnout jeho nutriční hodnoty pro porci na fotce.
-
-Víc fotek = pořád jedna porce jednoho jídla, jen pro přesnější rozpoznání (jiný úhel, detail, obal nebo etiketa):
-- co je vidět na víc fotkách, započítej jen jednou
-- součást, která je jen na jedné fotce (příloha, omáčka, nápoj), k jídlu přičti
-- když je vidět etiketa s nutričními hodnotami, vycházej z ní, ale velikost porce odhadni podle fotek
-
-Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný markdown, žádný text okolo):
-{
-  "name": "krátký český název jídla",
-  "calories": číslo (celkové kalorie porce na fotce),
-  "protein": číslo (bílkoviny v gramech),
-  "fat": číslo (tuky v gramech),
-  "carbs": číslo (sacharidy v gramech),
-  "type": "breakfast" | "lunch" | "dinner" | "snack" (odhad podle charakteru jídla),
-  "confidence": "low" | "medium" | "high" (jak jistá si jsi odhadem)
-}
-
-Pokud na fotce není rozpoznatelné jídlo, vrať confidence "low", name "Neznámé jídlo" a nulové hodnoty.`;
-
     try {
       const result = await callOpenAIChat({
         apiKey: openaiApiKey.value(),
         model: "gpt-4o",
         messages: [
-          { role: "system", content: systemPrompt },
+          // Prompt i parsování odpovědi (včetně složek s gramáží) viz foodPhoto.ts.
+          { role: "system", content: FOOD_PHOTO_SYSTEM_PROMPT },
           {
             role: "user",
             content: [
@@ -355,22 +336,13 @@ Pokud na fotce není rozpoznatelné jídlo, vrať confidence "low", name "Nezná
         ],
         responseFormat: "json_object",
         temperature: 0.3,
-        maxTokens: 300,
+        // Se složkami (až 8× název, gramy a makra) by 300 uřízlo JSON uprostřed.
+        maxTokens: 700,
       });
 
       if (!result.ok) throw new Error(result.reason === "rate_limited" ? "Rate limit exceeded" : "Invalid AI response");
 
-      const parsed = JSON.parse(result.content);
-
-      return {
-        name: typeof parsed.name === "string" && parsed.name.trim() ? parsed.name.trim() : "Neznámé jídlo",
-        calories: Math.max(0, Math.round(Number(parsed.calories) || 0)),
-        protein: Math.max(0, Math.round(Number(parsed.protein) || 0)),
-        fat: Math.max(0, Math.round(Number(parsed.fat) || 0)),
-        carbs: Math.max(0, Math.round(Number(parsed.carbs) || 0)),
-        type: MEAL_TYPES.includes(parsed.type) ? parsed.type : "snack",
-        confidence: CONFIDENCE_LEVELS.includes(parsed.confidence) ? parsed.confidence : "low",
-      };
+      return parseFoodPhotoResult(JSON.parse(result.content));
     } catch (error) {
       console.error("Mya Vision Error:", error);
       return null;

@@ -7,6 +7,16 @@ export type Confidence = "low" | "medium" | "high";
 // Fotek jednoho jídla najednou — stejný limit hlídá i server (functions/src/visionInput.ts).
 export const MAX_FOOD_PHOTOS = 3;
 
+/** Složka jídla z fotky s odhadem gramáže (viz functions/src/foodPhoto.ts). */
+export interface FoodComponent {
+  name: string;
+  grams: number;
+  calories: number;
+  protein: number;
+  fat: number;
+  carbs: number;
+}
+
 export interface VisionResult {
   name: string;
   calories: number;
@@ -15,6 +25,9 @@ export interface VisionResult {
   carbs: number;
   type: MealType;
   confidence: Confidence;
+  // Jen u fotky a jen z nové verze analyzeFood — starší server pole nevrací a appka pak ukáže
+  // jen souhrn jako dřív. Souhrn nahoře je vždy součtem složek.
+  components?: FoodComponent[];
 }
 
 /** Jedno jídlo z popisu/diktátu s víc jídly (viz functions/src/mealText.ts). */

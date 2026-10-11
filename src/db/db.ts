@@ -8,6 +8,9 @@ export interface MealIngredient {
   protein?: number; // g
   fat?: number; // g
   carbs?: number; // g
+  // Hmotnost ingredience (odhad Myi z fotky nebo zadaná uživatelkou). Kalorie a makra se při
+  // změně gramů přepočítají poměrem (scaleIngredientToGrams). Bez gramů jen pevné hodnoty.
+  grams?: number;
 }
 
 export interface MealItem {

@@ -9,7 +9,7 @@ import { MyaVoice } from "../lib/voice";
 import { MyaAI } from "../lib/ai";
 import { backupMeal, deleteMeal, subscribeMealTemplates, deleteMealTemplate, type MealTemplateEntry } from "../lib/cloudSync";
 import { calculateNutrition } from "../lib/nutrition";
-import { computeIngredientsTotals } from "../lib/mealComponents";
+import { computeIngredientsTotals, ingredientsFromComponents, sameIngredients, scaleIngredientToGrams } from "../lib/mealComponents";
 import { getLocalDateISO } from "../lib/date";
 import { reportCloudError } from "../lib/cloudErrors";
 import { resolveCoachingStyle } from "../lib/coachingStyle";
@@ -71,13 +71,18 @@ const MEAL_TYPE_OPTIONS: { id: MealType; label: string }[] = [
 interface IngredientRow {
   key: number;
   item: MealIngredient;
+  // Gramy přepsané přímo v řádku přepočítávají `item` vždy z `base` (hodnoty před úpravou),
+  // ne z mezistavu při psaní — viz scaleIngredientToGrams. `gramsInput` je text v poli.
+  base: MealIngredient;
+  gramsInput: string;
 }
 
 let nextIngredientKey = 0;
 
 function toIngredientRows(items: MealIngredient[]): IngredientRow[] {
-  return items.map((item) => ({ key: nextIngredientKey++, item }));
+  return items.map((item) => ({ key: nextIngredientKey++, item, base: item, gramsInput: item.grams ? String(item.grams) : "" }));
 }
+
 
 function guessMealType(): MealType {
   return guessMealTypeForHour(new Date().getHours());
@@ -138,6 +143,9 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   // označené jako hrubý odhad.
   const [eatingOut, setEatingOut] = useState(editMeal?.roughEstimate ?? false);
   const [hintText, setHintText] = useState("");
+  // Nepovinná gramáž před analýzou fotky ("200 g brambor, 50 g šunky") — jde do analyzeFood jako
+  // upřesnění, Mya ji u těch složek bere jako přesnou. Posílá se i s každým dalším "Upřesnit".
+  const [amountsNote, setAmountsNote] = useState("");
   const [confirmRefineOverwrite, setConfirmRefineOverwrite] = useState(false);
   const [lastConfidence, setLastConfidence] = useState<Confidence | null>(null);
   const [templates, setTemplates] = useState<MealTemplateEntry[]>([]);
@@ -169,6 +177,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   const [ingredientProtein, setIngredientProtein] = useState("");
   const [ingredientFat, setIngredientFat] = useState("");
   const [ingredientCarbs, setIngredientCarbs] = useState("");
+  const [ingredientGrams, setIngredientGrams] = useState("");
 
   const hasIngredients = ingredients.length > 0;
   const ingredientsTotals = computeIngredientsTotals(ingredients);
@@ -221,16 +230,25 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
   // jestli je uživatelka od posledního rozpoznání ručně upravila přímo v poli — "Upřesnit"
   // (refine s hintem) volá stejnou resetFormFromVision a bez týhle kontroly by ruční korekci
   // tiše přepsal novým AI odhadem.
-  const lastAiSnapshotRef = useRef<{ name: string; calories: string; protein: string; fat: string; carbs: string } | null>(
-    null
-  );
+  const lastAiSnapshotRef = useRef<{
+    name: string;
+    calories: string;
+    protein: string;
+    fat: string;
+    carbs: string;
+    ingredients: MealIngredient[];
+  } | null>(null);
 
   const resetFormFromVision = (
-    result: Pick<VisionResult, "name" | "calories" | "protein" | "fat" | "carbs" | "confidence"> | null,
+    result: Pick<VisionResult, "name" | "calories" | "protein" | "fat" | "carbs" | "confidence" | "components"> | null,
     failureNotice: string,
     statedType: MealType | null = null
   ) => {
     resetIngredients();
+    // Složky z fotky se předvyplní jako ingredience s odhadem gramů — uživatelka je může (nemusí)
+    // přepsat podle skutečnosti. Bez nich (popis/diktát, starší server) jen souhrn jako dřív.
+    const aiIngredients = result?.components?.length ? ingredientsFromComponents(result.components) : [];
+    if (aiIngredients.length > 0) setIngredientRows(toIngredientRows(aiIngredients));
     // Typ podle toho, co uživatelka řekla ("na snídani…", jen u popisu/diktátu), jinak podle
     // hodiny zápisu — nikdy result.type z AI: ta vidí jen jídlo, ne kdy ho uživatelka jí (jogurt
     // k večeři odhadla jako svačinu a připomínka večeře pak nezmizela). Ve formuláři jde přepnout.
@@ -257,7 +275,14 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
             ? "Mya si nebyla úplně jistá odhadem — zkontroluj prosím hodnoty."
             : null
       );
-      lastAiSnapshotRef.current = { name: result.name, calories: caloriesStr, protein: proteinStr, fat: fatStr, carbs: carbsStr };
+      lastAiSnapshotRef.current = {
+        name: result.name,
+        calories: caloriesStr,
+        protein: proteinStr,
+        fat: fatStr,
+        carbs: carbsStr,
+        ingredients: aiIngredients,
+      };
     } else {
       setName("");
       setCalories("");
@@ -270,13 +295,12 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     }
   };
 
-  // resetFormFromVision vždy volá resetIngredients() první, takže `ingredients.length > 0`
-  // samo o sobě znamená "appka od posledního AI rozpoznání dostala ruční rozpad na
-  // ingredience" — nepotřebuje vlastní snapshot navíc.
+  // Ingredience se porovnávají se snapshotem: fotka je teď předvyplňuje sama (složky s gramy),
+  // takže samotné `ingredients.length > 0` už ruční úpravu neznamená — přepsané gramy ano.
   const formEditedSinceLastAiAnalysis = () => {
-    if (ingredients.length > 0) return true;
     const last = lastAiSnapshotRef.current;
-    if (!last) return false;
+    if (!last) return ingredients.length > 0;
+    if (!sameIngredients(ingredients, last.ingredients)) return true;
     return name !== last.name || calories !== last.calories || protein !== last.protein || fat !== last.fat || carbs !== last.carbs;
   };
 
@@ -306,6 +330,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
       setSource("photo");
       setEatingOut(false);
       setHintText("");
+      setAmountsNote("");
       setStep("photo-preview");
     }
   };
@@ -321,7 +346,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
       photoDataUrls.length > 1 ? "Mya kouká na fotky a počítá kalorie..." : "Mya kouká na fotku a počítá kalorie..."
     );
     setStep("analyzing");
-    const result = await MyaVision.analyzeFood(photoDataUrls);
+    const result = await MyaVision.analyzeFood(photoDataUrls, amountsNote.trim() || undefined);
     resetFormFromVision(result, "Mya se nepodařilo rozpoznat jídlo z fotky. Zapiš prosím hodnoty ručně.");
     setStep("form");
   };
@@ -338,7 +363,10 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     setConfirmRefineOverwrite(false);
     setAnalyzingMessage("Mya upřesňuje odhad...");
     setStep("analyzing");
-    const result = await MyaVision.analyzeFood(photoDataUrls, hintText.trim());
+    // Gramáž zadaná před analýzou platí dál — bez ní by upřesnění ("bez oleje") vrátilo Myu
+    // k odhadu gramů z fotky.
+    const hint = [amountsNote.trim(), hintText.trim()].filter(Boolean).join(". ");
+    const result = await MyaVision.analyzeFood(photoDataUrls, hint);
     resetFormFromVision(result, "Mya se nepodařilo rozpoznat jídlo z fotky. Zapiš prosím hodnoty ručně.");
     setHintText("");
     setStep("form");
@@ -585,6 +613,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     setEatingOut(false);
     setLastConfidence(null);
     setHintText("");
+    setAmountsNote("");
     resetIngredients();
   };
 
@@ -630,6 +659,7 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     setIngredientProtein("");
     setIngredientFat("");
     setIngredientCarbs("");
+    setIngredientGrams("");
     setIngredientFormOpen(true);
   };
 
@@ -640,7 +670,41 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     setIngredientProtein(item.protein !== undefined ? String(item.protein) : "");
     setIngredientFat(item.fat !== undefined ? String(item.fat) : "");
     setIngredientCarbs(item.carbs !== undefined ? String(item.carbs) : "");
+    setIngredientGrams(item.grams ? String(item.grams) : "");
     setIngredientFormOpen(true);
+  };
+
+  // Gramy ve formuláři ingredience přepočítají kalorie a makra stejně jako pole v řádku — jen
+  // u ingredience, která už gramy má (jinak není z čeho počítat a gramy jsou jen informace).
+  // Kalorie jde potom i tak přepsat ručně.
+  const handleIngredientGramsInForm = (input: string) => {
+    setIngredientGrams(input);
+    const row = ingredientRows.find((r) => r.key === editingIngredientKey);
+    const grams = Number(input);
+    if (!row?.base.grams || !(grams > 0)) return;
+    const scaled = scaleIngredientToGrams(row.base, grams);
+    setIngredientValue(String(scaled.value));
+    setIngredientProtein(scaled.protein !== undefined ? String(scaled.protein) : "");
+    setIngredientFat(scaled.fat !== undefined ? String(scaled.fat) : "");
+    setIngredientCarbs(scaled.carbs !== undefined ? String(scaled.carbs) : "");
+  };
+
+  // Prázdné nebo nulové pole vrátí ingredienci na hodnoty před úpravou (odhad Myi), ať smazání
+  // čísla kvůli přepsání nenechá v součtu mezistav.
+  const handleRowGramsChange = (key: number, input: string) => {
+    setIngredientRows((prev) =>
+      prev.map((row) => {
+        if (row.key !== key) return row;
+        const grams = Number(input);
+        return { ...row, gramsInput: input, item: grams > 0 ? scaleIngredientToGrams(row.base, grams) : row.base };
+      })
+    );
+  };
+
+  const handleRowGramsBlur = (key: number) => {
+    setIngredientRows((prev) =>
+      prev.map((row) => (row.key === key && !(Number(row.gramsInput) > 0) ? { ...row, gramsInput: String(row.item.grams ?? "") } : row))
+    );
   };
 
   const saveIngredientDraft = () => {
@@ -653,10 +717,16 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
     if (ingredientProtein) draft.protein = Math.max(0, Math.round(Number(ingredientProtein)));
     if (ingredientFat) draft.fat = Math.max(0, Math.round(Number(ingredientFat)));
     if (ingredientCarbs) draft.carbs = Math.max(0, Math.round(Number(ingredientCarbs)));
+    const gramsNum = Math.round(Number(ingredientGrams));
+    if (gramsNum > 0) draft.grams = gramsNum;
 
     setIngredientRows((prev) => {
       if (editingIngredientKey !== null) {
-        return prev.map((row) => (row.key === editingIngredientKey ? { key: row.key, item: draft } : row));
+        return prev.map((row) =>
+          row.key === editingIngredientKey
+            ? { key: row.key, item: draft, base: draft, gramsInput: draft.grams ? String(draft.grams) : "" }
+            : row
+        );
       }
       return [...prev, ...toIngredientRows([draft])];
     });
@@ -987,6 +1057,20 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
                   <span className="text-xs text-slate-500 dark:text-slate-400">Jiný úhel, detail nebo etiketa zpřesní odhad</span>
                 </button>
               )}
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                  Víš, kolik čeho bylo? <span className="normal-case font-semibold">(nepovinné)</span>
+                </label>
+                <input
+                  type="text"
+                  value={amountsNote}
+                  onChange={(e) => setAmountsNote(e.target.value)}
+                  maxLength={200}
+                  placeholder="Např. 200 g brambor, 50 g šunky"
+                  className="w-full mt-1 bg-slate-50 dark:bg-slate-800 rounded-2xl px-4 py-3 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                />
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">Gramy jde přepsat i po analýze.</p>
+              </div>
               {notice && (
                 <div className="flex items-start gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 rounded-2xl text-xs">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
@@ -1164,6 +1248,12 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
 
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ingredience</label>
+                {!isEditing && source === "photo" && ingredientRows.some((row) => row.base.grams) && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Gramy odhadla Mya z fotky. Když víš, kolik čeho bylo, přepiš je a kalorie se přepočítají — gramy
+                    hotového jídla na talíři (rýže a těstoviny uvařené).
+                  </p>
+                )}
                 {ingredients.length > 0 && (
                   <div className="mt-1.5 space-y-2">
                     {ingredientRows.map((row) => (
@@ -1176,6 +1266,20 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
                           <span className="block text-sm font-semibold text-slate-700 dark:text-slate-200 truncate">{row.item.name}</span>
                           <span className="block text-xs text-slate-400">{row.item.value} kcal</span>
                         </button>
+                        {row.base.grams ? (
+                          <label className="flex items-center gap-1 shrink-0">
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              value={row.gramsInput}
+                              onChange={(e) => handleRowGramsChange(row.key, e.target.value)}
+                              onBlur={() => handleRowGramsBlur(row.key)}
+                              aria-label={`Gramy: ${row.item.name}`}
+                              className="w-16 bg-white dark:bg-slate-900 rounded-lg px-2 py-1.5 text-sm font-semibold text-right outline-rose-500 dark:text-white transition-all"
+                            />
+                            <span className="text-xs font-semibold text-slate-400">g</span>
+                          </label>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => removeIngredient(row.key)}
@@ -1198,14 +1302,24 @@ export default function AddMealModal({ onClose, editMeal, initialAction, effecti
                       placeholder="Např. kuřecí prsa"
                       className="w-full bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
                     />
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      value={ingredientValue}
-                      onChange={(e) => setIngredientValue(e.target.value)}
-                      placeholder="Kalorie (kcal)"
-                      className="w-full bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
-                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        value={ingredientGrams}
+                        onChange={(e) => handleIngredientGramsInForm(e.target.value)}
+                        placeholder="Gramy (g)"
+                        className="w-full bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                      />
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        value={ingredientValue}
+                        onChange={(e) => setIngredientValue(e.target.value)}
+                        placeholder="Kalorie (kcal)"
+                        className="w-full bg-slate-50 dark:bg-slate-800 rounded-xl px-3 py-2.5 text-sm font-semibold outline-rose-500 dark:text-white transition-all"
+                      />
+                    </div>
                     <div className="grid grid-cols-3 gap-2">
                       <input
                         type="number" inputMode="numeric" value={ingredientProtein} onChange={(e) => setIngredientProtein(e.target.value)} placeholder="B (g)"
