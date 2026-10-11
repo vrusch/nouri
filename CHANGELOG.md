@@ -2,6 +2,14 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.23.0] - 2026-10-11
+### Přidáno
+- **Gramáž složek u jídla z fotky**: Mya na fotce pozná, co na talíři je (brambory, šunka, sýr), ale gramy jednotlivých složek z fotky odhadne nepřesně. Teď jídlo rozloží na složky s odhadem gramů a předvyplní je jako ingredience. Když uživatelka ví, kolik čeho bylo, může gramy přepsat přímo v řádku a kalorie i makra se hned přepočítají, bez dalšího čekání na Myu. Je to nepovinné: bez úprav se uloží odhad jako dřív. Gramy platí pro hotové jídlo na talíři (rýže a těstoviny uvařené).
+- **„Víš, kolik čeho bylo?“**: nepovinné pole u náhledu fotky („200 g brambor, 50 g šunky“). Mya tyhle gramy bere jako přesné a umí přepočítat i syrovou surovinu („80 g rýže nasucho“). Zadaná gramáž platí i při dalším „Upřesnit“.
+
+### Opraveno
+- **„Upřesnit“ u fotky se zbytečně ptalo na přepsání**: s předvyplněnými složkami by se ptalo „Přepsat úpravy?“ i bez jediné změny. Teď se ptá, jen když uživatelka gramy nebo ingredience opravdu upravila.
+
 ## [0.22.0] - 2026-10-11
 ### Přidáno
 - **BMI ve Statistikách**: nová karta pod Trendem váhy – aktuální BMI z poslední zapsané váhy a výšky z profilu, kategorie podle WHO, tlumená stupnice se značkou, změna za stejné období jako graf váhy a BMI při cílové váze. Výslovně jen orientační (nerozliší svaly od tuku).

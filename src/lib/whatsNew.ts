@@ -10,6 +10,13 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.23.0",
+    items: [
+      "U jídla z fotky ti Mya ukáže, z čeho se skládá a kolik čeho odhadla. Když víš přesné gramy, přepiš je a kalorie se hned přepočítají.",
+      "Gramy můžeš napsat i rovnou k fotce („200 g brambor, 50 g šunky“) a Mya je vezme jako přesné. Obojí je nepovinné.",
+    ],
+  },
+  {
     version: "0.22.0",
     items: [
       "Ve Statistikách přibylo BMI – i s tím, jaké bude při tvé cílové váze.",
