@@ -2,6 +2,16 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.22.0] - 2026-10-11
+### Přidáno
+- **BMI ve Statistikách**: nová karta pod Trendem váhy – aktuální BMI z poslední zapsané váhy a výšky z profilu, kategorie podle WHO, tlumená stupnice se značkou, změna za stejné období jako graf váhy a BMI při cílové váze. Výslovně jen orientační (nerozliší svaly od tuku).
+- **Až 3 fotky jednoho jídla**: v náhledu fotky jde přidat další (jiný úhel, detail, etiketa), z galerie i víc naráz. Mya je vyhodnotí najednou jako jednu porci – co je vidět na víc fotkách, počítá jednou, přílohu nebo nápoj z jediné fotky přičte, z etikety vezme nutriční hodnoty. „Upřesnit“ posílá znovu všechny fotky.
+
+### Opraveno
+- **Stejná váha se nepočítala jako vážení**: kdo se zvážil a vyšla stejná váha jako v profilu, appka nic nezapsala a dál připomínala vážení. U pole Váha v Profilu je teď tlačítko ✓ (funguje i Enter), které zapíše vážení i beze změny; pouhé odkliknutí pole dál ukládá jen změněnou hodnotu. U zvonku po dnešním vážení stojí „Dnes zváženo“ místo „před 0 dní“.
+- **Připomínky vody mohly vytlačit večeři**: tři upozornění na vodu vyčerpala denní strop dřív, než začalo okno připomínky večeře. Upozornění teď chodí nejvýš 5× denně, z toho voda nejvýš 2×, takže na jídlo vždycky zbude místo.
+- **Bezpečnostní aktualizace závislostí**: `npm audit fix` v appce i v Cloud Functions (Cloud Functions 0 zranitelností, Firebase SDK 12.19). Zbývá hlášení k `@grpc/grpc-js` uvnitř Firebase SDK, které zatím nemá opravu a v prohlížeči se nepoužívá.
+
 ## [0.21.0] - 2026-10-10
 ### Přidáno
 - **Diktování víc jídel najednou**: popis nebo diktát typu „na snídani jsem měla kaši, na svačinu jablko a k obědu kuře s rýží“ appka rozdělí na samostatná jídla a každé zařadí tam, kam patří podle toho, co uživatelka řekla. Před uložením ukáže přehled, kde jde typ přepnout nebo jídlo odebrat. Zpětně nadiktované jídlo dostane typický čas (snídaně 8:00), nikdy ale čas v budoucnu. Talíř s více surovinami („vejce, chleba a rajče“) zůstává jedním jídlem.

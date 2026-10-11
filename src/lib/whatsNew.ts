@@ -10,6 +10,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.22.0",
+    items: [
+      "Ve Statistikách přibylo BMI – i s tím, jaké bude při tvé cílové váze.",
+      "K jídlu můžeš přidat až 3 fotky (jiný úhel, detail nebo etiketu) a Mya ho pozná přesněji.",
+      "Když se zvážíš a vyjde stejná váha, potvrď ji v Profilu tlačítkem ✓ – započítá se jako vážení a připomínka zmizí.",
+      "Upozornění na vodu tě už nezahltí – na připomínku jídla vždycky zbude místo.",
+    ],
+  },
+  {
     version: "0.21.0",
     items: [
       "Když nadiktuješ víc jídel najednou („na snídani…, na svačinu…, k obědu…“), appka je rozdělí a každé zařadí tam, kam patří.",
