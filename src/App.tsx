@@ -442,7 +442,9 @@ export default function App() {
                           ? "Ještě jsi nezapsala váhu — zapiš první hodnotu a appka ti pak sama pohlídá další vážení."
                           : weighInOverdue
                             ? "Nezapomeň se dnes zvážit — pomůže ti to sledovat trend."
-                            : `Naposledy zváženo před ${formatDaysCs(daysSinceWeighIn)} · další připomínka za ${formatDaysCs(reminderDays - daysSinceWeighIn)}.`}
+                            : daysSinceWeighIn === 0
+                              ? `Dnes zváženo · další připomínka za ${formatDaysCs(reminderDays)}.`
+                              : `Naposledy zváženo před ${formatDaysCs(daysSinceWeighIn)} · další připomínka za ${formatDaysCs(reminderDays - daysSinceWeighIn)}.`}
                       </p>
                       <button
                         onClick={() => { setActiveTab("profile"); setShowReminder(false); }}

@@ -27,3 +27,18 @@ export function computeWeighInStatus(
   const weighInOverdue = daysSinceWeighIn === null || daysSinceWeighIn >= reminderDays;
   return { daysSinceWeighIn, weighInOverdue };
 }
+
+/**
+ * Rozhodne, jestli uložení váhy v Profilu zapíše vážení (manual bod ve weightLogs, který
+ * shodí připomínku). Výslovné potvrzení (✓ nebo Enter) zapisuje i beze změny — stejná váha
+ * je platné vážení. Pouhé odkliknutí pole (blur) zapisuje jen změnu, ať ťuknutí na řádek
+ * a odchod bez vážení nevyrobí falešné vážení.
+ */
+export function shouldLogWeighIn(
+  newWeight: number,
+  previousWeight: number | undefined,
+  confirmed: boolean
+): boolean {
+  if (!Number.isFinite(newWeight) || newWeight <= 0) return false;
+  return confirmed || newWeight !== previousWeight;
+}

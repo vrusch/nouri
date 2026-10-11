@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeWeighInStatus, daysSince } from "./weighIn";
+import { computeWeighInStatus, daysSince, shouldLogWeighIn } from "./weighIn";
 
 describe("daysSince", () => {
   it("počítá rozdíl dnů mezi dvěma daty", () => {
@@ -59,5 +59,27 @@ describe("computeWeighInStatus", () => {
     const status = computeWeighInStatus({ date: "2026-08-06", weight: 80, source: "manual" }, 3, today);
     expect(status.daysSinceWeighIn).toBe(2);
     expect(status.weighInOverdue).toBe(false);
+  });
+});
+
+describe("shouldLogWeighIn", () => {
+  // REGRESE: stejná váha jako v profilu se dřív nezapsala jako vážení (zapisovala se jen
+  // změna), takže připomínka vážení po zvážení se stejným výsledkem nezmizela (hlášeno testerkou).
+  it("REGRESE: potvrzená stejná váha se zapíše jako vážení", () => {
+    expect(shouldLogWeighIn(72, 72, true)).toBe(true);
+  });
+
+  it("odkliknutí pole beze změny vážení nezapíše", () => {
+    expect(shouldLogWeighIn(72, 72, false)).toBe(false);
+  });
+
+  it("změněná váha se zapíše i při odkliknutí pole", () => {
+    expect(shouldLogWeighIn(71.5, 72, false)).toBe(true);
+    expect(shouldLogWeighIn(71.5, 72, true)).toBe(true);
+  });
+
+  it("nesmyslná hodnota se nezapíše ani po potvrzení", () => {
+    expect(shouldLogWeighIn(0, 72, true)).toBe(false);
+    expect(shouldLogWeighIn(NaN, 72, true)).toBe(false);
   });
 });

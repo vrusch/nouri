@@ -26,6 +26,7 @@ import { formatDaysCs, formatMealsCs, formatRowsCs } from "../lib/format";
 import { parseMealsCsv } from "../lib/csvImport";
 import { classifyReportLine, splitBoldSegments } from "../lib/aiReportMarkdown";
 import { computeProfileCheckStatus } from "../lib/profileCheck";
+import { shouldLogWeighIn } from "../lib/weighIn";
 import { QUIET_HOURS_START, QUIET_HOURS_END } from "../lib/quietHours";
 import { COACHING_STYLE_OPTIONS, resolveCoachingStyle, getCoachingStyleLabel } from "../lib/coachingStyle";
 import { DAY_NAMES_CS } from "../lib/workoutPlan";
@@ -269,16 +270,18 @@ export default function Profile() {
     setEditing(null);
   };
 
-  const handleSave = async (field: keyof UserProfile | 'name') => {
+  // confirmed = výslovné potvrzení (✓ / Enter), ne jen odkliknutí pole — u váhy pak appka
+  // zapíše vážení i beze změny (viz shouldLogWeighIn), jinak by připomínka vážení nezmizela.
+  const handleSave = async (field: keyof UserProfile | 'name', confirmed = false) => {
     if (!tempValue && field === 'name') return setEditing(null);
     if (!tempValue) return setEditing(null);
-    
+
     let val: string | number = tempValue;
     if (field === 'weight' || field === 'height' || field === 'targetWeight') val = Number(tempValue);
 
-    const weightChanged = field === 'weight' && val !== profile?.weight;
+    const weighIn = field === 'weight' && typeof val === 'number' && shouldLogWeighIn(val, profile?.weight, confirmed);
     await updateProfile({ [field]: val });
-    if (weightChanged && user && typeof val === 'number') {
+    if (weighIn && user && typeof val === 'number') {
       logWeight(user.uid, val, getLocalDateISO());
     }
     setEditing(null);
@@ -617,13 +620,29 @@ export default function Profile() {
               Váha
             </div>
             {editing === 'weight' ? (
-              <input 
-                type="number" autoFocus
-                className="w-16 bg-slate-100 dark:bg-slate-800 rounded px-2 py-1 text-sm font-bold dark:text-white outline-rose-500 text-right"
-                value={tempValue}
-                onChange={(e) => setTempValue(e.target.value)}
-                onBlur={() => handleSave('weight')}
-              />
+              <form
+                className="flex items-center gap-2"
+                onSubmit={(e) => { e.preventDefault(); handleSave('weight', true); }}
+              >
+                <input
+                  type="number" step="any" autoFocus
+                  className="w-16 bg-slate-100 dark:bg-slate-800 rounded px-2 py-1 text-sm font-bold dark:text-white outline-rose-500 text-right"
+                  value={tempValue}
+                  onChange={(e) => setTempValue(e.target.value)}
+                  onBlur={() => handleSave('weight')}
+                />
+                {/* preventDefault na mousedown drží fokus v inputu — jinak by blur uložil a zavřel
+                    editaci dřív, než klik na ✓ dorazí, a stejná váha by se nezapsala jako vážení. */}
+                <button
+                  type="submit"
+                  aria-label="Potvrdit váhu"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => e.stopPropagation()}
+                  className={`p-1.5 rounded-full text-white ${profile?.gender === 'female' ? 'bg-rose-600' : 'bg-sky-600'} active:scale-95 transition-all`}
+                >
+                  <Check className="w-4 h-4" />
+                </button>
+              </form>
             ) : (
               <div className="flex items-center gap-2">
                 <span className="text-[15px] font-bold text-slate-800 dark:text-white">{profile?.weight} kg</span>
