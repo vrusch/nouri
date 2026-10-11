@@ -122,7 +122,7 @@ export default function Profile() {
       const permission = await enablePush(user.uid);
       if (permission === "granted") {
         setPushEnabled(true);
-        setPushMessage("Zapnuto. Mya ti připomene jídlo a vodu nejvýš 3× denně, v tichém režimu nikdy.");
+        setPushMessage("Zapnuto. Mya ti připomene jídlo a vodu nejvýš 5× denně, v tichém režimu nikdy.");
       } else if (permission === "denied") {
         setPushMessage("Povolení bylo zamítnuto.");
       } else {

@@ -3,6 +3,7 @@ import {
   computeActiveNudges,
   isQuietHours,
   MAX_PUSHES_PER_DAY,
+  MAX_WATER_PUSHES_PER_DAY,
   nextPushState,
   selectNudgesToSend,
   type CoachingStyle,
@@ -58,6 +59,8 @@ describe("paritní test: serverová kopie = klientské computeActiveNudges", () 
 const lunch: ServerNudge = { kind: "lunch", text: "oběd", dismissKey: "lunch" };
 const water4: ServerNudge = { kind: "water", text: "voda", dismissKey: "water_4" };
 const water5: ServerNudge = { kind: "water", text: "voda", dismissKey: "water_5" };
+const water6: ServerNudge = { kind: "water", text: "voda", dismissKey: "water_6" };
+const dinner: ServerNudge = { kind: "dinner", text: "večeře", dismissKey: "dinner" };
 
 describe("selectNudgesToSend / nextPushState", () => {
   it("bez stavu pošle všechny aktivní připomínky", () => {
@@ -75,13 +78,27 @@ describe("selectNudgesToSend / nextPushState", () => {
   });
 
   it("denní strop platí i napříč hodinami", () => {
-    let state = nextPushState(undefined, "2026-09-26", [lunch, water4]);
-    expect(state.count).toBe(2);
-    const third = selectNudgesToSend([water5], state, "2026-09-26");
-    expect(third).toEqual([water5]);
-    state = nextPushState(state, "2026-09-26", third);
-    expect(state.count).toBe(MAX_PUSHES_PER_DAY);
-    expect(selectNudgesToSend([{ kind: "dinner", text: "večeře", dismissKey: "dinner" }], state, "2026-09-26")).toEqual([]);
+    const full = { date: "2026-09-26", sentKeys: ["breakfast", "lunch", "water_4", "water_5", "x"], count: MAX_PUSHES_PER_DAY };
+    expect(selectNudgesToSend([dinner], full, "2026-09-26")).toEqual([]);
+  });
+
+  // REGRESE: 10. 10. 2026 odešly tři připomínky vody (15, 17, 19 h) a vyčerpaly tehdejší strop
+  // 3/den — večeře (okno od 20 h) by už push nedostala. Voda má teď vlastní strop.
+  it("REGRESE: voda nejvýš 2× za den, večeře pak pořád projde", () => {
+    let state = nextPushState(undefined, "2026-10-10", [water4]);
+    state = nextPushState(state, "2026-10-10", selectNudgesToSend([water5], state, "2026-10-10"));
+    expect(state.count).toBe(MAX_WATER_PUSHES_PER_DAY);
+    expect(selectNudgesToSend([water6], state, "2026-10-10")).toEqual([]);
+    expect(selectNudgesToSend([dinner, water6], state, "2026-10-10")).toEqual([dinner]);
+  });
+
+  it("v jednom výběru nepustí víc vody, než zbývá do stropu vody", () => {
+    const state = nextPushState(undefined, "2026-10-10", [water4]);
+    expect(selectNudgesToSend([water5, water6], state, "2026-10-10")).toEqual([water5]);
+  });
+
+  it("3 jídla + strop vody se vejdou do denního stropu", () => {
+    expect(3 + MAX_WATER_PUSHES_PER_DAY).toBeLessThanOrEqual(MAX_PUSHES_PER_DAY);
   });
 
   it("stav ze včerejška se nepočítá", () => {

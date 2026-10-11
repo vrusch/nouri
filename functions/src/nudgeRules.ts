@@ -144,7 +144,11 @@ export function computeActiveNudges({ todaysMealTypes, waterGlasses, hour, minut
 }
 
 // --- jen server: výběr, co se opravdu pošle (fáze C) ---
-export const MAX_PUSHES_PER_DAY = 3;
+export const MAX_PUSHES_PER_DAY = 5;
+// Voda se připomíná znovu s každým narůstem skluzu, takže by za den, kdy skoro nepije, sama
+// vyčerpala celý denní strop dřív, než začne okno večeře (20 h). Jídla jsou nejvýš 3 za den,
+// 3 + 2 = MAX_PUSHES_PER_DAY, takže na jídlo vždycky zbude místo.
+export const MAX_WATER_PUSHES_PER_DAY = 2;
 
 export interface PushState {
   date: string;
@@ -154,13 +158,17 @@ export interface PushState {
 
 /**
  * Z aktivních připomínek vybere ty, které se ještě dnes neposlaly (podle dismissKey — jídlo
- * nejvýš jednou za den, voda znovu jen když skluz naroste), a ořízne je na zbytek denního stropu.
- * Stav z jiného dne se bere jako prázdný.
+ * nejvýš jednou za den, voda znovu jen když skluz naroste, ale nejvýš MAX_WATER_PUSHES_PER_DAY),
+ * a ořízne je na zbytek denního stropu. Stav z jiného dne se bere jako prázdný.
  */
 export function selectNudgesToSend(nudges: ServerNudge[], state: PushState | undefined, todayISO: string): ServerNudge[] {
   const current: PushState = state && state.date === todayISO ? state : { date: todayISO, sentKeys: [], count: 0 };
   const remaining = Math.max(0, MAX_PUSHES_PER_DAY - current.count);
-  return nudges.filter((n) => !current.sentKeys.includes(n.dismissKey)).slice(0, remaining);
+  let waterLeft = MAX_WATER_PUSHES_PER_DAY - current.sentKeys.filter((k) => k.startsWith("water_")).length;
+  return nudges
+    .filter((n) => !current.sentKeys.includes(n.dismissKey))
+    .filter((n) => n.kind !== "water" || waterLeft-- > 0)
+    .slice(0, remaining);
 }
 
 export function nextPushState(state: PushState | undefined, todayISO: string, sent: ServerNudge[]): PushState {
