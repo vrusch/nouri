@@ -12,6 +12,14 @@ export interface NutritionResults {
 export type Goal = "lose" | "maintain" | "gain";
 export type Gender = "male" | "female";
 
+// Kopie proteinBaseWeight ze src/lib/nutrition.ts (MYA_COACH_SPEC D3): při hubnutí s nižší cílovou
+// váhou se bílkoviny počítají z cílové váhy. Měnit obě spolu — paritní test v src/lib/nutrition.test.ts.
+export function proteinBaseWeight(data: { weight: number; goal: Goal; targetWeight?: number }): number {
+  return data.goal === "lose" && data.targetWeight !== undefined && data.targetWeight > 0 && data.targetWeight < data.weight
+    ? data.targetWeight
+    : data.weight;
+}
+
 export function calculateAge(birthDate: string): number {
   const today = new Date();
   const birth = new Date(birthDate);
@@ -33,6 +41,7 @@ export function calculateNutrition(data: {
   calibratedTDEE?: number;
   customProteinGrams?: number;
   customFatGrams?: number;
+  targetWeight?: number;
 }): NutritionResults {
   const age = calculateAge(data.birthDate);
 
@@ -55,7 +64,7 @@ export function calculateNutrition(data: {
     targetCalories = tdee + 300;
   }
 
-  const proteinGrams = data.customProteinGrams ?? Math.round(data.weight * 1.8);
+  const proteinGrams = data.customProteinGrams ?? Math.round(proteinBaseWeight(data) * 1.8);
   const fatGrams = data.customFatGrams ?? Math.round((targetCalories * 0.25) / 9);
   const proteinKcal = proteinGrams * 4;
   const fatKcal = fatGrams * 9;

@@ -110,7 +110,7 @@ export interface ChatReply {
 }
 
 const chatWithMyaFn = httpsCallable<
-  { profile: UserProfile; messages: ChatMessageInput[]; recipeCards: true; context?: ChatContext },
+  { profile: UserProfile; messages: ChatMessageInput[]; recipeCards: true; richText: true; context?: ChatContext },
   { text: string; recipes?: unknown }
 >(
   functions,
@@ -133,6 +133,7 @@ export const MyaAI = {
       calibratedTDEE: profile.calibratedTDEE,
       customProteinGrams: profile.customProteinGrams,
       customFatGrams: profile.customFatGrams,
+      targetWeight: profile.targetWeight,
     });
 
     try {
@@ -239,8 +240,9 @@ export const MyaAI = {
     try {
       // Kontext jen když je — bez něj (data dne ještě nedorazila) server Mye řekne, že je nevidí.
       // recipeCards: appka umí recepty ukázat jako karty (server bez téhle změny ho ignoruje
-      // a recepty napíše textem).
-      const response = await chatWithMyaFn({ profile, messages, recipeCards: true, ...(context ? { context } : {}) });
+      // a recepty napíše textem). richText: bublina umí tučné, odrážky a nadpisy (MyaChatModal,
+      // aiReportMarkdown.ts) — starší build příznak neposílá a dostane čistý text.
+      const response = await chatWithMyaFn({ profile, messages, recipeCards: true, richText: true, ...(context ? { context } : {}) });
       const recipes = normalizeRecipeSet({ recipes: response.data.recipes });
       return recipes ? { text: response.data.text, recipes } : { text: response.data.text };
     } catch (error) {

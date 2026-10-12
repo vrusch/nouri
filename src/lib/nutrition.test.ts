@@ -11,6 +11,7 @@ import {
   getRecipeAvailability,
   type NutritionResults,
 } from "./nutrition";
+import { calculateNutrition as serverCalculateNutrition } from "../../functions/src/nutrition";
 
 function addDays(base: string, days: number): string {
   const d = new Date(`${base}T00:00:00Z`);
@@ -180,6 +181,52 @@ describe("calculateNutrition", () => {
       expect(result.macros.protein).toBe(200);
       expect(result.macros.fat).toBe(90);
       expect(result.macros.carbs).toBe(0);
+    });
+  });
+
+  // REGRESE (zpětná vazba 2026-10-11, MYA_COACH_SPEC D3): při hubnutí z 84 kg dávalo 1,8 g ×
+  // aktuální váha cíl 152 g bílkovin. Ten se do zbývajících kalorií často nevešel a Mya ho den co
+  // den „vyčítala“ („chybí ti 48 g“). Při hubnutí s nižší cílovou váhou se počítá z cílové váhy.
+  describe("bílkoviny při hubnutí z cílové váhy (D3)", () => {
+    const wife = { ...base, weight: 84, height: 168, activityLevel: 1.375 };
+
+    it("REGRESE: hubnutí s cílovou váhou 70 kg → 1,8 × 70 = 126 g místo 151 g", () => {
+      expect(calculateNutrition({ ...wife, goal: "lose" }).macros.protein).toBe(151);
+      expect(calculateNutrition({ ...wife, goal: "lose", targetWeight: 70 }).macros.protein).toBe(126);
+    });
+
+    it("bez cílové váhy, s cílovou váhou nad aktuální nebo mimo hubnutí zůstává aktuální váha", () => {
+      expect(calculateNutrition({ ...wife, goal: "lose", targetWeight: 90 }).macros.protein).toBe(151);
+      expect(calculateNutrition({ ...wife, goal: "maintain", targetWeight: 70 }).macros.protein).toBe(151);
+      expect(calculateNutrition({ ...wife, goal: "gain", targetWeight: 70 }).macros.protein).toBe(151);
+    });
+
+    it("vlastní bílkoviny mají přednost i při cílové váze", () => {
+      expect(calculateNutrition({ ...wife, goal: "lose", targetWeight: 70, customProteinGrams: 140 }).macros.protein).toBe(140);
+    });
+
+    it("kalorie se nemění, ušetřené bílkoviny jdou do sacharidů", () => {
+      const before = calculateNutrition({ ...wife, goal: "lose" });
+      const after = calculateNutrition({ ...wife, goal: "lose", targetWeight: 70 });
+      expect(after.targetCalories).toBe(before.targetCalories);
+      expect(after.macros.fat).toBe(before.macros.fat);
+      expect(after.macros.carbs).toBeGreaterThan(before.macros.carbs);
+    });
+
+    // Server (getDailyGreeting, chatWithMya) počítá cíl vlastní kopií — rozdílné číslo by Mya
+    // a Home postavilo proti sobě (stejná třída chyby jako REGRESE v functions/src/dayStatus.ts).
+    it("server počítá stejně jako klient", () => {
+      const cases = [
+        { ...wife, goal: "lose" as const },
+        { ...wife, goal: "lose" as const, targetWeight: 70 },
+        { ...wife, goal: "lose" as const, targetWeight: 70, calibratedTDEE: 2100 },
+        { ...wife, goal: "maintain" as const, targetWeight: 70 },
+        { ...wife, goal: "lose" as const, targetWeight: 70, customProteinGrams: 130, customFatGrams: 55 },
+        { ...base, gender: "male" as const, weight: 110, goal: "lose" as const, targetWeight: 85 },
+      ];
+      for (const input of cases) {
+        expect(serverCalculateNutrition(input)).toEqual(calculateNutrition(input));
+      }
     });
   });
 });

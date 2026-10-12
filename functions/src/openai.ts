@@ -20,6 +20,8 @@ interface OpenAIChatOptions {
   // Jen chatWithMya (karty receptů). Model smí zavolat nejvýš jeden nástroj — appka výsledek
   // nástroje modelu nevrací, jen podle volání spustí vlastní generování (viz index.ts).
   tools?: OpenAITool[];
+  // Vynucení konkrétního nástroje (forcesRecipeTool v recipes.ts); bez něj model volí sám ("auto").
+  toolChoice?: { name: string };
 }
 
 export interface OpenAITool {
@@ -55,7 +57,13 @@ export async function callOpenAIChat(options: OpenAIChatOptions): Promise<OpenAI
       ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
       ...(options.maxTokens !== undefined ? { max_tokens: options.maxTokens } : {}),
       ...(options.responseFormat ? { response_format: { type: options.responseFormat } } : {}),
-      ...(options.tools ? { tools: options.tools, tool_choice: "auto", parallel_tool_calls: false } : {}),
+      ...(options.tools
+        ? {
+            tools: options.tools,
+            tool_choice: options.toolChoice ? { type: "function", function: { name: options.toolChoice.name } } : "auto",
+            parallel_tool_calls: false,
+          }
+        : {}),
     }),
   });
 

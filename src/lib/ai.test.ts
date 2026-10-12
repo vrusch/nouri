@@ -53,12 +53,12 @@ describe("MyaAI — úspěšné volání", () => {
     expect(callable.calls).toEqual([{ name: "getDailyGreeting", payload: { profile, ...stats } }]);
   });
 
-  it("chatWithMya pošle profil, historii a recipeCards, vrátí text bez receptů", async () => {
+  it("chatWithMya pošle profil, historii, recipeCards a richText, vrátí text bez receptů", async () => {
     respond("chatWithMya", { text: "Jasně." });
     const messages = [{ role: "user" as const, content: "Kolik bílkovin?" }];
 
     await expect(MyaAI.chatWithMya(profile, messages)).resolves.toEqual({ text: "Jasně." });
-    expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages, recipeCards: true } }]);
+    expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages, recipeCards: true, richText: true } }]);
   });
 
   it("chatWithMya vrátí i recepty, když je Mya navrhla jako karty", async () => {
@@ -103,7 +103,7 @@ describe("MyaAI — úspěšné volání", () => {
     };
 
     await expect(MyaAI.chatWithMya(profile, messages, context)).resolves.toEqual({ text: "Zbývá ti 211 kcal." });
-    expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages, recipeCards: true, context } }]);
+    expect(callable.calls).toEqual([{ name: "chatWithMya", payload: { profile, messages, recipeCards: true, richText: true, context } }]);
   });
 
   it("generateWelcomeReport vrátí data ze serveru beze změny", async () => {

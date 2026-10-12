@@ -36,6 +36,19 @@ function applyGoalAdjustment(tdee: number, goal: Goal, bmr: number): number {
 }
 
 /**
+ * Váha, ze které se počítají bílkoviny (1,8 g/kg). Při hubnutí s nastavenou nižší cílovou váhou
+ * je to cílová váha (MYA_COACH_SPEC D3): 1,8 g × aktuální váha dávalo při 84 kg cíl 152 g, který
+ * se do zbývajících kalorií často vůbec nevešel a appka ho pak den co den „vyčítala“. U nadváhy
+ * je počítání z cílové váhy běžná praxe a výsledek leží v doporučených 1,2–1,6 g/kg aktuální váhy.
+ * Serverová kopie ve functions/src/nutrition.ts — měnit obě spolu (paritní test v nutrition.test.ts).
+ */
+export function proteinBaseWeight(data: { weight: number; goal: Goal; targetWeight?: number }): number {
+  return data.goal === 'lose' && data.targetWeight !== undefined && data.targetWeight > 0 && data.targetWeight < data.weight
+    ? data.targetWeight
+    : data.weight;
+}
+
+/**
  * Vypočítá věk z data narození
  */
 export function calculateAge(birthDate: string): number {
@@ -62,6 +75,7 @@ export function calculateNutrition(data: {
   calibratedTDEE?: number;
   customProteinGrams?: number; // ruční přepis místo formulky 1.8g/kg (např. od výživového poradce)
   customFatGrams?: number; // ruční přepis místo formulky 25 % cílových kalorií
+  targetWeight?: number; // cílová váha — při hubnutí se z ní počítají bílkoviny (viz proteinBaseWeight)
 }): NutritionResults {
   const age = calculateAge(data.birthDate);
 
@@ -84,7 +98,7 @@ export function calculateNutrition(data: {
   // mají přednost před formulkou, sacharidy appka dopočítá jako zbytek kalorií v obou případech,
   // ať zůstanou v souladu s (případně kalibrovaným) cílem, i když appka bílkoviny/tuky nepočítá sama.
   // Bílkoviny: 1.8g - 2.2g na kg váhy (pro hubnutí/svaly)
-  const proteinGrams = data.customProteinGrams ?? Math.round(data.weight * 1.8);
+  const proteinGrams = data.customProteinGrams ?? Math.round(proteinBaseWeight(data) * 1.8);
 
   // Tuky: cca 25-30 % celkového příjmu
   const fatGrams = data.customFatGrams ?? Math.round((targetCalories * 0.25) / 9);

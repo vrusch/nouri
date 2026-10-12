@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, Droplet, Beef, AlertCircle, Megaphone, type LucideIcon } from "lucide-react";
+import { User, Moon, Sun, Smartphone, Ruler, Weight, Target, Flag, Trash2, Download, Upload, FileJson, FileText, RefreshCw, ChevronRight, Info, LogOut, ChevronDown, Check, Edit2, Sparkles, Loader2, Zap, Activity, Bell, BellOff, Dumbbell, Plus, MessageCircleHeart, TreePalm, Droplet, Beef, AlertCircle, Megaphone, BookHeart, type LucideIcon } from "lucide-react";
 import { useTheme } from "../context/useTheme";
 import { type Theme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
@@ -30,6 +30,7 @@ import { shouldLogWeighIn } from "../lib/weighIn";
 import { QUIET_HOURS_START, QUIET_HOURS_END } from "../lib/quietHours";
 import { COACHING_STYLE_OPTIONS, resolveCoachingStyle, getCoachingStyleLabel } from "../lib/coachingStyle";
 import { DAY_NAMES_CS } from "../lib/workoutPlan";
+import MyaMemoryEditor from "../components/MyaMemoryEditor";
 import { expandDateRange, datesToEndVacation } from "../lib/vacationMode";
 import { db, type MealItem } from "../db/db";
 import { reportCloudError } from "../lib/cloudErrors";
@@ -252,6 +253,7 @@ export default function Profile() {
         calibratedTDEE: profile.calibratedTDEE,
         customProteinGrams: protein,
         customFatGrams: fat,
+        targetWeight: profile.targetWeight,
       });
       if (candidate.macros.protein * 4 + candidate.macros.fat * 9 > candidate.targetCalories - CUSTOM_MACRO_CARB_RESERVE_KCAL) {
         setCustomMacroError("Bílkoviny a tuky dohromady přesahují tvůj kalorický cíl — na sacharidy by nezbylo nic. Sniž některou z hodnot.");
@@ -541,6 +543,7 @@ export default function Profile() {
     calibratedTDEE: profile.calibratedTDEE,
     customProteinGrams: profile.customProteinGrams,
     customFatGrams: profile.customFatGrams,
+    targetWeight: profile.targetWeight,
   }) : null;
 
   const accentBg = profile?.gender === 'female' ? 'bg-rose-50 dark:bg-rose-900/10' : 'bg-sky-50 dark:bg-sky-900/10';
@@ -873,6 +876,32 @@ export default function Profile() {
                 );
               })}
             </div>
+          )}
+
+          {/* Její příběh a paměť pro Myu (REFERENCE/MYA_COACH_SPEC.md 5.5). */}
+          <div
+            className={`px-4 py-3.5 flex items-center justify-between transition-colors cursor-pointer ${editing === 'myaMemory' ? accentBg : 'active:bg-slate-50 dark:active:bg-slate-800'}`}
+            onClick={() => setEditing(editing === 'myaMemory' ? null : 'myaMemory')}
+          >
+            <div className="flex items-center gap-3 text-[15px] font-semibold dark:text-slate-200 transition-colors">
+              <BookHeart className="w-4 h-4 text-pink-500" />
+              Co o mně Mya ví
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[15px] font-bold text-slate-800 dark:text-white">
+                {profile?.myaMemory || profile?.journeyStartWeight !== undefined ? 'Vyplněno' : 'Doplnit'}
+              </span>
+              <ChevronDown className={`w-4 h-4 ${editing === 'myaMemory' ? accentText : 'text-slate-400'}`} />
+            </div>
+          </div>
+
+          {editing === 'myaMemory' && profile && (
+            <MyaMemoryEditor
+              profile={profile}
+              accentBg={accentBg}
+              buttonClass={profile.gender === 'female' ? 'bg-rose-600' : 'bg-sky-600'}
+              onSave={async (fields) => { await updateProfile(fields); setEditing(null); }}
+            />
           )}
 
           <div

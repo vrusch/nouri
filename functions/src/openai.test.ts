@@ -45,6 +45,14 @@ describe("callOpenAIChat", () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(body.tools).toEqual([tool]);
     expect(body.parallel_tool_calls).toBe(false);
+    expect(body.tool_choice).toBe("auto");
+  });
+
+  it("toolChoice vynutí konkrétní nástroj", async () => {
+    const fetchMock = mockFetch({ choices: [{ message: { content: null, tool_calls: [{ function: { name: "navrhni_recepty" } }] } }] });
+    await callOpenAIChat({ apiKey: "k", model: "m", messages: [], tools: [tool], toolChoice: { name: "navrhni_recepty" } });
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.tool_choice).toEqual({ type: "function", function: { name: "navrhni_recepty" } });
   });
 
   it("bez textu i bez nástroje = empty_response, 429 = rate_limited", async () => {

@@ -20,7 +20,16 @@ import {
 import { db } from "../db/db";
 import { useAuth } from "../context/useAuth";
 import { calculateNutrition, computeRemainingMacros, getRecipeAvailability } from "../lib/nutrition";
-import { MyaRecipes, RECIPE_MEAL_TYPE_LABELS, isRecipeSaved, type RecipeResult } from "../lib/recipes";
+import {
+  MyaRecipes,
+  RECIPE_MEAL_TYPE_LABELS,
+  bestFitIndex,
+  isRecipeSaved,
+  recipeFit,
+  sortRecipesByFit,
+  todayMealTypesOf,
+  type RecipeResult,
+} from "../lib/recipes";
 import { fileToCompressedDataUrl } from "../lib/image";
 import {
   addShoppingListItems,
@@ -97,9 +106,13 @@ export default function Recipes() {
     dailyCarbs: target.macros.carbs,
   };
 
+  // Server navrhne jen jídla, která dnes ještě chybí, s porcí podle zbytku dne (MYA_COACH_SPEC 6.6).
+  const dayPlan = () => ({ todayMealTypes: todayMealTypesOf(todaysMeals), localHour: new Date().getHours() });
+
   const showRecipes = (result: RecipeResult[] | null, source: "text" | "photo") => {
     if (result) {
-      setRecipes(result);
+      // Recepty do dneška seřadí podle toho, jak doplní zbytek dne (v rámci typu jídla).
+      setRecipes(forAnotherDay ? result : sortRecipesByFit(result, remaining));
       setGeneration((n) => n + 1);
       setExpandedIndex(result.length === 1 ? 0 : null);
       setRecipeSource(source);
@@ -120,6 +133,7 @@ export default function Recipes() {
       preferences: preferences.trim() || undefined,
       availableIngredients: availableIngredients.trim() || undefined,
       ...dailyTarget,
+      ...dayPlan(),
     });
     showRecipes(result, "text");
   };
@@ -151,6 +165,7 @@ export default function Recipes() {
       goal: profile.goal,
       preferences: preferences.trim() || undefined,
       ...dailyTarget,
+      ...dayPlan(),
     });
     showRecipes(result, "photo");
   };
@@ -423,6 +438,8 @@ export default function Recipes() {
               onSave={handleSaveRecipe}
               onAddToShoppingList={handleAddToShoppingList}
               alreadySaved={isRecipeSaved(item, savedRecipes)}
+              fit={forAnotherDay ? undefined : recipeFit(item, remaining)}
+              bestFit={!forAnotherDay && bestFitIndex(recipes, remaining) === i}
             />
           ))}
 

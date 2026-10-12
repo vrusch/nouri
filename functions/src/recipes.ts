@@ -4,6 +4,7 @@
 // typu jídla), ne jídelníček, který se má sečíst. Bez `multi` (starší build appky v cache PWA)
 // funkce vrací jeden recept přesně jako dřív.
 
+import { MAX_PROTEIN_PER_100_KCAL } from "./dayStatus.js";
 import type { OpenAITool } from "./openai.js";
 import { sanitizePromptText } from "./promptText.js";
 
@@ -133,15 +134,31 @@ export function mealPortionGuides(
 // klientu) — chat pak navrhne recepty "na jindy" s porcemi podle denního cíle.
 export const MIN_RECIPE_BUDGET_CALORIES = 200;
 
-function recipeSetRules(limitToToday: boolean): string {
-  return `Navrhni ${MAX_RECIPES} RŮZNÉ recepty reálně uvařitelné doma — standardně lehkou snídani, oběd a večeři.
+// today = do zbytku dne bez plánu jídel (starší build appky), planned = do zbytku dne s cílem
+// porce pro jídla, která dnes ještě chybí (MYA_COACH_SPEC 6.6), anotherDay = recepty "na jindy".
+type RecipeSetMode = "today" | "planned" | "anotherDay";
+
+function recipeSetRules(mode: RecipeSetMode): string {
+  const which =
+    mode === "planned"
+      ? `Navrhni ${MAX_RECIPES} RŮZNÉ recepty reálně uvařitelné doma pro jídla, která uživatelce dnes ještě chybí (jsou v zadání).`
+      : `Navrhni ${MAX_RECIPES} RŮZNÉ recepty reálně uvařitelné doma — standardně lehkou snídani, oběd a večeři.`;
+  // Poměr maker denního cíle jen bez cíle porce — s ním by si pravidla odporovala (cíl porce
+  // vychází ze zbývající mezery, ne z poměru celého dne).
+  const portion =
+    mode === "planned"
+      ? `U jídla s cílem porce ze zadání drž kalorie co nejblíž cíli (klidně mírně pod, nikdy nad), bílkovin aspoň tolik, kolik cíl
+uvádí, a tuky a sacharidy nejvýš podle cíle — recept má co nejlíp doplnit její denní cíl. Typ jídla bez cíle porce (podle přání)
+drž podle orientačních kalorií. Žádný recept nesmí mít víc kalorií, než uživatelce dnes zbývá.`
+      : `Velikost porce drž podle orientačních kalorií pro daný typ jídla ze zadání${
+          mode === "today" ? " a žádný recept nesmí mít víc kalorií,\nnež uživatelce dnes zbývá" : ""
+        }. Bílkoviny, tuky a sacharidy drž zhruba v poměru jejího denního cíle, hlavně ať má recept dost bílkovin.`;
+  return `${which}
 Pokud uživatelka v přání chce konkrétní typ jídla (např. "jen večeře", "něco ke svačině"), navrhni ${MAX_RECIPES} různé varianty
-tohoto typu. Recepty se mají od sebe opravdu lišit (jiné hlavní jídlo nebo způsob přípravy), ne tři obměny téhož.
+tohoto typu${mode === "planned" ? " — přání má přednost před jídly ze zadání" : ""}. Recepty se mají od sebe opravdu lišit (jiné hlavní jídlo nebo způsob přípravy), ne tři obměny téhož.
 
 Každý recept je jedna porce pro jednu osobu a je to samostatná možnost, ne část jídelníčku — kalorie receptů se nesčítají.
-Velikost porce drž podle orientačních kalorií pro daný typ jídla ze zadání${
-    limitToToday ? " a žádný recept nesmí mít víc kalorií,\nnež uživatelce dnes zbývá" : ""
-  }. Bílkoviny, tuky a sacharidy drž zhruba v poměru jejího denního cíle, hlavně ať má recept dost bílkovin.`;
+${portion}`;
 }
 
 
@@ -160,9 +177,9 @@ const RECIPE_SET_JSON_FIELDS = `"recipes": [
     }
   ]`;
 
-function recipeSetSystemPrompt(limitToToday: boolean): string {
+function recipeSetSystemPrompt(mode: RecipeSetMode): string {
   return `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatelka chce nápady, co si uvařit.
-${recipeSetRules(limitToToday)}
+${recipeSetRules(mode)}
 
 Pokud uživatelka uvede suroviny, které má doma, každý recept musí jít uvařit JEN z nich — klidně navíc s běžnými
 základními surovinami (sůl, pepř, koření, olej, voda), i když v seznamu nejsou, ale žádné jiné suroviny nenavrhuj.
@@ -174,15 +191,16 @@ Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný ma
 }`;
 }
 
-export const RECIPE_SET_SYSTEM_PROMPT = recipeSetSystemPrompt(true);
+export const RECIPE_SET_SYSTEM_PROMPT = recipeSetSystemPrompt("today");
+export const RECIPE_SET_PLANNED_SYSTEM_PROMPT = recipeSetSystemPrompt("planned");
 // Recepty "na jindy" (chat, když dnes zbývá málo nebo appka data dne neposlala) — bez pravidla o zbytku dne.
-export const RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT = recipeSetSystemPrompt(false);
+export const RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT = recipeSetSystemPrompt("anotherDay");
 
-function fridgeRecipeSetSystemPrompt(limitToToday: boolean): string {
+function fridgeRecipeSetSystemPrompt(mode: RecipeSetMode): string {
   return `Jsi Mya, AI nutriční asistentka aplikace Nouri. Uživatelka ti pošle fotku obsahu lednice nebo spíže.
 Podívej se, jaké potravinové suroviny jsou na fotce rozpoznatelné, a navrhni z nich recepty (klidně i s běžnými základními
 surovinami jako sůl, pepř, olej, mouka, i když nejsou na fotce vidět).
-${recipeSetRules(limitToToday)}
+${recipeSetRules(mode)}
 
 Pokud na fotce nejde rozpoznat žádné použitelné potravinové suroviny (např. prázdná lednice, nesouvisející fotka),
 nastav "recognized": false a "recipes" nech prázdné.
@@ -194,8 +212,175 @@ Odpověz VÝHRADNĚ validním JSON objektem v tomto přesném tvaru (žádný ma
 }`;
 }
 
-export const FRIDGE_RECIPE_SET_SYSTEM_PROMPT = fridgeRecipeSetSystemPrompt(true);
-export const FRIDGE_RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT = fridgeRecipeSetSystemPrompt(false);
+export const FRIDGE_RECIPE_SET_SYSTEM_PROMPT = fridgeRecipeSetSystemPrompt("today");
+export const FRIDGE_RECIPE_SET_PLANNED_SYSTEM_PROMPT = fridgeRecipeSetSystemPrompt("planned");
+export const FRIDGE_RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT = fridgeRecipeSetSystemPrompt("anotherDay");
+
+/** System prompt sady receptů podle situace: na jindy / do zbytku dne / s plánem jídel. */
+export function recipeSetSystemPromptFor(
+  remaining: RecipeBudget | null,
+  mealPlan: MealTarget[] | undefined,
+  source: "text" | "fridge" = "text"
+): string {
+  if (!remaining) return source === "fridge" ? FRIDGE_RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT : RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT;
+  if (mealPlan && mealPlan.length > 0) {
+    return source === "fridge" ? FRIDGE_RECIPE_SET_PLANNED_SYSTEM_PROMPT : RECIPE_SET_PLANNED_SYSTEM_PROMPT;
+  }
+  return source === "fridge" ? FRIDGE_RECIPE_SET_SYSTEM_PROMPT : RECIPE_SET_SYSTEM_PROMPT;
+}
+
+// --- Jídla, která dnes ještě chybí, a cíl porce (MYA_COACH_SPEC 6.6, body 1 a 2; D8) ---
+// Dřív sada receptů v 19:00 po snídani a obědě navrhla zase snídani, oběd a večeři a večeře mířila
+// na 30 % denního cíle (při zbytku 700 kcal ~525 kcal), takže denní cíl nedoplnila. Typy jídel a
+// velikost porce teď počítá appka z dnešních zápisů a hodiny, model jen vaří.
+
+const MAIN_MEAL_TYPES = ["breakfast", "lunch", "dinner"] as const;
+type MainMealType = (typeof MAIN_MEAL_TYPES)[number];
+
+// Od téhle hodiny už dané hlavní jídlo nenavrhovat (snídaně ve 12:00 už je oběd).
+const MAIN_MEAL_LAST_HOUR: Record<MainMealType, number> = { breakfast: 11, lunch: 16, dinner: 24 };
+
+// Strop porce posledního hlavního jídla dne (D8). Zbytek nad ním je spíš nezapsané jídlo nebo
+// prostor na svačinu než jedna obří večeře.
+export const LAST_MEAL_MAX_SHARE = 0.45;
+// Kolik bílkovin porce reálně unese — stejná hranice jako řádek "Zbývá dnes" (dayStatus.ts), ať
+// si cíl porce a zbytek dne neodporují.
+const MEAL_MAX_PROTEIN_PER_KCAL = MAX_PROTEIN_PER_100_KCAL / 100;
+// Pod tímhle limitem se tuky/sacharidy v cíli porce neuvádí číslem, ale "co nejméně".
+const MIN_MEANINGFUL_FAT_G = 5;
+const MIN_MEANINGFUL_CARBS_G = 10;
+
+export interface MealTarget {
+  type: RecipeMealType;
+  calories: number;
+  minProtein: number;
+  maxFat: number;
+  maxCarbs: number;
+  /** Zbytek dne je větší než strop porce tohohle jídla (D8). */
+  remainderAboveCap: boolean;
+}
+
+/** Typy dnes zapsaných jídel od klienta (nedůvěryhodný vstup) — neznámé hodnoty vypadnou. */
+export function parseTodayMealTypes(value: unknown): RecipeMealType[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .slice(0, 40)
+    .map(parseMealType)
+    .filter((type): type is RecipeMealType => type !== undefined);
+}
+
+/**
+ * Hlavní jídla, která dnes ještě chybí a mají smysl. Jídlo vypadne, když je zapsané, když už je
+ * zapsané pozdější hlavní jídlo, nebo když jeho čas minul. Když chybí jen svačina, je to svačina.
+ */
+export function plannedMealTypes(todayTypes: RecipeMealType[], hour: number): RecipeMealType[] {
+  const logged = new Set<RecipeMealType>(todayTypes);
+  const planned = MAIN_MEAL_TYPES.filter(
+    (type, i) =>
+      !logged.has(type) && !MAIN_MEAL_TYPES.slice(i + 1).some((later) => logged.has(later)) && hour < MAIN_MEAL_LAST_HOUR[type]
+  );
+  return planned.length > 0 ? [...planned] : ["snack"];
+}
+
+/**
+ * Cíl porce jednoho jídla. Poslední hlavní jídlo dne dostane celý zbytek (se stropem
+ * LAST_MEAL_MAX_SHARE denního cíle), ostatní podíl denního cíle omezený zbytkem. Bílkoviny, tuky
+ * a sacharidy ze zbývající mezery v poměru porce ke zbytku dne.
+ */
+export function mealTargetFor(
+  type: RecipeMealType,
+  remaining: RecipeBudget,
+  dailyCalories: number,
+  isLastMainMeal: boolean
+): MealTarget {
+  const share = isLastMainMeal && type !== "snack" ? LAST_MEAL_MAX_SHARE : MEAL_PORTION_SHARES[type];
+  const cap = dailyCalories * share;
+  const calories = Math.max(0, Math.min(remaining.calories, cap));
+  const ratio = remaining.calories > 0 ? calories / remaining.calories : 0;
+  return {
+    type,
+    calories: Math.round(calories),
+    minProtein: Math.round(Math.min(remaining.protein * ratio, calories * MEAL_MAX_PROTEIN_PER_KCAL)),
+    maxFat: Math.round(remaining.fat * ratio),
+    maxCarbs: Math.round(remaining.carbs * ratio),
+    // Jen u jídla, které má zbytek dne uzavřít — u oběda zbytek po něm pokryje večeře.
+    remainderAboveCap: (isLastMainMeal || type === "snack") && remaining.calories > cap + 1,
+  };
+}
+
+/** Cíl porce pro každé jídlo, které dnes ještě chybí. */
+export function buildMealPlan(
+  todayTypes: RecipeMealType[],
+  hour: number,
+  remaining: RecipeBudget,
+  dailyCalories: number
+): MealTarget[] {
+  const planned = plannedMealTypes(todayTypes, hour);
+  const lastMain = planned.filter((type) => type !== "snack").at(-1);
+  return planned.map((type) => mealTargetFor(type, remaining, dailyCalories, type === lastMain));
+}
+
+/**
+ * Plán jídel pro chat z kontextu dne (typy zapsaných jídel, hodina, tréninkový bonus) — sdílí ho
+ * karty receptů v chatWithMya, řádek "Další jídla dne" i skript na porovnání modelů.
+ */
+export function chatMealPlan(
+  daily: DailyTarget,
+  day: { meals: { type?: RecipeMealType }[]; localHour?: number; workoutBonusCalories: number } | undefined,
+  remaining: RecipeBudget | null
+): MealTarget[] | undefined {
+  if (!remaining || !day || day.localHour === undefined) return undefined;
+  const todayTypes = day.meals.flatMap((m) => (m.type ? [m.type] : []));
+  return buildMealPlan(todayTypes, day.localHour, remaining, daily.calories + day.workoutBonusCalories);
+}
+
+const MEAL_TYPE_NAMES_CS: Record<RecipeMealType, string> = {
+  breakfast: "snídaně",
+  lunch: "oběd",
+  dinner: "večeře",
+  snack: "svačina",
+};
+
+function describePortionCs(target: MealTarget): string {
+  const parts = [`~${target.calories} kcal`];
+  if (target.minProtein > 0) parts.push(`aspoň ${target.minProtein} g bílkovin`);
+  parts.push(target.maxFat >= MIN_MEANINGFUL_FAT_G ? `tuky max ${target.maxFat} g` : "tuky co nejméně");
+  parts.push(target.maxCarbs >= MIN_MEANINGFUL_CARBS_G ? `sacharidy max ${target.maxCarbs} g` : "sacharidy co nejméně");
+  return parts.join(", ");
+}
+
+export function describeMealTargetCs(target: MealTarget): string {
+  return `${MEAL_TYPE_NAMES_CS[target.type]} ${describePortionCs(target)}`;
+}
+
+/**
+ * Řádek do kontextu chatu: jídla, která dnes ještě zbývají, každé s vlastním cílem porce (6.6 bod 6).
+ * Mya podle něj radí, "co si dát k večeři", i bez žádosti o recept.
+ *
+ * REGRESE (živý test 2026-10-12): řádek nesl cíl jen pro nejbližší jídlo (oběd ~476 kcal) a na
+ * dotaz na večeři ho Mya použila pro večeři. Proto každé zbývající jídlo dostane svůj cíl.
+ */
+export function describeNextMealCs(plan: MealTarget[], remainingCalories: number): string | undefined {
+  const next = plan[0];
+  if (!next) return undefined;
+  const remaining = Math.round(remainingCalories);
+  if (next.type === "snack") {
+    return (
+      `Další jídla dne: hlavní jídla má dnes zapsaná, když má hlad, tak svačina — cíl porce ${describePortionCs(next)} (spočítala appka).` +
+      (next.remainderAboveCap
+        ? ` Zbývá ještě ${remaining} kcal, víc než na svačinu — zeptej se, jestli nějaké jídlo nezapomněla zapsat; dojídat to nemusí.`
+        : "")
+    );
+  }
+  const last = plan[plan.length - 1];
+  return (
+    `Další jídla dne podle času a zápisů, každé s vlastním cílem porce (spočítala appka): ` +
+    `${plan.map((t) => `${MEAL_TYPE_NAMES_CS[t.type]} ${describePortionCs(t)}`).join("; ")}.` +
+    (plan.length === 1 && last.remainderAboveCap
+      ? ` Zbytek dne (${remaining} kcal) je víc než rozumná porce — buď nějaké jídlo nezapsala (zeptej se), nebo zbytek nech na svačinu.`
+      : "")
+  );
+}
 
 export interface RecipeBudget {
   calories: number;
@@ -236,6 +421,8 @@ export interface RecipeSetPromptInput {
   daily?: DailyTarget;
   preferences?: string;
   availableIngredients?: string;
+  // Jídla, která dnes ještě chybí, s cílem porce (buildMealPlan) — jen s `remaining`.
+  mealPlan?: MealTarget[];
 }
 
 export function buildRecipeSetUserPrompt(input: RecipeSetPromptInput): string {
@@ -253,6 +440,15 @@ export function buildRecipeSetUserPrompt(input: RecipeSetPromptInput): string {
       `Denní cíl: ${Math.round(input.daily.calories)} kcal (bílkoviny ${Math.round(input.daily.protein)} g, tuky ${Math.round(
         input.daily.fat
       )} g, sacharidy ${Math.round(input.daily.carbs)} g).`
+    );
+  }
+  if (remaining && input.mealPlan && input.mealPlan.length > 0) {
+    const names = input.mealPlan.map((t) => MEAL_TYPE_NAMES_CS[t.type]);
+    lines.push(
+      `Jídla, která jí dnes ještě chybí: ${names.join(", ")}. Bez jiného přání navrhni jen tato jídla${
+        names.length > 1 ? ` (${MAX_RECIPES} recepty rozděl mezi ně, každé aspoň jednou)` : ` (${MAX_RECIPES} různé varianty)`
+      }.`,
+      `Cíl porce (spočítala appka ze zbytku dne — drž se ho): ${input.mealPlan.map(describeMealTargetCs).join("; ")}.`
     );
   }
   lines.push(
@@ -275,8 +471,8 @@ export const SUGGEST_RECIPES_TOOL: OpenAITool = {
   function: {
     name: SUGGEST_RECIPES_TOOL_NAME,
     description:
-      "Navrhne uživatelce 3 různé recepty (standardně lehkou snídani, oběd a večeři) jako karty, které si může uložit " +
-      "nebo poslat do nákupního seznamu. Použij vždy, když chce recept nebo nápad, co si uvařit, když vypíše suroviny, " +
+      "Navrhne uživatelce 3 různé recepty (jídla, která jí dnes ještě chybí, nebo podle přání) jako karty, které si může uložit " +
+      "nebo poslat do nákupního seznamu. Použij vždy, když chce recept nebo nápad, co si uvařit (např. „co si mám uvařit k večeři?“), když vypíše suroviny, " +
       "které má doma, nebo když chce nové návrhy či úpravu dřívějších (např. „to samé bez šunky“). Nepoužívej na otázky " +
       "k už navrženému receptu (kolik má kalorií, čím nahradit surovinu, jak dlouho péct) — na ty odpověz textem.",
     parameters: {
@@ -289,13 +485,30 @@ export const SUGGEST_RECIPES_TOOL: OpenAITool = {
         preferences: {
           type: "string",
           description:
-            "Přání a omezení: typ jídla (např. „jen večeře“), dieta, čas přípravy, co vynechat. Prázdné, když žádné nemá.",
+            "Přání a omezení: typ jídla (např. „jen večeře“), dieta, čas přípravy, co vynechat — včetně toho, co podle " +
+            "informací o uživatelce nejí nebo nemá ráda. Prázdné, když nic takového není.",
         },
       },
       additionalProperties: false,
     },
   },
 };
+
+// REGRESE (živý test a A/B 2026-10-12, scénář 6c): s historií, ve které už byly karty, gpt-4.1-mini
+// na "Co si mám uvařit k večeři?" nástroj nezavolal ani po zpřísnění promptu a nabídl starší kartu.
+// Žádost o vaření nebo nový recept proto pozná appka sama a nástroj vynutí (tool_choice).
+// Jen přítomný čas / rozkaz ("uvařit", "uvařím", "uvař"), ne minulý ("uvařila jsem polévku").
+const COOK_VERB = /(?<!\p{L})(?:u|na)va[řr](?:it|ím|íš|íme|te)?(?!\p{L})/iu;
+const RECIPE_REQUEST =
+  /(?<!\p{L})(?:dej mi|chci|navrhni|vymysli|pošli|nějak[ýé]|jin[ýé]|nov[ýé]|další)\s+(?:\p{L}+\s+)?recept|(?<!\p{L})recept[ya]?\s+na(?!\p{L})/iu;
+// Otázka k už navrženému receptu ("kolik má ten recept tuku?") je na text, ne na nové karty.
+const EXISTING_RECIPE = /(?<!\p{L})(?:ten|tenhle|tom|tomu|toho|tvůj|tvém|tvého|tvému)\s+recept/iu;
+
+/** Zpráva uživatelky jednoznačně chce vařit nebo nové recepty — chat pak nástroj vynutí. */
+export function forcesRecipeTool(message: string): boolean {
+  if (EXISTING_RECIPE.test(message)) return false;
+  return COOK_VERB.test(message) || RECIPE_REQUEST.test(message);
+}
 
 /** Argumenty nástroje od modelu (JSON text) — nevalidní JSON = bez surovin a přání. */
 export function parseSuggestRecipesArgs(raw: string): { ingredients?: string; preferences?: string } {

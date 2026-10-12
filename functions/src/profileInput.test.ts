@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseProfileInput } from "./profileInput.js";
+import { nutritionFromProfile, parseProfileInput } from "./profileInput.js";
 
 const NOW = new Date("2026-09-26T12:00:00Z");
 
@@ -79,5 +79,13 @@ describe("parseProfileInput (N38)", () => {
 
   it("styl Myi propustí beze změny — validuje ho parseCoachingStyle", () => {
     expect(parseProfileInput({ ...valid, coachingStyle: "strict" }, NOW)?.coachingStyle).toBe("strict");
+  });
+
+  // Cílová váha určuje bílkoviny při hubnutí (D3) — bez ní by server počítal jiný cíl než Home.
+  it("cílovou váhu propustí, rozbitou zahodí; bílkoviny se pak počítají z ní", () => {
+    const withTarget = parseProfileInput({ ...valid, weight: 84, targetWeight: 70 }, NOW)!;
+    expect(withTarget.targetWeight).toBe(70);
+    expect(nutritionFromProfile(withTarget).macros.protein).toBe(126);
+    expect(parseProfileInput({ ...valid, targetWeight: "abc" }, NOW)).not.toHaveProperty("targetWeight");
   });
 });

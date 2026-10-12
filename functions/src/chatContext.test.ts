@@ -125,3 +125,25 @@ describe("formatChatContextCs", () => {
     expect(ctx.weightLogs?.[9].date).toBe("2026-09-15");
   });
 });
+
+describe("formatChatContextCs — zbytek dne a další jídlo (MYA_COACH_SPEC 5.3, 6.6)", () => {
+  it("při zapsaných jídlech řádek Zbývá dnes a cíl porce dalšího jídla", () => {
+    const ctx = parseChatContext({ ...valid, localHour: 18, consumedCalories: 1505, consumedProtein: 105 })!;
+    const text = formatChatContextCs(ctx, TARGETS);
+    expect(text).toContain("Zbývá dnes: 415 kcal, bílkoviny 48 g");
+    expect(text).toContain("Další jídla dne podle času a zápisů, každé s vlastním cílem porce (spočítala appka): večeře");
+  });
+
+  it("pozdě večer žádné další jídlo, bez zápisu žádný zbytek (nezapsáno ≠ nesnědeno)", () => {
+    const late = formatChatContextCs(parseChatContext({ ...valid, localHour: 22 })!, TARGETS);
+    expect(late).toContain("mezeru už nehoň");
+    expect(late).not.toContain("Další jídla dne");
+    const empty = formatChatContextCs(
+      parseChatContext({ ...valid, localHour: 8, consumedCalories: 0, consumedProtein: 0, consumedCarbs: 0, consumedFat: 0, meals: [] })!,
+      TARGETS
+    );
+    expect(empty).not.toContain("Zbývá dnes");
+    expect(empty).toContain("Další jídla dne podle času a zápisů, každé s vlastním cílem porce (spočítala appka): snídaně");
+    expect(empty).toContain("; večeře ~");
+  });
+});

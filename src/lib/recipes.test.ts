@@ -16,7 +16,17 @@ vi.mock("firebase/functions", () => ({
   },
 }));
 
-const { MyaRecipes, chatHistoryContent, isRecipeSaved, normalizeRecipeSet } = await import("./recipes");
+const {
+  MyaRecipes,
+  bestFitIndex,
+  chatHistoryContent,
+  describeRecipeFit,
+  isRecipeSaved,
+  normalizeRecipeSet,
+  recipeFit,
+  sortRecipesByFit,
+  todayMealTypesOf,
+} = await import("./recipes");
 
 const recipe = {
   name: "Tvarohová miska",
@@ -40,6 +50,9 @@ const input = {
   dailyProtein: 120,
   dailyFat: 60,
   dailyCarbs: 190,
+  // Jídla, která dnes ještě chybí (MYA_COACH_SPEC 6.6) — server podle nich navrhne jen večeři.
+  todayMealTypes: ["breakfast" as const, "lunch" as const],
+  localHour: 18,
 };
 
 beforeEach(() => {
@@ -112,5 +125,54 @@ describe("chatHistoryContent", () => {
         "- Tvarohová miska — 300 kcal, bílkoviny 30 g, tuky 5 g, sacharidy 20 g, 5 min; suroviny: tvaroh; postup: smíchat\n" +
         "- Večeře: Losos se zeleninou — 300 kcal, bílkoviny 30 g, tuky 5 g, sacharidy 20 g, 5 min; suroviny: tvaroh; postup: smíchat]"
     );
+  });
+});
+
+// MYA_COACH_SPEC 6.6 bod 5, D9 — "Doplní 42 z 48 g bílkovin, zbude ti 30 kcal" a štítek u nejlepšího.
+describe("recipeFit / describeRecipeFit", () => {
+  const remaining = { calories: 650, protein: 55 };
+
+  it("recept do zbytku dne: kolik bílkovin doplní a kolik kcal zbude", () => {
+    const fit = recipeFit({ ...dinner, calories: 620, protein: 48 }, remaining);
+    expect(fit).toEqual({ proteinGap: 55, proteinCovered: 48, leftoverCalories: 30, fits: true });
+    expect(describeRecipeFit(fit)).toBe("Doplní 48 z 55 g bílkovin · zbude ti 30 kcal");
+  });
+
+  it("víc bílkovin, než chybí, se počítá jen do mezery; splněné bílkoviny zvlášť", () => {
+    expect(recipeFit({ ...dinner, protein: 70 }, remaining).proteinCovered).toBe(55);
+    expect(describeRecipeFit(recipeFit(dinner, { calories: 650, protein: -10 }))).toBe("Bílkoviny máš splněné · zbude ti 350 kcal");
+  });
+
+  it("nad zbytkem dne (s tolerancí 5 %) varování, těsně nad ní ještě vejde", () => {
+    const over = recipeFit({ ...dinner, calories: 780 }, remaining);
+    expect(over.fits).toBe(false);
+    expect(describeRecipeFit(over)).toBe("O 130 kcal víc, než ti dnes zbývá");
+    const tight = recipeFit({ ...dinner, calories: 670 }, remaining);
+    expect(tight.fits).toBe(true);
+    expect(describeRecipeFit(tight)).toContain("vyčerpá zbytek dne");
+  });
+});
+
+describe("bestFitIndex / sortRecipesByFit", () => {
+  const remaining = { calories: 650, protein: 55 };
+  const a = { ...dinner, name: "A", calories: 600, protein: 30 };
+  const b = { ...dinner, name: "B", calories: 620, protein: 50 };
+  const c = { ...dinner, name: "C", calories: 800, protein: 70 };
+
+  it("nejlíp sedí recept, který se vejde a pokryje nejvíc bílkovin", () => {
+    expect(bestFitIndex([a, b, c], remaining)).toBe(1);
+    expect(bestFitIndex([c, { ...c, name: "D" }], remaining)).toBeNull(); // žádný se nevejde
+    expect(bestFitIndex([b], remaining)).toBeNull(); // jediný recept štítek nepotřebuje
+  });
+
+  it("řadí podle shody jen v rámci typu jídla, stabilně", () => {
+    const breakfast = { ...recipe, name: "Snídaně", mealType: "breakfast" as const, calories: 900, protein: 5 };
+    expect(sortRecipesByFit([c, a, breakfast, b], remaining).map((r) => r.name)).toEqual(["Snídaně", "B", "A", "C"]);
+  });
+});
+
+describe("todayMealTypesOf", () => {
+  it("jen známé typy, bez duplicit", () => {
+    expect(todayMealTypesOf([{ type: "lunch" }, { type: "breakfast" }, { type: "lunch" }, { type: "brunch" }])).toEqual(["breakfast", "lunch"]);
   });
 });

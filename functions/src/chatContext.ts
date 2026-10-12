@@ -1,5 +1,6 @@
-import { describeIntakeStatusCs } from "./dayStatus.js";
+import { describeIntakeStatusCs, describeRemainingTodayCs, LATE_EVENING_HOUR } from "./dayStatus.js";
 import { sanitizePromptText } from "./promptText.js";
+import { chatMealPlan, chatRecipeBudget, describeNextMealCs } from "./recipes.js";
 
 // Kontext dne pro chatWithMya (testování 2026-10-10: "Mya nevidí data uživatele a nemůže
 // diskutovat o situaci"). Chat dřív znal jen jméno, cíl a cílové kalorie z profilu — na otázku
@@ -212,6 +213,24 @@ export function formatChatContextCs(
       `sacharidy ${Math.round(context.consumedCarbs)} / ${targets.carbs} g, tuky ${Math.round(context.consumedFat)} / ${targets.fat} g` +
       (context.hasIncompleteMacroData ? " (orientačně — některé dnešní jídlo nemá rozpad maker)." : ".")
   );
+
+  // Zbytek dne a další jídlo počítá appka (MYA_COACH_SPEC 5.3, 6.6) — model je jen vykládá.
+  // Bez zapsaného jídla zbytek neplatí ("nic nezapsáno" ≠ "nic nesnědeno"), další jídlo ano.
+  const remainingLine = describeRemainingTodayCs({
+    calories: dayTarget - context.consumedCalories,
+    protein: targets.protein - context.consumedProtein,
+    carbs: targets.carbs - context.consumedCarbs,
+    fat: targets.fat - context.consumedFat,
+    hasIncompleteMacroData: context.hasIncompleteMacroData,
+    localHour: context.localHour,
+  });
+  if (remainingLine && context.consumedCalories > 0) lines.push(remainingLine);
+  if (context.localHour !== undefined && context.localHour < LATE_EVENING_HOUR) {
+    const budget = chatRecipeBudget(targets, context);
+    const plan = chatMealPlan(targets, context, budget);
+    const nextMeal = budget && plan ? describeNextMealCs(plan, budget.calories) : undefined;
+    if (nextMeal) lines.push(nextMeal);
+  }
 
   if (context.workouts.length > 0) {
     const workouts = context.workouts

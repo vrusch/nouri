@@ -4,7 +4,8 @@ import { X, Send, Loader2, Trash2 } from "lucide-react";
 import { useAuth } from "../context/useAuth";
 import { db } from "../db/db";
 import { MyaAI } from "../lib/ai";
-import { calculateNutrition } from "../lib/nutrition";
+import { calculateNutrition, computeRemainingMacros, getRecipeAvailability } from "../lib/nutrition";
+import type { UserProfile } from "../context/AuthContext";
 import { buildChatContext, getRecentDates } from "../lib/chatContext";
 import { getLocalDateISO } from "../lib/date";
 import { WATER_TARGET_GLASSES } from "../lib/water";
@@ -22,9 +23,17 @@ import {
   type WeightLogEntry,
 } from "../lib/cloudSync";
 import { reportCloudError } from "../lib/cloudErrors";
-import { chatHistoryContent, isRecipeSaved, type RecipeResult } from "../lib/recipes";
+import {
+  bestFitIndex,
+  chatHistoryContent,
+  isRecipeSaved,
+  recipeFit,
+  sortRecipesByFit,
+  type RecipeResult,
+} from "../lib/recipes";
 import { buildShoppingListItems } from "../lib/shoppingList";
 import { RecipeSuggestion } from "./RecipeCards";
+import ChatRichText from "./ChatRichText";
 
 interface MyaChatModalProps {
   onClose: () => void;
@@ -89,6 +98,24 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
   }, [user]);
   const [expandedRecipeKey, setExpandedRecipeKey] = useState<string | null>(null);
 
+  // Luteálně navýšené TDEE (viz props) — stejný cíl jako Home.
+  const withEffectiveTDEE = (p: UserProfile): UserProfile =>
+    effectiveCalibratedTDEE !== undefined ? { ...p, calibratedTDEE: effectiveCalibratedTDEE } : p;
+
+  // Zbytek dne pro "Doplní X z Y g bílkovin" na kartách receptů (MYA_COACH_SPEC D9) — stejný
+  // výpočet jako Home (cíl + dnešní trénink − snězeno). null = data ještě nedorazila, nebo dnes
+  // zbývá tak málo, že server navrhuje recepty "na jindy" (stejná hranice jako záložka Recepty).
+  const recipeFitRemaining = (() => {
+    if (!profile || recentMeals === undefined || recentWorkouts === undefined) return null;
+    const remaining = computeRemainingMacros(
+      calculateNutrition(withEffectiveTDEE(profile)),
+      recentMeals.filter((m) => m.date === today)
+    );
+    const workoutBonus = recentWorkouts.filter((w) => w.date === today).reduce((sum, w) => sum + w.caloriesBurned, 0);
+    const calories = remaining.calories + workoutBonus;
+    return getRecipeAvailability(calories) === "ready" ? { calories, protein: remaining.protein } : null;
+  })();
+
   const handleSaveRecipe = async (recipe: RecipeResult) => {
     if (!user) return;
     await saveRecipe(user.uid, recipe, "chat");
@@ -141,8 +168,7 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
         .map((message) => ({ role: message.role, content: chatHistoryContent(message) }));
       // chatWithMya nikdy nezreject appce zpátky (viz ai.ts) — i offline appka doběhne rychle
       // s Czech fallback textem ("Mya právě neodpovídá..."), takže finally spolehlivě proběhne.
-      const effectiveProfile =
-        effectiveCalibratedTDEE !== undefined ? { ...profile, calibratedTDEE: effectiveCalibratedTDEE } : profile;
+      const effectiveProfile = withEffectiveTDEE(profile);
       // Snímek dne se staví až při odeslání, ať Mya vidí stav i po jídle zapsaném během konverzace.
       // Dokud jídla/tréninky nedorazí z Dexie, appka kontext neposílá vůbec (radši "nevidím" než 0 kcal).
       const context =
@@ -161,7 +187,9 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
             })
           : undefined;
       const reply = await MyaAI.chatWithMya(effectiveProfile, history, context);
-      saveChatMessage(user.uid, "assistant", reply.text, reply.recipes);
+      // Karty do dneška seřazené podle toho, jak doplní zbytek dne (v rámci typu jídla).
+      const recipes = reply.recipes && recipeFitRemaining ? sortRecipesByFit(reply.recipes, recipeFitRemaining) : reply.recipes;
+      saveChatMessage(user.uid, "assistant", reply.text, recipes);
     } finally {
       setSending(false);
     }
@@ -240,18 +268,21 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
             <div key={m.id} className="space-y-2">
               <div className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div
-                  className={`max-w-[85%] px-4 py-2.5 text-sm whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl ${
+                  className={`max-w-[85%] px-4 py-2.5 text-sm [overflow-wrap:anywhere] rounded-2xl ${
                     m.role === "user"
-                      ? `text-white rounded-br-sm ${isFemale ? "bg-rose-600" : "bg-sky-600"}`
+                      ? `whitespace-pre-wrap text-white rounded-br-sm ${isFemale ? "bg-rose-600" : "bg-sky-600"}`
                       : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 rounded-bl-sm"
                   }`}
                 >
-                  {m.content}
+                  {/* Formátování jen u Myi — zprávy uživatelky se ukazují doslova. */}
+                  {m.role === "assistant" ? <ChatRichText text={m.content} /> : m.content}
                 </div>
               </div>
               {m.role === "assistant" &&
                 m.recipes?.map((recipe, i) => {
                   const key = `${m.id}-${i}`;
+                  // "Doplní X z Y g" jen u dnešních karet — včerejší karta proti dnešnímu zbytku nedává smysl.
+                  const fitRemaining = recipeFitRemaining && getLocalDateISO(new Date(m.createdAt)) === today ? recipeFitRemaining : null;
                   return (
                     <RecipeSuggestion
                       key={key}
@@ -261,6 +292,8 @@ export default function MyaChatModal({ onClose, effectiveCalibratedTDEE }: MyaCh
                       onSave={handleSaveRecipe}
                       onAddToShoppingList={handleAddToShoppingList}
                       alreadySaved={isRecipeSaved(recipe, savedRecipes)}
+                      fit={fitRemaining ? recipeFit(recipe, fitRemaining) : undefined}
+                      bestFit={!!fitRemaining && bestFitIndex(m.recipes ?? [], fitRemaining) === i}
                     />
                   );
                 })}

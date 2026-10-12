@@ -5,9 +5,17 @@ import {
   FRIDGE_RECIPE_SET_SYSTEM_PROMPT,
   RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
   RECIPE_SET_SYSTEM_PROMPT,
+  FRIDGE_RECIPE_SET_PLANNED_SYSTEM_PROMPT,
+  RECIPE_SET_PLANNED_SYSTEM_PROMPT,
+  buildMealPlan,
   buildRecipeSetUserPrompt,
+  describeNextMealCs,
+  parseTodayMealTypes,
+  plannedMealTypes,
+  recipeSetSystemPromptFor,
   chatRecipeBudget,
   chatRecipeIntro,
+  forcesRecipeTool,
   mealPortionGuides,
   parseDailyTarget,
   parseRecipeSet,
@@ -228,5 +236,158 @@ describe("chatRecipeIntro", () => {
       "Tady máš tenhle recept — rozklikni, co tě láká:"
     );
     expect(chatRecipeIntro({ hasIngredients: false, todayFull: true, count: 3 })).toContain("inspiraci na jindy");
+  });
+});
+
+describe("plannedMealTypes (6.6 bod 2)", () => {
+  it("v 19:00 po snídani a obědě jen večeře", () => {
+    expect(plannedMealTypes(["breakfast", "lunch"], 19)).toEqual(["dinner"]);
+  });
+
+  it("ráno bez zápisu všechna tři hlavní jídla, v poledne po snídani oběd a večeře", () => {
+    expect(plannedMealTypes([], 8)).toEqual(["breakfast", "lunch", "dinner"]);
+    expect(plannedMealTypes(["breakfast", "snack"], 12)).toEqual(["lunch", "dinner"]);
+  });
+
+  it("propásnutou snídani ani oběd nenavrhuje (čas minul nebo je zapsané pozdější jídlo)", () => {
+    expect(plannedMealTypes(["lunch"], 13)).toEqual(["dinner"]);
+    expect(plannedMealTypes([], 19)).toEqual(["dinner"]);
+    expect(plannedMealTypes(["snack"], 11)).toEqual(["lunch", "dinner"]);
+  });
+
+  it("po všech hlavních jídlech svačina", () => {
+    expect(plannedMealTypes(["breakfast", "lunch", "dinner"], 20)).toEqual(["snack"]);
+    expect(plannedMealTypes(["dinner"], 20)).toEqual(["snack"]);
+  });
+});
+
+describe("mealTargetFor / buildMealPlan (6.6 bod 1, D8)", () => {
+  const remaining = { calories: 650, protein: 55, fat: 22, carbs: 70 };
+
+  it("scénář 7: večeře jako poslední jídlo dostane celý zbytek a celou mezeru bílkovin", () => {
+    expect(buildMealPlan(["breakfast", "lunch"], 18, remaining, 1750)).toEqual([
+      { type: "dinner", calories: 650, minProtein: 55, maxFat: 22, maxCarbs: 70, remainderAboveCap: false },
+    ]);
+  });
+
+  it("REGRESE: zbytek 700 kcal už nezastropuje 30 % denního cíle (~525 kcal)", () => {
+    const [dinner] = buildMealPlan(["breakfast", "lunch"], 19, { calories: 700, protein: 50, fat: 25, carbs: 80 }, 1750);
+    expect(dinner.calories).toBe(700);
+  });
+
+  it("zbytek nad 45 % denního cíle se zastropuje a označí (nezapsané jídlo nebo svačina)", () => {
+    const [dinner] = buildMealPlan(["breakfast", "lunch"], 19, { calories: 1000, protein: 80, fat: 40, carbs: 100 }, 1750);
+    expect(dinner.calories).toBe(788);
+    expect(dinner.remainderAboveCap).toBe(true);
+    expect(dinner.minProtein).toBe(63); // 80 × 788/1000
+  });
+
+  it("víc bílkovin, než se do porce vejde (~20 g na 100 kcal), se nežádá", () => {
+    const [dinner] = buildMealPlan(["breakfast", "lunch"], 19, { calories: 300, protein: 80, fat: 5, carbs: 10 }, 1750);
+    expect(dinner.minProtein).toBe(60);
+  });
+
+  it("oběd není poslední jídlo — jen podíl denního cíle, mezera v poměru porce", () => {
+    const [lunch, dinner] = buildMealPlan(["breakfast"], 12, { calories: 1300, protein: 100, fat: 45, carbs: 140 }, 1750);
+    expect(lunch.type).toBe("lunch");
+    expect(lunch.calories).toBe(613); // 35 % z 1750
+    expect(lunch.minProtein).toBe(47); // 100 × 612,5/1300
+    expect(lunch.remainderAboveCap).toBe(false);
+    expect(dinner.calories).toBe(788);
+  });
+});
+
+describe("describeNextMealCs (6.6 bod 6)", () => {
+  it("večeře s cílem porce, bez dalších jídel", () => {
+    const plan = buildMealPlan(["breakfast", "lunch"], 18, { calories: 650, protein: 55, fat: 22, carbs: 70 }, 1750);
+    expect(describeNextMealCs(plan, 650)).toBe(
+      "Další jídla dne podle času a zápisů, každé s vlastním cílem porce (spočítala appka): večeře ~650 kcal, aspoň 55 g bílkovin, tuky max 22 g, sacharidy max 70 g."
+    );
+  });
+
+  // REGRESE (živý test 2026-10-12): s cílem jen pro nejbližší jídlo (oběd) ho Mya na dotaz na večeři
+  // použila pro večeři — každé zbývající jídlo má vlastní cíl.
+  it("oběd i večeře, každé s vlastním cílem porce", () => {
+    const plan = buildMealPlan(["breakfast"], 12, { calories: 1300, protein: 100, fat: 45, carbs: 140 }, 1750);
+    const text = describeNextMealCs(plan, 1300)!;
+    expect(text).toContain("oběd ~613 kcal, aspoň 47 g bílkovin");
+    expect(text).toContain("; večeře ~788 kcal");
+    expect(text).not.toContain("nezapsala");
+  });
+
+  it("velký zbytek: zeptat se na nezapsané jídlo, nebo svačina", () => {
+    const plan = buildMealPlan(["breakfast", "lunch"], 18, { calories: 1000, protein: 80, fat: 40, carbs: 100 }, 1750);
+    expect(describeNextMealCs(plan, 1000)).toContain("nezapsala (zeptej se)");
+  });
+
+  it("po hlavních jídlech svačina bez tlaku dojídat; vyčerpané tuky jako co nejméně", () => {
+    const plan = buildMealPlan(["breakfast", "lunch", "dinner"], 20, { calories: 600, protein: 20, fat: 2, carbs: 60 }, 1750);
+    const text = describeNextMealCs(plan, 600)!;
+    expect(text).toContain("svačina");
+    expect(text).toContain("tuky co nejméně");
+    expect(text).toContain("dojídat to nemusí");
+  });
+});
+
+describe("sada receptů s plánem jídel", () => {
+  const remaining = { calories: 650, protein: 55, fat: 22, carbs: 70 };
+  const daily = { calories: 1750, protein: 126, fat: 49, carbs: 200 };
+
+  it("prompt nese chybějící jídla a cíl porce, bez plánu beze změny", () => {
+    const mealPlan = buildMealPlan(["breakfast", "lunch"], 18, remaining, daily.calories);
+    const text = buildRecipeSetUserPrompt({ remaining, goalLabel: "hubnutí", daily, mealPlan });
+    expect(text).toContain("Jídla, která jí dnes ještě chybí: večeře.");
+    expect(text).toContain(`(${MAX_RECIPES} různé varianty)`);
+    expect(text).toContain("večeře ~650 kcal, aspoň 55 g bílkovin");
+    expect(buildRecipeSetUserPrompt({ remaining, goalLabel: "hubnutí", daily })).not.toContain("chybí");
+  });
+
+  it("system prompt s plánem nenutí poměr denního cíle a přání má přednost", () => {
+    const mealPlan = buildMealPlan(["breakfast", "lunch"], 18, remaining, daily.calories);
+    expect(recipeSetSystemPromptFor(remaining, mealPlan)).toBe(RECIPE_SET_PLANNED_SYSTEM_PROMPT);
+    expect(recipeSetSystemPromptFor(remaining, mealPlan, "fridge")).toBe(FRIDGE_RECIPE_SET_PLANNED_SYSTEM_PROMPT);
+    expect(recipeSetSystemPromptFor(remaining, undefined)).toBe(RECIPE_SET_SYSTEM_PROMPT);
+    expect(recipeSetSystemPromptFor(null, mealPlan)).toBe(RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT);
+    expect(RECIPE_SET_PLANNED_SYSTEM_PROMPT).not.toContain("v poměru jejího denního cíle");
+    expect(RECIPE_SET_PLANNED_SYSTEM_PROMPT).toContain("přání má přednost");
+    expect(RECIPE_SET_PLANNED_SYSTEM_PROMPT).toContain("nesmí mít víc kalorií");
+    expect(RECIPE_SET_SYSTEM_PROMPT).toContain("v poměru jejího denního cíle");
+  });
+
+  it("typy jídel od klienta: neznámé vypadnou, ne-pole = nic", () => {
+    expect(parseTodayMealTypes(["breakfast", "brunch", 3, "lunch"])).toEqual(["breakfast", "lunch"]);
+    expect(parseTodayMealTypes("breakfast")).toBeUndefined();
+    expect(parseTodayMealTypes([])).toEqual([]);
+  });
+});
+
+// REGRESE (živý test a A/B 2026-10-12, scénář 6c): s historií karet model nástroj nezavolal.
+describe("forcesRecipeTool", () => {
+  it("žádost o vaření nebo nový recept nástroj vynutí", () => {
+    for (const text of [
+      "Co si mám uvařit k večeři?",
+      "co uvařit z vajec a šunky",
+      "Uvař mi něco rychlého",
+      "Dej mi recept na večeři.",
+      "Chci nějaký jiný recept",
+      "navrhni recepty na oběd",
+      "Recepty na večeři bez masa?",
+      "Navařím si na tři dny, co by šlo?",
+    ]) {
+      expect(forcesRecipeTool(text), text).toBe(true);
+    }
+  });
+
+  it("minulý čas, otázka k existujícímu receptu a běžný dotaz nástroj nevynutí", () => {
+    for (const text of [
+      "Uvařila jsem si těstoviny, je to ok?",
+      "Kolik má ten recept tuku?",
+      "V tom receptu nahradím šunku čím?",
+      "Co si dám k večeři? Vařit se mi nechce.",
+      "Jak dohnat bílkoviny?",
+      "Jak dlouho to mám vařit?",
+    ]) {
+      expect(forcesRecipeTool(text), text).toBe(false);
+    }
   });
 });

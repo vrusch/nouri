@@ -1,32 +1,38 @@
 import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
-import { calculateNutrition, calculateAge, type Goal } from "./nutrition.js";
+import { calculateAge, type Goal } from "./nutrition.js";
 import { callOpenAIChat } from "./openai.js";
 import { enforceRateLimit } from "./rateLimit.js";
 import { parseCoachingStyle, buildCoachingPrompt } from "./coachingStyle.js";
-import { parseProfileInput, type UserProfileInput } from "./profileInput.js";
-import { describeIntakeStatusCs, INTAKE_STATUS_RULE } from "./dayStatus.js";
-import { parseChatContext, formatChatContextCs } from "./chatContext.js";
+import { buildChatSystemPrompt } from "./chatPrompt.js";
+import { parseUserStory } from "./userStory.js";
+import { ACTIVITY_LEVELS, nutritionFromProfile, parseProfileInput } from "./profileInput.js";
+import { describeIntakeStatusCs, greetingProteinToCatchUp, INTAKE_STATUS_RULE } from "./dayStatus.js";
+import { parseChatContext } from "./chatContext.js";
 import { parseChatMessages } from "./chatMessages.js";
 import { sanitizePromptText } from "./promptText.js";
 import { MULTI_MEAL_SYSTEM_PROMPT, parseMealsFromText } from "./mealText.js";
 import { parseFoodImages } from "./visionInput.js";
 import { FOOD_PHOTO_SYSTEM_PROMPT, parseFoodPhotoResult } from "./foodPhoto.js";
 import {
-  FRIDGE_RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
-  FRIDGE_RECIPE_SET_SYSTEM_PROMPT,
-  RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
-  RECIPE_SET_SYSTEM_PROMPT,
   SUGGEST_RECIPES_TOOL,
   SUGGEST_RECIPES_TOOL_NAME,
+  buildMealPlan,
   buildRecipeSetUserPrompt,
+  chatMealPlan,
   chatRecipeBudget,
   chatRecipeIntro,
+  forcesRecipeTool,
   parseDailyTarget,
   parseRecipeSet,
   parseSuggestRecipesArgs,
+  parseTodayMealTypes,
   recipeSetBudget,
+  recipeSetSystemPromptFor,
   sanitizeRecipeResult,
+  type DailyTarget,
+  type MealTarget,
+  type RecipeBudget,
   type RecipeResult,
 } from "./recipes.js";
 
@@ -35,26 +41,15 @@ export { sendNudgePushes, sendTestPush } from "./pushNudges.js";
 
 const openaiApiKey = defineSecret("OPENAI_API_KEY");
 
+// Model chatu a sad receptů (MYA_COACH_SPEC D1, D10). Fáze 1 gpt-4.1-mini — jde přes dnešní
+// callOpenAIChat beze změny parametrů. Fáze 2 (spec 5A) ho vymění za gpt-6.1-sol a k tomu
+// upraví parametry volání (reasoning_effort, max_completion_tokens).
+const CHAT_MODEL = "gpt-4.1-mini";
+
 function requireAuth(request: CallableRequest) {
   if (!request.auth) {
     throw new HttpsError("unauthenticated", "Musíš být přihlášená.");
   }
-}
-
-// N17 v REFERENCE/AUDIT_2026-08-14.md — tenhle přesný objekt byl doslovně zkopírovaný na 3
-// místech (generateWelcomeReport, getDailyGreeting, chatWithMya), pokaždé nad stejným profilem.
-function buildNutritionFromProfile(profile: UserProfileInput) {
-  return calculateNutrition({
-    gender: profile.gender,
-    weight: profile.weight,
-    height: profile.height,
-    birthDate: profile.birthDate,
-    activityLevel: profile.activityLevel,
-    goal: profile.goal,
-    calibratedTDEE: profile.calibratedTDEE,
-    customProteinGrams: profile.customProteinGrams,
-    customFatGrams: profile.customFatGrams,
-  });
 }
 
 // N19 — obrana proti runaway smyčce (chybný retry v klientovi apod.). Dva tiery: EXPENSIVE pro
@@ -81,15 +76,6 @@ function parseBoundedInt(value: unknown, min: number, max: number): number | und
   return value !== undefined && value !== null && Number.isInteger(n) && n >= min && n <= max ? n : undefined;
 }
 
-const ACTIVITY_LEVELS: Record<number, string> = {
-  1: "Leží v posteli / naprostý klid",
-  1.2: "Sedavé zaměstnání, minimální pohyb",
-  1.375: "Lehká aktivita (1-3 dny/týden cvičení nebo 10k kroků)",
-  1.55: "Střední aktivita (3-5 dní/týden cvičení)",
-  1.725: "Vysoká aktivita (6-7 dní/týden cvičení)",
-  1.9: "Extrémní aktivita (profesionální sport, těžká fyzická práce)",
-};
-
 export const generateWelcomeReport = onCall(
   { secrets: [openaiApiKey], region: "us-central1" },
   async (request) => {
@@ -99,7 +85,7 @@ export const generateWelcomeReport = onCall(
     await enforceRateLimit(request.auth!.uid, "generateWelcomeReport", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
     const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
-    const results = buildNutritionFromProfile(profile);
+    const results = nutritionFromProfile(profile);
 
     // N36 (AUDIT_2026-08-14.md) — dřív naivní rozdíl kalendářních roků bez ohledu na to,
     // jestli už letos narozeniny byly, na rozdíl od calculateAge() o pár řádků výš uvnitř
@@ -231,7 +217,7 @@ export const getDailyGreeting = onCall(
     // zastaralé (naposledy zapsané při onboardingu nebo posledním "Aktualizovat analýzu").
     // Dnešní tréninkový bonus appka přičítá stejně jako Home (adjustedGoalCalories), jinak by
     // Mya po tréninku hlásila překročení, které Home neukazuje.
-    const nutrition = buildNutritionFromProfile(profile);
+    const nutrition = nutritionFromProfile(profile);
     const targetCalories = nutrition.targetCalories + workoutBonusCalories;
     const targetProtein = nutrition.macros.protein;
 
@@ -239,7 +225,8 @@ export const getDailyGreeting = onCall(
     // buď nacpal všechno, nebo vybíral náhodně.
     const systemPrompt = `Jsi Mya z aplikace Nouri. Piš krátké, úderné zprávy (max 2 věty).
 Zohledni aktuální stav uživatele. Nezmiňuj všechno najednou — vyber nejvýš dvě nejdůležitější věci v tomhle pořadí:
-1) dnešní překročení kalorického cíle (jen při STAV: PŘEKROČENO), 2) připomínky uvedené v datech (nezapsané jídlo, málo vody), 3) včerejší překročení cíle, 4) výrazně chybějící bílkoviny vzhledem k denní době (konkrétně v gramech).
+1) dnešní překročení kalorického cíle (jen při STAV: PŘEKROČENO), 2) připomínky uvedené v datech (nezapsané jídlo, málo vody), 3) včerejší překročení cíle, 4) bílkoviny k dohnání vzhledem k denní době — jen když je data uvádějí, a to přesně tím číslem, klidně s tipem, čím je dohnat (tvaroh, skyr, kuřecí), nikdy vyčítavě.
+O chybějících bílkovinách mluv JEN podle řádku "Bílkoviny, které jde dnes ještě dohnat" — když v datech není, o chybějících bílkovinách nic neříkej.
 ${INTAKE_STATUS_RULE}
 O nezapsaném jídle nebo málo vypité vodě mluv JEN když je uvedeno v "Appka právě připomíná" — jinak nic takového netvrď ani nedomýšlej.
 ${buildCoachingPrompt(coachingStyle, isVacationDay, profile.gender)}${
@@ -265,7 +252,18 @@ ${buildCoachingPrompt(coachingStyle, isVacationDay, profile.gender)}${
         ? ` Dnešní nálada/energie: ${mood}/5 (1 = mizerně, 5 = skvěle).${moodNote ? ` Poznámka od uživatele: "${moodNote}"` : ""}`
         : "";
 
-    const intakeSummary = describeIntakeStatusCs(consumedCalories, targetCalories, consumedProtein, targetProtein);
+    // D6 (MYA_COACH_SPEC): celá mezera bílkovin ("chybí 48 g") při 245 zbývajících kcal byla hlavní
+    // zdroj "vyčítavosti" — pozdrav dostane jen část, která se do zbytku dne reálně vejde, a pozdě
+    // večer nic.
+    const intakeSummary = describeIntakeStatusCs(consumedCalories, targetCalories, consumedProtein, targetProtein, {
+      omitProtein: true,
+    });
+    const proteinToCatchUp =
+      consumedCalories > 0
+        ? greetingProteinToCatchUp(targetCalories - consumedCalories, targetProtein - consumedProtein, localHour)
+        : undefined;
+    const proteinContext =
+      proteinToCatchUp !== undefined ? ` Bílkoviny, které jde dnes ještě dohnat: ~${proteinToCatchUp} g.` : "";
 
     const waterContext =
       waterGlasses !== undefined ? ` Voda dnes: ${waterGlasses} z ${waterTarget ?? 8} sklenic (sklenice = 250 ml).` : "";
@@ -282,7 +280,8 @@ ${buildCoachingPrompt(coachingStyle, isVacationDay, profile.gender)}${
       nudgeKinds.length > 0 ? ` Appka právě připomíná: ${nudgeKinds.map((k) => NUDGE_KIND_LABELS[k]).join("; ")}.` : "";
 
     const workoutContext = workoutBonusCalories > 0 ? ` (včetně +${workoutBonusCalories} kcal za dnešní trénink)` : "";
-    const userPrompt = `Uživatel: ${safeName}. Cíl: ${targetCalories} kcal${workoutContext} (bílkoviny ${targetProtein}g).${timeContext} ${intakeSummary}${waterContext}${nudgeContext}${yesterdayContext}${moodContext}`;
+    // Cíl bílkovin záměrně ne (D6) — jediné číslo o bílkovinách je proteinContext.
+    const userPrompt = `Uživatel: ${safeName}. Cíl: ${targetCalories} kcal${workoutContext}.${timeContext} ${intakeSummary}${proteinContext}${waterContext}${nudgeContext}${yesterdayContext}${moodContext}`;
 
     try {
       const result = await callOpenAIChat({
@@ -613,12 +612,25 @@ const GOAL_LABELS: Record<Goal, string> = {
   gain: "nabírání svalové hmoty",
 };
 
-// Sada receptů přes gpt-4o-mini (záložka Recepty i karty v chatu) — při chybě vyhodí, volající
-// si sám rozhodne, co ukáže.
+// Jídla, která dnes ještě chybí, s cílem porce (MYA_COACH_SPEC 6.6) — záložka Recepty posílá typy
+// dnes zapsaných jídel a místní hodinu. Starší build appky je neposílá a sada se chová jako dřív.
+function mealPlanFromRequest(
+  data: Record<string, unknown> | undefined,
+  remaining: RecipeBudget | null,
+  daily: DailyTarget | undefined
+): MealTarget[] | undefined {
+  const todayMealTypes = parseTodayMealTypes(data?.todayMealTypes);
+  const localHour = parseBoundedInt(data?.localHour, 0, 23);
+  if (!remaining || !daily || !todayMealTypes || localHour === undefined) return undefined;
+  return buildMealPlan(todayMealTypes, localHour, remaining, daily.calories);
+}
+
+// Sada receptů (záložka Recepty i karty v chatu) na stejném modelu jako chat (MYA_COACH_SPEC D10) —
+// při chybě vyhodí, volající si sám rozhodne, co ukáže.
 async function generateRecipeSet(systemPrompt: string, userPrompt: string): Promise<RecipeResult[]> {
   const result = await callOpenAIChat({
     apiKey: openaiApiKey.value(),
-    model: "gpt-4o-mini",
+    model: CHAT_MODEL,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
@@ -658,10 +670,11 @@ export const generateRecipe = onCall(
     // `multi` (Recepty.tsx) = sada receptů, viz recipes.ts. Bez něj (starší build appky) jeden
     // recept přesně jako dřív.
     if (multi) {
+      const mealPlan = mealPlanFromRequest(request.data, remaining, daily);
       try {
         const recipes = await generateRecipeSet(
-          remaining ? RECIPE_SET_SYSTEM_PROMPT : RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
-          buildRecipeSetUserPrompt({ remaining, goalLabel, daily, preferences, availableIngredients })
+          recipeSetSystemPromptFor(remaining, mealPlan),
+          buildRecipeSetUserPrompt({ remaining, goalLabel, daily, preferences, availableIngredients, mealPlan })
         );
         return recipes.length > 0 ? { recipes } : null;
       } catch (error) {
@@ -888,20 +901,13 @@ Bílkoviny: cíl ${input.targetProtein}g/den. Všední dny průměr ${input.week
 
 const CHAT_FALLBACK_TEXT = "Mya právě neodpovídá — zkus to prosím znovu za chvíli.";
 const CHAT_RECIPE_FALLBACK_TEXT = "Recepty se mi teď nepodařilo vymyslet — zkus to prosím znovu za chvíli.";
-// Zpětná vazba 2026-10-11: uživatelka se na recepty ptá hlavně Myi v chatu, ne v záložce Recepty —
-// chat má navrhovat stejně jako generátor (recipes.ts): víc různých jídel ze surovin, co má doma.
-// Textová varianta jen pro starší build appky (bez `recipeCards`), který karty neumí ukázat.
-const CHAT_RECIPE_RULE = `Když se uživatelka ptá na recept nebo co si uvařit, nebo vypíše suroviny, které má doma, navrhni 3 různé recepty — standardně lehkou snídani, oběd a večeři; když chce konkrétní jídlo (např. jen večeři), tak 3 varianty toho jídla. Když suroviny uvedla, použij jen je (navíc smíš sůl, pepř, koření, olej, vodu), žádný recept nemusí použít všechny. Každý recept je jedna porce, velká podle typu jídla a toho, kolik jí dnes zbývá. U každého receptu napiš řádek "Snídaně/Oběd/Večeře/Svačina: název (cca X kcal, Y g bílkovin)", pod něj suroviny s množstvím na jednom řádku a 2–4 krátké kroky postupu, každý na vlastním řádku s pomlčkou. Mezi recepty nech prázdný řádek.`;
 
 // Volný chat s Myou (FEATURE_IDEAS.md sekce 6) — jediná funkce v tomhle souboru s vícekolovou
 // konverzací (ostatní jsou vždy přesně systém+user). Zůstává bezstavová jako všechny sourozenní
 // funkce: appka posílá ořezanou historii z users/{uid}/chatMessages (viz cloudSync.ts), funkce
 // sama do Firestore nesahá. Protože historie teď přichází od klienta, je to nedůvěryhodný vstup —
 // validuje se délka pole i každé zprávy zvlášť, na rozdíl od ostatních funkcí v souboru.
-// Nová appka (`recipeCards: true`) dostane recepty jako karty: model jen zavolá nástroj
-// navrhni_recepty a sadu vygeneruje stejný prompt jako záložka Recepty (recipes.ts).
-const CHAT_RECIPE_TOOL_RULE = `Když uživatelka chce recept nebo nápad, co si uvařit, nebo vypíše suroviny, které má doma, zavolej nástroj ${SUGGEST_RECIPES_TOOL_NAME} — appka jí recepty ukáže jako karty. Recepty nikdy nepiš textem. Řádky "[Karty receptů: …]" v historii jsou recepty, které už dostala jako karty; na otázky k nim odpovídej textem a ten formát nikdy nepoužívej.`;
-
+// System prompt staví chatPrompt.ts (pravidla, příběh a paměť, data dne).
 // Timeout 60 s: odpověď s recepty jsou dvě volání OpenAI po sobě (nástroj + sada receptů).
 export const chatWithMya = onCall(
   { secrets: [openaiApiKey], region: "us-central1", timeoutSeconds: 60 },
@@ -909,10 +915,6 @@ export const chatWithMya = onCall(
     requireAuth(request);
     const profile = parseProfileInput(request.data?.profile);
     if (!profile) throw new HttpsError("invalid-argument", "Chybí profil nebo je neplatný.");
-    // profile.name jde na rozdíl od ostatních funkcí do SYSTÉMOVÉ části promptu (B8) — sanitizace
-    // řádkových zlomů je tu obzvlášť důležitá, ať appka nemá jméno, které se snaží vydávat za
-    // další systémovou instrukci.
-    const safeName = sanitizePromptText(profile.name, 100) ?? "";
 
     // Validace historie (délky, role, oříznutí dlouhé odpovědi Myi) — viz chatMessages.ts.
     const parsedMessages = parseChatMessages(request.data?.messages);
@@ -921,49 +923,22 @@ export const chatWithMya = onCall(
     await enforceRateLimit(request.auth!.uid, "chatWithMya", STANDARD_AI_CALL_MAX, STANDARD_AI_CALL_WINDOW_MS);
 
     // Živě přepočteno z profilu, ne z profile.targetCalories (stejný důvod jako u getDailyGreeting).
-    const nutrition = buildNutritionFromProfile(profile);
-    const goalLabel = profile.goal === "lose" ? "hubnutí" : profile.goal === "gain" ? "nabírání svalové hmoty" : "udržování váhy";
-    // Styl Myi jde s profilem (klient posílá celý UserProfile), volný den s kontextem dne.
-    const coachingStyle = parseCoachingStyle(profile.coachingStyle);
+    const nutrition = nutritionFromProfile(profile);
+    const goalLabel = GOAL_LABELS[profile.goal];
     // Snímek dne od klienta (viz chatContext.ts) — bez něj (starší build appky) chat zná jen profil.
     const dayContext = parseChatContext(request.data?.context);
+    // Příznaky nové appky — starší build v cache PWA je neposílá a dostane recepty textem a čistý text.
     const recipeCards = request.data?.recipeCards === true;
+    const richText = request.data?.richText === true;
 
-    const profileSummary =
-      `${safeName}, ${profile.gender === "female" ? "žena" : "muž"}, ${calculateAge(profile.birthDate)} let, ` +
-      `${profile.height} cm, ${profile.weight} kg (váha z profilu), aktivita: ${ACTIVITY_LEVELS[profile.activityLevel] || profile.activityLevel}. ` +
-      `Cíl: ${goalLabel}. BMR ${Math.round(nutrition.bmr)} kcal, TDEE ${Math.round(nutrition.tdee)} kcal, ` +
-      `denní cíl ${nutrition.targetCalories} kcal (bílkoviny ${nutrition.macros.protein} g, sacharidy ${nutrition.macros.carbs} g, tuky ${nutrition.macros.fat} g).`;
-
-    const dataSection = dayContext
-      ? `${formatChatContextCs(dayContext, {
-          calories: nutrition.targetCalories,
-          protein: nutrition.macros.protein,
-          carbs: nutrition.macros.carbs,
-          fat: nutrition.macros.fat,
-        })}
-
-Pravidla k datům:
-- Data výš jsou aktuální stav z appky, stejný, jaký uživatelka vidí na obrazovce. Na otázky o jejím dni, jídlech, vodě, tréninku, váze a pokroku odpovídej z nich a konkrétními čísly.
-- Čísla nepřepočítávej ani si je nedomýšlej. Co v datech není (např. starší historie než 7 dní), na rovinu řekni, že to nevidíš.
-- ${INTAKE_STATUS_RULE}`
-      : "Dnešní data (jídla, vodu, trénink, váhu) appka tentokrát neposlala — o dnešním příjmu nic netvrď a když se na něj uživatelka ptá, řekni, že ho teď nevidíš.";
-
-    const systemPrompt = `Jsi Mya, AI nutriční a fitness asistentka aplikace Nouri. Vedeš volnou konverzaci s uživatelkou/uživatelem appky.
-
-Profil uživatele: ${profileSummary}
-
-${dataSection}
-
-Pravidla:
-- Odpovídej výhradně na témata výživy, hubnutí/nabírání/udržování váhy, cvičení, pohybu a zdravého životního stylu, případně dotazy k používání appky Nouri. Na cokoliv mimo tato témata zdvořile odpověz, že se raději bavíš o výživě a zdraví, a nasměruj konverzaci zpět.
-- Piš česky jako zkušená kamarádka-nutriční poradkyně, v tónu podle stylu níž.
-- Odpovědi drž přiměřeně stručné (typicky 2-5 vět) — delší jen když si to téma opravdu vyžádá (např. rozpis jídelníčku nebo recepty).
-- Píšeš do obyčejného textu, ne do markdownu: žádné tabulky, hvězdičky (**), mřížky (#) ani číslované nadpisy — odrážky jen pomlčkou na začátku řádku.
-- ${recipeCards ? CHAT_RECIPE_TOOL_RULE : CHAT_RECIPE_RULE}
-- Nejsi lékařka — u zdravotních potížích nebo léčebných dotazech doporuč konzultaci s lékařem, nediagnostikuj.
-
-${buildCoachingPrompt(coachingStyle, dayContext?.isVacationDay ?? false, profile.gender)}`;
+    const systemPrompt = buildChatSystemPrompt({
+      profile,
+      nutrition,
+      story: parseUserStory(request.data?.profile),
+      dayContext,
+      recipeCards,
+      richText,
+    });
 
     const apiMessages = [
       { role: "system", content: systemPrompt },
@@ -973,12 +948,18 @@ ${buildCoachingPrompt(coachingStyle, dayContext?.isVacationDay ?? false, profile
     try {
       const result = await callOpenAIChat({
         apiKey: openaiApiKey.value(),
-        model: "gpt-4o-mini",
+        model: CHAT_MODEL,
         messages: apiMessages,
         // 500 by tři recepty (viz CHAT_RECIPE_RULE) uřízlo uprostřed; běžné odpovědi jsou dál krátké.
         maxTokens: 1100,
         temperature: 0.7,
-        ...(recipeCards ? { tools: [SUGGEST_RECIPES_TOOL] } : {}),
+        ...(recipeCards
+          ? {
+              tools: [SUGGEST_RECIPES_TOOL],
+              // Jednoznačná žádost o vaření / nový recept = karty vždy (viz forcesRecipeTool).
+              ...(forcesRecipeTool(messages[messages.length - 1].content) ? { toolChoice: { name: SUGGEST_RECIPES_TOOL_NAME } } : {}),
+            }
+          : {}),
       });
 
       if (!result.ok) {
@@ -996,15 +977,18 @@ ${buildCoachingPrompt(coachingStyle, dayContext?.isVacationDay ?? false, profile
           carbs: nutrition.macros.carbs,
         };
         const remaining = chatRecipeBudget(daily, dayContext);
+        // Jídla, která dnes ještě chybí, z typů dnes zapsaných jídel a hodiny v kontextu (6.6).
+        const mealPlan = chatMealPlan(daily, dayContext, remaining);
         try {
           const recipes = await generateRecipeSet(
-            remaining ? RECIPE_SET_SYSTEM_PROMPT : RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
+            recipeSetSystemPromptFor(remaining, mealPlan),
             buildRecipeSetUserPrompt({
               remaining,
               goalLabel,
               daily,
               preferences: args.preferences,
               availableIngredients: args.ingredients,
+              mealPlan,
             })
           );
           if (recipes.length === 0) return { text: CHAT_RECIPE_FALLBACK_TEXT };
@@ -1178,19 +1162,17 @@ export const generateRecipeFromFridge = onCall(
 
     // `multi` (Recepty.tsx) = sada receptů jako u generateRecipe, viz recipes.ts.
     if (multi) {
+      const mealPlan = mealPlanFromRequest(request.data, remaining, daily);
       try {
         const result = await callOpenAIChat({
           apiKey: openaiApiKey.value(),
           model: "gpt-4o",
           messages: [
-            {
-              role: "system",
-              content: remaining ? FRIDGE_RECIPE_SET_SYSTEM_PROMPT : FRIDGE_RECIPE_SET_ANOTHER_DAY_SYSTEM_PROMPT,
-            },
+            { role: "system", content: recipeSetSystemPromptFor(remaining, mealPlan, "fridge") },
             {
               role: "user",
               content: [
-                { type: "text", text: buildRecipeSetUserPrompt({ remaining, goalLabel, daily, preferences }) },
+                { type: "text", text: buildRecipeSetUserPrompt({ remaining, goalLabel, daily, preferences, mealPlan }) },
                 { type: "image_url", image_url: { url: input.imageDataUrl } },
               ],
             },

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { BookMarked, CheckCircle2, ChevronDown, ChevronUp, Clock, ShoppingCart } from "lucide-react";
-import { RECIPE_MEAL_TYPE_LABELS, type RecipeResult } from "../lib/recipes";
+import { RECIPE_MEAL_TYPE_LABELS, describeRecipeFit, type RecipeFit, type RecipeResult } from "../lib/recipes";
 import { reportCloudError } from "../lib/cloudErrors";
 
 // Karty receptů sdílené záložkou Recepty (Recipes.tsx) a chatem s Myou (MyaChatModal.tsx) —
@@ -24,6 +24,8 @@ export function RecipeSuggestion({
   onSave,
   onAddToShoppingList,
   alreadySaved = false,
+  fit,
+  bestFit = false,
 }: {
   recipe: RecipeResult;
   expanded: boolean;
@@ -33,6 +35,9 @@ export function RecipeSuggestion({
   /** Stejný recept už je v Uložených (viz isRecipeSaved) — karty v chatu přežijí zavření
    *  chatu, lokální stav "Uloženo" ne, a bez tohohle by šel týž recept uložit znovu. */
   alreadySaved?: boolean;
+  /** Jak recept sedí na dnešní zbytek (MYA_COACH_SPEC D9) — jen u receptů do dneška. */
+  fit?: RecipeFit;
+  bestFit?: boolean;
 }) {
   // N21 (AUDIT_2026-08-14.md) — saved/added se nastavují až PO doběhnutí await, takže bez
   // saving/adding by rychlé dvojťuknutí BĚHEM zápisu prošlo dvakrát (recept uložený nebo
@@ -74,11 +79,27 @@ export function RecipeSuggestion({
     <div className="bg-white dark:bg-slate-900 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden transition-colors">
       <button onClick={onToggleExpand} className="w-full flex items-center justify-between gap-3 p-5 text-left">
         <div className="min-w-0 space-y-1">
-          <MealTypeChip recipe={recipe} />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <MealTypeChip recipe={recipe} />
+            {bestFit && (
+              <span className="inline-block text-[10px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 rounded-full px-2 py-0.5">
+                Nejlíp sedí na dnešní cíl
+              </span>
+            )}
+          </div>
           <h3 className="font-bold text-slate-800 dark:text-white">{recipe.name}</h3>
           <p className="text-xs text-slate-400 dark:text-slate-500">
             {recipe.calories} kcal · {recipe.protein} g bílkovin · {recipe.prepMinutes} min
           </p>
+          {fit && (
+            <p
+              className={`text-xs font-semibold ${
+                fit.fits ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+              }`}
+            >
+              {describeRecipeFit(fit)}
+            </p>
+          )}
         </div>
         {expanded ? (
           <ChevronUp className="w-5 h-5 text-slate-400 shrink-0" />

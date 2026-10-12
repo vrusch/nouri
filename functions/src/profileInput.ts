@@ -1,4 +1,4 @@
-import type { Gender, Goal } from "./nutrition.js";
+import { calculateNutrition, type Gender, type Goal } from "./nutrition.js";
 
 // N38 (AUDIT_2026-08-14.md) — generateWelcomeReport, getDailyGreeting a chatWithMya dřív
 // věřily profilu z request.data napřímo (jen `as UserProfileInput`). Nesmyslné číslo (NaN,
@@ -21,7 +21,35 @@ export interface UserProfileInput {
   calibratedTDEE?: number;
   customProteinGrams?: number;
   customFatGrams?: number;
+  targetWeight?: number; // jen pro bílkoviny při hubnutí (proteinBaseWeight v nutrition.ts) a pro chat
   coachingStyle?: unknown; // Styl Myi, validuje parseCoachingStyle (viz coachingStyle.ts)
+}
+
+export const ACTIVITY_LEVELS: Record<number, string> = {
+  1: "Leží v posteli / naprostý klid",
+  1.2: "Sedavé zaměstnání, minimální pohyb",
+  1.375: "Lehká aktivita (1-3 dny/týden cvičení nebo 10k kroků)",
+  1.55: "Střední aktivita (3-5 dní/týden cvičení)",
+  1.725: "Vysoká aktivita (6-7 dní/týden cvičení)",
+  1.9: "Extrémní aktivita (profesionální sport, těžká fyzická práce)",
+};
+
+// N17 v REFERENCE/AUDIT_2026-08-14.md — tenhle přesný objekt byl doslovně zkopírovaný na 3
+// místech (generateWelcomeReport, getDailyGreeting, chatWithMya), pokaždé nad stejným profilem.
+// Tady (ne v index.ts), ať ho použije i chatPrompt.ts a skript na porovnání modelů.
+export function nutritionFromProfile(profile: UserProfileInput) {
+  return calculateNutrition({
+    gender: profile.gender,
+    weight: profile.weight,
+    height: profile.height,
+    birthDate: profile.birthDate,
+    activityLevel: profile.activityLevel,
+    goal: profile.goal,
+    calibratedTDEE: profile.calibratedTDEE,
+    customProteinGrams: profile.customProteinGrams,
+    customFatGrams: profile.customFatGrams,
+    targetWeight: profile.targetWeight,
+  });
 }
 
 const GENDERS: readonly Gender[] = ["male", "female"];
@@ -71,5 +99,7 @@ export function parseProfileInput(value: unknown, now: Date = new Date()): UserP
   if (customProteinGrams !== undefined) profile.customProteinGrams = customProteinGrams;
   const customFatGrams = finiteInRange(raw.customFatGrams, 0, 1000);
   if (customFatGrams !== undefined) profile.customFatGrams = customFatGrams;
+  const targetWeight = finiteInRange(raw.targetWeight, 20, 500);
+  if (targetWeight !== undefined) profile.targetWeight = targetWeight;
   return profile;
 }

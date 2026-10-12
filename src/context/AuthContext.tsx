@@ -50,6 +50,12 @@ export interface UserProfile {
   coachingStyle?: CoachingStyle; // Styl Myi (jemná/vyvážená/přísná), výchozí (undefined) = 'balanced', viz coachingStyle.ts a REFERENCE/STRICT_COACHING_SPEC.md
   lastHighCaloriePatternDismissedAt?: string; // ISO datum posledního "Beru na vědomí" u karty opakovaného přejídání (viz overeatingReview.ts), 7denní cooldown
   lastVacationRecapDismissedEnd?: string; // konec (ISO) dovolené, jejíž bilanci appka už ukázala a uživatelka ji zavřela — nová dovolená ji ukáže znovu
+  // Její příběh pro Myu (REFERENCE/MYA_COACH_SPEC.md 5.5) — vyplňuje Profil → "Co o mně Mya ví".
+  // Záměrně pole profilu, ne zpětně zapsané vážení: první vážení v appce je start pro milníky,
+  // Stats, report i kalibraci a zpětné 115 kg by spustilo šest oslav naráz.
+  journeyStartWeight?: number; // kg na začátku hubnutí (i mimo appku)
+  journeyStartDate?: string; // ISO datum začátku hubnutí
+  myaMemory?: string; // "Co o mně Mya ví" — volný text (i shrnutí od ChatGPT), max MAX_MYA_MEMORY_LENGTH znaků, server ho čte jako data, ne pokyny
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
