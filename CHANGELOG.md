@@ -2,6 +2,18 @@
 
 Všechny významné změny v projektu Nouri budou zaznamenány v tomto souboru.
 
+## [0.25.0] - 2026-10-12
+### Přidáno
+- **Mya radí podle dne**: chat běží na `gpt-4.1-mini` (fáze 1 `REFERENCE/MYA_COACH_SPEC.md`) s novým promptem (`functions/src/chatPrompt.ts`). Rady jsou konkrétní a vychází z dat, Mya rozhodne a zdůvodní, bere širší témata cesty hubnutí (plató, motivace, spánek, cyklus…) a na strategické otázky odpovídá delší. Appka do kontextu sama počítá řádek „Zbývá dnes“ (zbytek kcal a maker, potřebná hustota bílkovin, jestli se mezera do kalorií vejde) a „Další jídla dne“ (cíl porce pro každé jídlo, které dnes ještě chybí). Model čísla jen vykládá.
+- **Co o mně Mya ví**: v Profilu váha a datum začátku hubnutí a volný text pro Myu, s hotovým dotazem, jak do něj přenést, co o uživatelce ví ChatGPT. Mya ho dostává s každou zprávou jako ohraničená data, ne pokyny. Neoblíbené potraviny nenavrhuje a posílá je i do přání receptů.
+- **Formátování v chatu**: tučné písmo, odrážky a krátké nadpisy. Starší verze appky dostane dál čistý text.
+- **Recepty podle dne**: záložka Recepty i karty v chatu navrhnou jen jídla, která dnes ještě chybí (v 19:00 po snídani a obědě jen večeře). Poslední hlavní jídlo dostane celý zbytek dne (nejvýš 45 % denního cíle) a bílkoviny ze zbývající mezery. Karta ukáže „Doplní X z Y g bílkovin · zbude ti Z kcal“, nejlepší recept štítek „Nejlíp sedí na dnešní cíl“ a recepty jsou podle toho seřazené. Jednoznačná žádost o vaření nebo nový recept v chatu karty spustí vždy, i s dřívějšími kartami v historii.
+- **Skript na porovnání modelů chatu** (`functions/scripts/compareChatModels.mjs`, mimo build): scénáře ze specu na více modelech, klíč jen v proměnné prostředí, `--dry` vypíše prompty.
+
+### Změněno
+- **Cíl bílkovin při hubnutí z cílové váhy**: 1,8 g × cílová váha místo aktuální, vlastní makra mají přednost. U 84 kg s cílem 70 kg je to 126 g místo 151 g, který se do zbytku dne často nevešel. Klient i server počítají stejně (paritní test).
+- **Pozdrav na Home bílkoviny nevyčítá**: zmíní jen tu část, kterou jde do zbytku dne reálně dohnat, po 21:00 vůbec. Celou mezeru ani cíl bílkovin už nedostává.
+
 ## [0.24.1] - 2026-10-11
 ### Opraveno
 - **Mya si u receptů z chatu domýšlela tuky a sacharidy**: do historie chatu šly z karet receptů jen kalorie a bílkoviny, takže na „kolik má ten oběd tuku?“ Mya odpověděla jiné číslo, než ukazovala karta (12 g místo 14 g). Teď dostává všechno, co karta ukazuje (makra, čas, suroviny i postup); ověřeno živě.

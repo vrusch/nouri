@@ -10,6 +10,15 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    version: "0.25.0",
+    items: [
+      "Mya v chatu radí konkrétněji: podle toho, co už dnes máš snědené, ti řekne, kolik gramů čeho si dát, aby ses vešla do cíle.",
+      "V Profilu přibylo „Co o mně Mya ví“. Napiš tam, odkud jsi začala a co ti fungovalo, nebo tam vlož shrnutí od ChatGPT.",
+      "Cíl bílkovin se při hubnutí počítá z tvé cílové váhy, takže je nižší a dá se reálně splnit.",
+      "Recepty navrhují jen jídla, která ti dnes ještě chybí, a na kartě uvidíš, kolik ti doplní.",
+    ],
+  },
+  {
     version: "0.24.0",
     items: [
       "Mya ti teď navrhne tři recepty najednou – lehkou snídani, oběd a večeři z toho, co máš doma. Chceš jen večeři? Napiš to do přání.",
